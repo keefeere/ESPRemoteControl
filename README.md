@@ -2,6 +2,9 @@
 
 Turn your iPhone into a wireless keyboard and mouse for any computer using an ESP32-S3 microcontroller.
 
+[![Demo](https://img.youtube.com/vi/NFtp6ubC3DU/maxresdefault.jpg)](https://youtu.be/NFtp6ubC3DU)
+
+
 ## Why This Exists
 
 Ever tried typing a password on your Smart TV using the remote? Or needed to control a computer from across the room? This project creates a true wireless input bridge - your iPhone becomes a fully functional keyboard and trackpad that works with any device via USB.
