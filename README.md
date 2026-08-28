@@ -13,12 +13,15 @@ Unlike software solutions that require network setup or specific operating syste
 
 ## Features
 
-- **Full keyboard input** - Type naturally on your iPhone, including symbols, punctuation, and special keys
+- **English and Ukrainian input** - Physical US and Ukrainian Enhanced HID mappings
+- **Two keyboard modes** - Use the native iOS keyboard or a full-screen remote keyboard
+- **Clipboard typing** - Send text from the iPhone clipboard in one tap
 - **Precision trackpad** - Multi-touch gestures for cursor control, clicking, and scrolling  
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
 - **Zero configuration** - No drivers, no network setup, just plug and play
 - **Low latency** - Direct Bluetooth LE connection for responsive input
-- **Privacy focused** - Text appears as bullets (•) on screen, nothing stored or transmitted beyond keystrokes
+- **Reliable reconnect** - Remembers the last ESP32 and reconnects with backoff
+- **Optional privacy mask** - Keep the typing composer visible or mask it when entering passwords
 
 ## Hardware Requirements
 
@@ -75,7 +78,7 @@ To build the same unsigned IPA on a Mac locally:
 
 1. Plug the ESP32 into your target computer or Smart TV via USB
 2. Open the iOS app - it will automatically scan and connect to the ESP32
-3. Start typing! The keyboard appears immediately and your input is sent to the computer
+3. Select `EN` or `UA` to match the target computer, then type with the iOS keyboard or open the full-screen keyboard
 4. Use the trackpad area for mouse control:
    - **Drag** to move cursor
    - **Tap** for left click  
@@ -98,7 +101,7 @@ The ESP32 acts as both a Bluetooth peripheral (receiving from iPhone) and USB HI
 
 ## Technical Details
 
-- **Protocol**: Custom 3-byte command format over Bluetooth LE
+- **Protocol**: Batched TLV command frames over Bluetooth LE, with compatibility for the original 3-byte protocol
 - **Battery**: ESP32 powered by target computer via USB
 - **Compatibility**: Works with any OS that supports USB HID (Windows, macOS, Linux, etc.)
 
@@ -147,6 +150,18 @@ This project solves a real problem with a unique hardware approach. Contribution
 - Protocol optimizations  
 - Support for other microcontrollers
 - Android app version
+
+## Roadmap
+
+- **v1.2** - iOS Share Extension for text and URLs
+- **v2** - Direct BLE HID mode that works without the ESP32 adapter
+- **v3** - Optional LAN host mode for exact Unicode and bidirectional clipboard
+
+## Artwork
+
+The app icon incorporates the MIT-licensed `keyboard` outline from
+[Tabler Icons](https://github.com/tabler/tabler-icons). See
+[`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) for details.
 
 ## License
 
