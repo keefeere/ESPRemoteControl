@@ -18,6 +18,7 @@ Unlike software solutions that require network setup or specific operating syste
 - **Layout synchronization** - Configurable Ctrl+Space, Ctrl+Shift, Alt+Shift, Shift+Space, or Win+Space host shortcut
 - **Clipboard typing** - Send text from the iPhone clipboard in one tap
 - **Precision trackpad** - Multi-touch gestures for cursor control, clicking, and scrolling  
+- **Keyboard trackpad** - Uses the free portrait space below the full keyboard without extra mouse buttons
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
 - **Zero configuration** - No drivers, no network setup, just plug and play
 - **Low latency** - Direct Bluetooth LE connection for responsive input

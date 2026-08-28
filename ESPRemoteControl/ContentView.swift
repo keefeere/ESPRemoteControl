@@ -284,7 +284,7 @@ struct ContentView: View {
                 }
 
                 Section("Версія") {
-                    LabeledContent("ESP Remote Control", value: "1.1.2")
+                    LabeledContent("ESP Remote Control", value: "1.1.3")
                     Text("Іконка клавіатури: Tabler Icons, MIT License.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

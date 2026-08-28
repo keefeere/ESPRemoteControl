@@ -121,13 +121,26 @@ final class KeyUIButton: UIButton {
 
     private var heightConstraint: NSLayoutConstraint?
 
+    override var isHighlighted: Bool {
+        didSet {
+            if isHighlighted != oldValue {
+                updateColors()
+            }
+        }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         // Separate keys must be able to receive simultaneous fingers for
         // hardware-like chords (for example Ctrl+Alt+Delete).
         isExclusiveTouch = false
         
-        // Set static properties once
+        configuration = nil
+        contentHorizontalAlignment = .center
+        contentVerticalAlignment = .center
+        titleLabel?.adjustsFontSizeToFitWidth = true
+        titleLabel?.minimumScaleFactor = 0.65
+        titleLabel?.lineBreakMode = .byClipping
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
         clipsToBounds = true
@@ -135,10 +148,6 @@ final class KeyUIButton: UIButton {
         // Create height constraint once
         heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant: minHeight)
         heightConstraint?.isActive = true
-
-        configurationUpdateHandler = { [weak self] _ in
-            self?.applyConfiguration()
-        }
     }
 
     required init?(coder: NSCoder) {
@@ -146,37 +155,41 @@ final class KeyUIButton: UIButton {
     }
 
     func applyConfiguration() {
-        var config = UIButton.Configuration.filled()
-        config.cornerStyle = isCompact ? .small : .medium
-        config.title = baseTitle
-        config.contentInsets = isCompact
-            ? NSDirectionalEdgeInsets(top: 2, leading: 3, bottom: 2, trailing: 3)
-            : NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
-        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { [weak self] incoming in
-            var outgoing = incoming
-            outgoing.font = UIFont.monospacedSystemFont(
-                ofSize: self?.fontSize ?? (self?.isCompact == true ? 10 : 16),
+        UIView.performWithoutAnimation {
+            if currentTitle != baseTitle {
+                setTitle(baseTitle, for: .normal)
+            }
+            titleLabel?.font = UIFont.monospacedSystemFont(
+                ofSize: fontSize ?? (isCompact ? 10 : 16),
                 weight: .semibold
             )
-            return outgoing
+            contentEdgeInsets = isCompact
+                ? UIEdgeInsets(top: 2, left: 3, bottom: 2, right: 3)
+                : UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+            layer.cornerRadius = isCompact ? 8 : 12
+            updateColors()
         }
+    }
 
+    private func updateColors() {
         let pressed = isHighlighted
         let active = isActive
 
         let bg: UIColor
+        let foreground: UIColor
         if isProminent {
             bg = pressed ? UIColor.systemRed.withAlphaComponent(0.75) : UIColor.systemRed
-            config.baseForegroundColor = .white
+            foreground = .white
         } else if active {
             bg = pressed ? UIColor.systemBlue.withAlphaComponent(0.65) : UIColor.systemBlue.withAlphaComponent(0.9)
-            config.baseForegroundColor = .white
+            foreground = .white
         } else {
             bg = pressed ? UIColor.secondarySystemFill : UIColor.tertiarySystemFill
-            config.baseForegroundColor = .label
+            foreground = .label
         }
 
-        config.baseBackgroundColor = bg
-        configuration = config
+        backgroundColor = bg
+        setTitleColor(foreground, for: .normal)
+        setTitleColor(foreground, for: .highlighted)
     }
 }

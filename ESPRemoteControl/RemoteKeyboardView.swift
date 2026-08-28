@@ -55,7 +55,6 @@ struct RemoteKeyboardView: View {
                             actionKey(
                                 "⌫",
                                 keycode: HID.keyBackspace,
-                                preserveModifiers: true,
                                 height: keyHeight
                             )
                         }
@@ -64,6 +63,14 @@ struct RemoteKeyboardView: View {
 
                 punctuationRow(height: keyHeight, availableWidth: geometry.size.width - 12)
                 commandRow(height: keyHeight)
+
+                if geometry.size.height > geometry.size.width {
+                    keyboardTrackpad
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 72)
+                        .padding(.top, 3)
+                        .layoutPriority(1)
+                }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 5)
@@ -112,7 +119,6 @@ struct RemoteKeyboardView: View {
                 actionKey(
                     label,
                     keycode: keycodes[index],
-                    preserveModifiers: label == "Del",
                     height: height
                 )
             }
@@ -153,11 +159,46 @@ struct RemoteKeyboardView: View {
             )
             actionKey("Tab", keycode: HID.keyTab, height: height)
             actionKey("Home", keycode: HID.keyHome, height: height)
-            actionKey("←", keycode: HID.keyLeftArrow, preserveModifiers: true, height: height)
-            actionKey("↑", keycode: HID.keyUpArrow, preserveModifiers: true, height: height)
-            actionKey("↓", keycode: HID.keyDownArrow, preserveModifiers: true, height: height)
-            actionKey("→", keycode: HID.keyRightArrow, preserveModifiers: true, height: height)
+            actionKey("←", keycode: HID.keyLeftArrow, height: height)
+            actionKey("↑", keycode: HID.keyUpArrow, height: height)
+            actionKey("↓", keycode: HID.keyDownArrow, height: height)
+            actionKey("→", keycode: HID.keyRightArrow, height: height)
             actionKey("End", keycode: HID.keyEnd, height: height)
+        }
+    }
+
+    private var keyboardTrackpad: some View {
+        TrackpadView(
+            onMove: { ble.sendMouseMove(dx: $0, dy: $1) },
+            onTap: { fingers in
+                ble.sendMouseClick(button: fingers >= 2 ? 2 : 1)
+            },
+            onScroll: { ble.sendMouseScroll(dx: $0, dy: $1) },
+            onDragStart: { ble.sendMouseButtonDown(button: 1) },
+            onDragEnd: { ble.sendMouseButtonUp(button: 1) }
+        )
+        .background(
+            LinearGradient(
+                colors: [Color.accentColor.opacity(0.09), Color(.secondarySystemGroupedBackground)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay {
+            VStack(spacing: 3) {
+                Image(systemName: "rectangle.and.hand.point.up.left")
+                    .font(.title3)
+                Text("Тачпад · 2 пальці — скрол / правий клік")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .allowsHitTesting(false)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+                .allowsHitTesting(false)
         }
     }
 
@@ -197,7 +238,6 @@ struct RemoteKeyboardView: View {
         _ title: String,
         keycode: UInt8,
         active: Bool = false,
-        preserveModifiers: Bool = false,
         width: CGFloat? = nil,
         height: CGFloat,
         onReleased: (() -> Void)? = nil
@@ -210,7 +250,7 @@ struct RemoteKeyboardView: View {
             minHeight: height,
             onPress: { pressKey(keycode) },
             onRelease: {
-                releaseKey(keycode, preserveModifiers: preserveModifiers)
+                releaseKey(keycode)
                 onReleased?()
             }
         )
@@ -268,13 +308,11 @@ struct RemoteKeyboardView: View {
         )
     }
 
-    private func releaseKey(_ keycode: UInt8, preserveModifiers: Bool = false) {
+    private func releaseKey(_ keycode: UInt8) {
         guard pressedKeycodes.contains(keycode) else { return }
         pressedKeycodes.remove(keycode)
         ble.sendKeyUp(keycode: keycode)
-        if !preserveModifiers {
-            stickyModifiers = 0
-        }
+        stickyModifiers = 0
         ble.setModifiers(effectiveModifiers)
     }
 
