@@ -15,7 +15,7 @@ Unlike software solutions that require network setup or specific operating syste
 
 - **English and Ukrainian input** - Automatic alphabet detection with physical US and Ukrainian Enhanced HID mappings
 - **Two keyboard modes** - Use the native iOS keyboard beside the trackpad or the dedicated full-screen keyboard tab
-- **Layout synchronization** - Configurable Ctrl+Shift, Alt+Shift, Shift+Space, or Win+Space host shortcut
+- **Layout synchronization** - Configurable Ctrl+Space, Ctrl+Shift, Alt+Shift, Shift+Space, or Win+Space host shortcut
 - **Clipboard typing** - Send text from the iPhone clipboard in one tap
 - **Precision trackpad** - Multi-touch gestures for cursor control, clicking, and scrolling  
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
@@ -23,6 +23,7 @@ Unlike software solutions that require network setup or specific operating syste
 - **Low latency** - Direct Bluetooth LE connection for responsive input
 - **Reliable reconnect** - Remembers the last ESP32 and reconnects with backoff
 - **Optional privacy mask** - Keep the typing composer visible or mask it when entering passwords
+- **Hardware key hold** - Every on-screen key sends real HID key-down/key-up events, including multi-finger chords; modifiers can also be tapped to latch
 
 ## Hardware Requirements
 

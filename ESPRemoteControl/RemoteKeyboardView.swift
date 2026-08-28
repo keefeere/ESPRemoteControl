@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct RemoteKeyboardView: View {
@@ -5,11 +6,16 @@ struct RemoteKeyboardView: View {
     @Binding var layout: KeyboardLayout
     let onLayoutChange: (KeyboardLayout, Bool) -> Void
 
-    @State private var shift = false
     @State private var capsLock = false
     @State private var stickyModifiers: UInt8 = 0
+    @State private var momentaryModifiers: UInt8 = 0
+    @State private var usedMomentaryModifiers: UInt8 = 0
+    @State private var modifierPressStartedAt: [UInt8: TimeInterval] = [:]
+    @State private var pressedKeycodes: Set<UInt8> = []
 
-    private var uppercaseLetters: Bool { shift != capsLock }
+    private var effectiveModifiers: UInt8 { stickyModifiers | momentaryModifiers }
+    private var shiftIsActive: Bool { effectiveModifiers & HID.modLeftShift != 0 }
+    private var uppercaseLetters: Bool { shiftIsActive != capsLock }
 
     var body: some View {
         GeometryReader { geometry in
@@ -38,9 +44,7 @@ struct RemoteKeyboardView: View {
                 ForEach(Array(layout.letterRows.enumerated()), id: \.offset) { rowIndex, row in
                     HStack(spacing: 3) {
                         if rowIndex == 2 {
-                            actionKey("⇧", active: shift, height: keyHeight) {
-                                shift.toggle()
-                            }
+                            modifierKey("⇧", mask: HID.modLeftShift, height: keyHeight)
                         }
 
                         ForEach(Array(row.enumerated()), id: \.offset) { _, character in
@@ -48,9 +52,12 @@ struct RemoteKeyboardView: View {
                         }
 
                         if rowIndex == 2 {
-                            actionKey("⌫", height: keyHeight) {
-                                sendKey(HID.keyBackspace, preserveModifiers: true)
-                            }
+                            actionKey(
+                                "⌫",
+                                keycode: HID.keyBackspace,
+                                preserveModifiers: true,
+                                height: keyHeight
+                            )
                         }
                     }
                 }
@@ -62,7 +69,7 @@ struct RemoteKeyboardView: View {
             .padding(.vertical, 5)
         }
         .background(Color(.systemGroupedBackground))
-        .onDisappear(perform: releaseModifiers)
+        .onDisappear(perform: releaseAllInput)
     }
 
     private var connectionStatus: some View {
@@ -102,9 +109,12 @@ struct RemoteKeyboardView: View {
     private func functionRow(labels: [String], keycodes: [UInt8], height: CGFloat) -> some View {
         HStack(spacing: 4) {
             ForEach(Array(labels.enumerated()), id: \.offset) { index, label in
-                actionKey(label, height: height) {
-                    sendKey(keycodes[index], preserveModifiers: label == "Del")
-                }
+                actionKey(
+                    label,
+                    keycode: keycodes[index],
+                    preserveModifiers: label == "Del",
+                    height: height
+                )
             }
         }
     }
@@ -124,12 +134,8 @@ struct RemoteKeyboardView: View {
             ForEach(Array(punctuationCharacters.enumerated()), id: \.offset) { _, character in
                 characterKey(character, usesCase: false, height: height)
             }
-            actionKey("Space", width: spaceWidth, height: height) {
-                sendKey(HID.keySpace)
-            }
-            actionKey("↵", height: height) {
-                sendKey(HID.keyEnter)
-            }
+            actionKey("Space", keycode: HID.keySpace, width: spaceWidth, height: height)
+            actionKey("↵", keycode: HID.keyEnter, height: height)
         }
     }
 
@@ -138,16 +144,20 @@ struct RemoteKeyboardView: View {
             modifierKey("Ctrl", mask: HID.modLeftCtrl, height: height)
             modifierKey("Win", mask: HID.modLeftGUI, height: height)
             modifierKey("Alt", mask: HID.modLeftAlt, height: height)
-            actionKey("Caps", active: capsLock, height: height) {
-                capsLock.toggle()
-            }
-            actionKey("Tab", height: height) { sendKey(HID.keyTab) }
-            actionKey("Home", height: height) { sendKey(HID.keyHome) }
-            actionKey("←", height: height) { sendKey(HID.keyLeftArrow, preserveModifiers: true) }
-            actionKey("↑", height: height) { sendKey(HID.keyUpArrow, preserveModifiers: true) }
-            actionKey("↓", height: height) { sendKey(HID.keyDownArrow, preserveModifiers: true) }
-            actionKey("→", height: height) { sendKey(HID.keyRightArrow, preserveModifiers: true) }
-            actionKey("End", height: height) { sendKey(HID.keyEnd) }
+            actionKey(
+                "Caps",
+                keycode: HID.keyCapsLock,
+                active: capsLock,
+                height: height,
+                onReleased: { capsLock.toggle() }
+            )
+            actionKey("Tab", keycode: HID.keyTab, height: height)
+            actionKey("Home", keycode: HID.keyHome, height: height)
+            actionKey("←", keycode: HID.keyLeftArrow, preserveModifiers: true, height: height)
+            actionKey("↑", keycode: HID.keyUpArrow, preserveModifiers: true, height: height)
+            actionKey("↓", keycode: HID.keyDownArrow, preserveModifiers: true, height: height)
+            actionKey("→", keycode: HID.keyRightArrow, preserveModifiers: true, height: height)
+            actionKey("End", keycode: HID.keyEnd, height: height)
         }
     }
 
@@ -163,80 +173,129 @@ struct RemoteKeyboardView: View {
             character = base
         }
 
-        return Button {
-            sendCharacter(character)
-        } label: {
-            Text(String(character))
-                .font(.system(size: height < 34 ? 14 : 17, weight: .medium, design: .rounded))
-                .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(RemoteKeyButtonStyle())
+        let transmittedCharacter = usesCase ? base : character
+        let command = HID.mapCharacterToHID(transmittedCharacter, layout: layout)
+
+        return PressableKeyButton(
+            title: String(character),
+            isCompact: true,
+            fontSize: height < 34 ? 14 : 17,
+            minHeight: height,
+            onPress: {
+                guard let command else { return }
+                pressKey(command.keycode, additionalModifiers: command.modifiers)
+            },
+            onRelease: {
+                guard let command else { return }
+                releaseKey(command.keycode)
+            }
+        )
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
     }
 
     private func actionKey(
         _ title: String,
+        keycode: UInt8,
         active: Bool = false,
+        preserveModifiers: Bool = false,
         width: CGFloat? = nil,
         height: CGFloat,
-        action: @escaping () -> Void
+        onReleased: (() -> Void)? = nil
     ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: height < 34 ? 9 : 11, weight: .semibold, design: .rounded))
-                .minimumScaleFactor(0.65)
-                .lineLimit(1)
-                .frame(maxWidth: width == nil ? .infinity : nil, minHeight: height, maxHeight: height)
-                .frame(width: width)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(RemoteKeyButtonStyle(active: active))
+        PressableKeyButton(
+            title: title,
+            isActive: active,
+            isCompact: true,
+            fontSize: height < 34 ? 9 : 11,
+            minHeight: height,
+            onPress: { pressKey(keycode) },
+            onRelease: {
+                releaseKey(keycode, preserveModifiers: preserveModifiers)
+                onReleased?()
+            }
+        )
+        .frame(maxWidth: width == nil ? .infinity : nil, minHeight: height, maxHeight: height)
+        .frame(width: width)
     }
 
     private func modifierKey(_ title: String, mask: UInt8, height: CGFloat) -> some View {
-        actionKey(title, active: stickyModifiers & mask != 0, height: height) {
+        PressableKeyButton(
+            title: title,
+            isActive: effectiveModifiers & mask != 0,
+            isCompact: true,
+            minHeight: height,
+            onPress: { beginModifierPress(mask) },
+            onRelease: { endModifierPress(mask) }
+        )
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
+    }
+
+    private func beginModifierPress(_ mask: UInt8) {
+        modifierPressStartedAt[mask] = ProcessInfo.processInfo.systemUptime
+        let nextMomentary = momentaryModifiers | mask
+        momentaryModifiers = nextMomentary
+        ble.setModifiers(stickyModifiers | nextMomentary)
+    }
+
+    private func endModifierPress(_ mask: UInt8) {
+        let startedAt = modifierPressStartedAt.removeValue(forKey: mask)
+            ?? ProcessInfo.processInfo.systemUptime
+        let heldLongEnough = ProcessInfo.processInfo.systemUptime - startedAt >= 0.35
+        let wasUsedForChord = usedMomentaryModifiers & mask != 0
+        usedMomentaryModifiers &= ~mask
+
+        let nextMomentary = momentaryModifiers & ~mask
+        momentaryModifiers = nextMomentary
+        if !heldLongEnough, !wasUsedForChord {
             stickyModifiers ^= mask
-            ble.setModifiers(stickyModifiers)
         }
+        ble.setModifiers(stickyModifiers | nextMomentary)
     }
 
     private func changeLayout(synchronizeHost: Bool) {
-        releaseModifiers()
+        releaseAllInput()
         let next: KeyboardLayout = layout == .englishUS ? .ukrainianEnhanced : .englishUS
         onLayoutChange(next, synchronizeHost)
     }
 
-    private func sendCharacter(_ character: Character) {
-        guard let command = HID.mapCharacterToHID(character, layout: layout) else { return }
-        ble.sendKeyTap(
-            modifiers: command.modifiers | stickyModifiers,
-            hidKeycode: command.keycode
+    private func pressKey(_ keycode: UInt8, additionalModifiers: UInt8 = 0) {
+        guard !pressedKeycodes.contains(keycode) else { return }
+        pressedKeycodes.insert(keycode)
+        usedMomentaryModifiers |= momentaryModifiers
+        ble.sendKeyDown(
+            modifiersMask: effectiveModifiers | additionalModifiers,
+            keycode: keycode
         )
-        finishOneShotModifiers()
     }
 
-    private func sendKey(_ keycode: UInt8, preserveModifiers: Bool = false) {
-        ble.sendKeyTap(modifiers: stickyModifiers, hidKeycode: keycode)
+    private func releaseKey(_ keycode: UInt8, preserveModifiers: Bool = false) {
+        guard pressedKeycodes.contains(keycode) else { return }
+        pressedKeycodes.remove(keycode)
+        ble.sendKeyUp(keycode: keycode)
         if !preserveModifiers {
-            finishOneShotModifiers()
+            stickyModifiers = 0
         }
+        ble.setModifiers(effectiveModifiers)
     }
 
-    private func finishOneShotModifiers() {
-        shift = false
-        if stickyModifiers != 0 {
-            stickyModifiers = 0
-            ble.setModifiers(0)
+    private func releaseAllInput() {
+        for keycode in pressedKeycodes.sorted() {
+            ble.sendKeyUp(keycode: keycode)
         }
+        pressedKeycodes.removeAll()
+        releaseModifiers()
     }
 
     private func releaseModifiers() {
         stickyModifiers = 0
+        momentaryModifiers = 0
+        usedMomentaryModifiers = 0
+        modifierPressStartedAt.removeAll()
         ble.setModifiers(0)
     }
 
     private var shiftedNumberCharacters: [Character] {
-        guard shift else { return Array("1234567890") }
+        guard shiftIsActive else { return Array("1234567890") }
         switch layout {
         case .englishUS:
             return Array("!@#$%^&*()")
@@ -259,21 +318,5 @@ struct RemoteKeyboardView: View {
             HID.keyF1, HID.keyF2, HID.keyF3, HID.keyF4, HID.keyF5, HID.keyF6,
             HID.keyF7, HID.keyF8, HID.keyF9, HID.keyF10, HID.keyF11, HID.keyF12
         ]
-    }
-}
-
-private struct RemoteKeyButtonStyle: ButtonStyle {
-    var active = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(active ? Color.white : Color.primary)
-            .background(
-                active
-                    ? Color.accentColor.opacity(configuration.isPressed ? 0.72 : 1)
-                    : Color(.secondarySystemGroupedBackground).opacity(configuration.isPressed ? 0.62 : 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
     }
 }

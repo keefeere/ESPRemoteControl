@@ -5,6 +5,8 @@ struct PressableKeyButton: UIViewRepresentable {
     let title: String
     var isActive: Bool = false
     var isProminent: Bool = false
+    var isCompact: Bool = false
+    var fontSize: CGFloat? = nil
     var minHeight: CGFloat = 44
 
     var onPress: () -> Void
@@ -21,6 +23,8 @@ struct PressableKeyButton: UIViewRepresentable {
         button.baseTitle = title
         button.isActive = isActive
         button.isProminent = isProminent
+        button.isCompact = isCompact
+        button.fontSize = fontSize
         button.minHeight = minHeight
         button.applyConfiguration()
 
@@ -31,8 +35,11 @@ struct PressableKeyButton: UIViewRepresentable {
         uiView.baseTitle = title
         uiView.isActive = isActive
         uiView.isProminent = isProminent
+        uiView.isCompact = isCompact
+        uiView.fontSize = fontSize
         uiView.minHeight = minHeight
         uiView.applyConfiguration()
+        context.coordinator.update(onPress: onPress, onRelease: onRelease)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -40,11 +47,16 @@ struct PressableKeyButton: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject {
-        private let onPress: () -> Void
-        private let onRelease: () -> Void
+        private var onPress: () -> Void
+        private var onRelease: () -> Void
         private var isDown: Bool = false
 
         init(onPress: @escaping () -> Void, onRelease: @escaping () -> Void) {
+            self.onPress = onPress
+            self.onRelease = onRelease
+        }
+
+        func update(onPress: @escaping () -> Void, onRelease: @escaping () -> Void) {
             self.onPress = onPress
             self.onRelease = onRelease
         }
@@ -85,6 +97,20 @@ final class KeyUIButton: UIButton {
             }
         }
     }
+    var isCompact: Bool = false {
+        didSet {
+            if isCompact != oldValue {
+                applyConfiguration()
+            }
+        }
+    }
+    var fontSize: CGFloat? {
+        didSet {
+            if fontSize != oldValue {
+                applyConfiguration()
+            }
+        }
+    }
     var minHeight: CGFloat = 44 {
         didSet {
             if minHeight != oldValue {
@@ -97,10 +123,11 @@ final class KeyUIButton: UIButton {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isExclusiveTouch = true
+        // Separate keys must be able to receive simultaneous fingers for
+        // hardware-like chords (for example Ctrl+Alt+Delete).
+        isExclusiveTouch = false
         
         // Set static properties once
-        titleLabel?.font = UIFont.monospacedSystemFont(ofSize: 16, weight: .semibold)
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
         clipsToBounds = true
@@ -120,9 +147,19 @@ final class KeyUIButton: UIButton {
 
     func applyConfiguration() {
         var config = UIButton.Configuration.filled()
-        config.cornerStyle = .medium
+        config.cornerStyle = isCompact ? .small : .medium
         config.title = baseTitle
-        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
+        config.contentInsets = isCompact
+            ? NSDirectionalEdgeInsets(top: 2, leading: 3, bottom: 2, trailing: 3)
+            : NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { [weak self] incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.monospacedSystemFont(
+                ofSize: self?.fontSize ?? (self?.isCompact == true ? 10 : 16),
+                weight: .semibold
+            )
+            return outgoing
+        }
 
         let pressed = isHighlighted
         let active = isActive

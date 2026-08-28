@@ -1,21 +1,53 @@
 import SwiftUI
 import UIKit
 
-final class BackspaceDetectingTextField: UITextField {
+final class BackspaceDetectingTextView: UITextView {
     var onDeleteBackwardWhenEmpty: (() -> Void)?
 
+    private let placeholderLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Введіть або вставте текст…"
+        label.font = UIFont.systemFont(ofSize: 17)
+        label.textColor = .placeholderText
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        addSubview(placeholderLabel)
+        NSLayoutConstraint.activate([
+            placeholderLabel.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: textContainerInset.left + textContainer.lineFragmentPadding
+            ),
+            placeholderLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -(textContainerInset.right + textContainer.lineFragmentPadding)
+            ),
+            placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func deleteBackward() {
-        let wasEmpty = text?.isEmpty ?? true
+        let wasEmpty = text.isEmpty
         super.deleteBackward()
         if wasEmpty {
             onDeleteBackwardWhenEmpty?()
         }
     }
+
+    func updatePlaceholder() {
+        placeholderLabel.isHidden = !text.isEmpty
+    }
 }
 
-/// A real text field used as a remote typing composer. Unlike the original
-/// masked implementation, its backing text always matches what UIKit sees,
-/// which keeps non-Latin keyboards, marked text, paste and prediction sane.
+/// A fixed-height, multiline composer backed by UIKit so marked text, paste,
+/// prediction and non-Latin keyboards behave like a native iOS text editor.
 struct KeyCaptureTextField: UIViewRepresentable {
     @Binding var text: String
     @Binding var wantsFirstResponder: Bool
@@ -25,55 +57,71 @@ struct KeyCaptureTextField: UIViewRepresentable {
     var onReturn: () -> Void
     var onBackspaceWhenEmpty: () -> Void
 
-    func makeUIView(context: Context) -> BackspaceDetectingTextField {
-        let textField = BackspaceDetectingTextField(frame: .zero)
-        textField.delegate = context.coordinator
-        textField.borderStyle = .none
-        textField.font = UIFont.systemFont(ofSize: 18)
-        textField.textColor = .label
-        textField.tintColor = .systemBlue
-        textField.placeholder = "Введіть або вставте текст…"
-        textField.keyboardType = .default
-        textField.autocorrectionType = .no
-        textField.spellCheckingType = .no
-        textField.smartQuotesType = .no
-        textField.smartDashesType = .no
-        textField.smartInsertDeleteType = .no
-        textField.textContentType = .none
-        textField.autocapitalizationType = .sentences
-        textField.returnKeyType = .send
-        textField.clearButtonMode = .whileEditing
+    func makeUIView(context: Context) -> BackspaceDetectingTextView {
+        let textView = BackspaceDetectingTextView(frame: .zero)
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = UIFont.systemFont(ofSize: 17)
+        textView.textColor = .label
+        textView.tintColor = .systemBlue
+        textView.keyboardType = .default
+        textView.autocorrectionType = .no
+        textView.spellCheckingType = .no
+        textView.smartQuotesType = .no
+        textView.smartDashesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.textContentType = .none
+        textView.autocapitalizationType = .sentences
+        textView.returnKeyType = .send
+        textView.isScrollEnabled = true
+        textView.alwaysBounceVertical = false
+        textView.showsVerticalScrollIndicator = true
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.updatePlaceholder()
 
-        textField.onDeleteBackwardWhenEmpty = {
+        let accessory = UIToolbar()
+        accessory.sizeToFit()
+        accessory.items = [
+            UIBarButtonItem(
+                barButtonSystemItem: .flexibleSpace,
+                target: nil,
+                action: nil
+            ),
+            UIBarButtonItem(
+                title: "Сховати",
+                style: .done,
+                target: context.coordinator,
+                action: #selector(Coordinator.dismissKeyboard)
+            )
+        ]
+        textView.inputAccessoryView = accessory
+        textView.onDeleteBackwardWhenEmpty = {
             context.coordinator.parent.onBackspaceWhenEmpty()
         }
-        textField.addTarget(
-            context.coordinator,
-            action: #selector(Coordinator.textFieldDidChange(_:)),
-            for: .editingChanged
-        )
-        return textField
+        return textView
     }
 
-    func updateUIView(_ textField: BackspaceDetectingTextField, context: Context) {
+    func updateUIView(_ textView: BackspaceDetectingTextView, context: Context) {
         context.coordinator.parent = self
-        if textField.isSecureTextEntry != isSecure {
-            textField.isSecureTextEntry = isSecure
+        if textView.isSecureTextEntry != isSecure {
+            textView.isSecureTextEntry = isSecure
         }
 
-        if textField.text != text {
-            textField.text = text
+        if textView.text != text {
+            textView.text = text
             context.coordinator.lastCommittedText = text
+            textView.updatePlaceholder()
         }
 
-        if wantsFirstResponder, !textField.isFirstResponder {
+        if wantsFirstResponder, !textView.isFirstResponder {
             DispatchQueue.main.async {
-                textField.becomeFirstResponder()
-                context.coordinator.moveCaretToEnd(in: textField)
+                textView.becomeFirstResponder()
+                context.coordinator.moveCaretToEnd(in: textView)
             }
-        } else if !wantsFirstResponder, textField.isFirstResponder {
+        } else if !wantsFirstResponder, textView.isFirstResponder {
             DispatchQueue.main.async {
-                textField.resignFirstResponder()
+                textView.resignFirstResponder()
             }
         }
     }
@@ -82,7 +130,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
         Coordinator(parent: self)
     }
 
-    final class Coordinator: NSObject, UITextFieldDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate {
         var parent: KeyCaptureTextField
         var lastCommittedText: String
         private var isMovingSelection = false
@@ -92,52 +140,61 @@ struct KeyCaptureTextField: UIViewRepresentable {
             self.lastCommittedText = parent.text
         }
 
-        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        @objc func dismissKeyboard() {
+            parent.wantsFirstResponder = false
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText replacement: String
+        ) -> Bool {
+            guard replacement == "\n" else { return true }
             parent.onReturn()
             return false
         }
 
-        func textFieldDidBeginEditing(_ textField: UITextField) {
+        func textViewDidBeginEditing(_ textView: UITextView) {
             guard !parent.wantsFirstResponder else { return }
             DispatchQueue.main.async {
                 self.parent.wantsFirstResponder = true
             }
         }
 
-        func textFieldDidEndEditing(_ textField: UITextField) {
+        func textViewDidEndEditing(_ textView: UITextView) {
             guard parent.wantsFirstResponder else { return }
             DispatchQueue.main.async {
                 self.parent.wantsFirstResponder = false
             }
         }
 
-        @objc func textFieldDidChange(_ textField: UITextField) {
-            // Wait until an IME finishes composing before emitting HID taps.
-            guard textField.markedTextRange == nil else { return }
+        func textViewDidChange(_ textView: UITextView) {
+            textView.updatePlaceholder()
+            guard textView.markedTextRange == nil else { return }
 
-            let newText = textField.text ?? ""
+            let newText = textView.text ?? ""
             let oldText = lastCommittedText
             guard newText != oldText else { return }
 
             lastCommittedText = newText
             parent.text = newText
             parent.onTextChange(oldText, newText)
-            moveCaretToEnd(in: textField)
+            moveCaretToEnd(in: textView)
         }
 
-        func textFieldDidChangeSelection(_ textField: UITextField) {
-            guard textField.markedTextRange == nil, !isMovingSelection else { return }
-            moveCaretToEnd(in: textField)
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard textView.markedTextRange == nil, !isMovingSelection else { return }
+            moveCaretToEnd(in: textView)
         }
 
-        func moveCaretToEnd(in textField: UITextField) {
-            let end = textField.endOfDocument
-            if let selectedRange = textField.selectedTextRange,
-               textField.compare(selectedRange.end, to: end) == .orderedSame {
+        func moveCaretToEnd(in textView: UITextView) {
+            let end = textView.endOfDocument
+            if let selectedRange = textView.selectedTextRange,
+               textView.compare(selectedRange.end, to: end) == .orderedSame {
                 return
             }
             isMovingSelection = true
-            textField.selectedTextRange = textField.textRange(from: end, to: end)
+            textView.selectedTextRange = textView.textRange(from: end, to: end)
             isMovingSelection = false
         }
     }

@@ -5,7 +5,7 @@ struct ContentView: View {
     @StateObject private var ble = BLEKeyboardBridge()
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
-    @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.superSpace.rawValue
+    @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.controlSpace.rawValue
 
     @State private var inputText = ""
     @State private var wantsFocus = false
@@ -114,7 +114,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 KeyCaptureTextField(
                     text: $inputText,
                     wantsFirstResponder: $wantsFocus,
@@ -123,7 +123,9 @@ struct ContentView: View {
                     onReturn: handleReturnKey,
                     onBackspaceWhenEmpty: handleBackspaceWhenEmpty
                 )
-                .frame(height: 48)
+                .frame(maxWidth: .infinity)
+                .frame(height: 88)
+                .layoutPriority(1)
 
                 Button {
                     sendLayoutShortcut()
@@ -132,6 +134,7 @@ struct ContentView: View {
                         .frame(width: 30, height: 42)
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 4)
                 .accessibilityLabel("Перемкнути розкладку на комп’ютері")
 
                 Button {
@@ -141,6 +144,7 @@ struct ContentView: View {
                         .frame(width: 34, height: 42)
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 4)
                 .accessibilityLabel(isSecureInput ? "Показати текст" : "Приховати текст")
             }
             .padding(.horizontal, 12)
@@ -164,6 +168,23 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Spacer()
+
+                Menu {
+                    ForEach(HostLayoutShortcut.allCases) { shortcut in
+                        Button {
+                            shortcutRawValue = shortcut.rawValue
+                        } label: {
+                            if shortcut == selectedShortcut {
+                                Label(shortcut.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(shortcut.displayName)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(selectedShortcut.displayName, systemImage: "switch.2")
+                }
+                .buttonStyle(.borderedProminent)
             }
             .font(.caption.weight(.semibold))
 
@@ -263,7 +284,7 @@ struct ContentView: View {
                 }
 
                 Section("Версія") {
-                    LabeledContent("ESP Remote Control", value: "1.1.1")
+                    LabeledContent("ESP Remote Control", value: "1.1.2")
                     Text("Іконка клавіатури: Tabler Icons, MIT License.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -284,7 +305,7 @@ struct ContentView: View {
     }
 
     private var selectedShortcut: HostLayoutShortcut {
-        HostLayoutShortcut(rawValue: shortcutRawValue) ?? .superSpace
+        HostLayoutShortcut(rawValue: shortcutRawValue) ?? .controlSpace
     }
 
     private var layoutBinding: Binding<KeyboardLayout> {
