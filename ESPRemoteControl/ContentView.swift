@@ -5,7 +5,7 @@ struct ContentView: View {
     @StateObject private var ble = BLEKeyboardBridge()
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
-    @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.manual.rawValue
+    @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.superSpace.rawValue
 
     @State private var inputText = ""
     @State private var wantsFocus = false
@@ -23,7 +23,7 @@ struct ContentView: View {
             RemoteKeyboardView(
                 ble: ble,
                 layout: layoutBinding,
-                onLayoutChange: { selectLayout($0, synchronizeHost: true) }
+                onLayoutChange: selectLayout
             )
             .tabItem { Label("Клавіатура", systemImage: "keyboard.fill") }
             .tag(1)
@@ -124,6 +124,15 @@ struct ContentView: View {
                     onBackspaceWhenEmpty: handleBackspaceWhenEmpty
                 )
                 .frame(height: 48)
+
+                Button {
+                    sendLayoutShortcut()
+                } label: {
+                    Image(systemName: "globe")
+                        .frame(width: 30, height: 42)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Перемкнути розкладку на комп’ютері")
 
                 Button {
                     isSecureInput.toggle()
@@ -241,7 +250,7 @@ struct ContentView: View {
                             Text(shortcut.displayName).tag(shortcut)
                         }
                     }
-                    Text("Коли ти натискаєш EN/UA, застосунок може одночасно надіслати системну комбінацію на комп’ютер.")
+                    Text("Коротке натискання EN/UA змінює розкладку телефона й надсилає цю комбінацію. Довге натискання змінює лише розкладку телефона.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -275,7 +284,7 @@ struct ContentView: View {
     }
 
     private var selectedShortcut: HostLayoutShortcut {
-        HostLayoutShortcut(rawValue: shortcutRawValue) ?? .manual
+        HostLayoutShortcut(rawValue: shortcutRawValue) ?? .superSpace
     }
 
     private var layoutBinding: Binding<KeyboardLayout> {
@@ -295,12 +304,17 @@ struct ContentView: View {
     private func selectLayout(_ layout: KeyboardLayout, synchronizeHost: Bool) {
         guard layout != selectedLayout else { return }
         layoutRawValue = layout.rawValue
-        inputText = ""
         inputWarning = nil
 
-        if synchronizeHost, let command = selectedShortcut.command {
+        if synchronizeHost {
+            let command = selectedShortcut.command
             ble.sendKeyTap(modifiers: command.modifiers, hidKeycode: command.keycode)
         }
+    }
+
+    private func sendLayoutShortcut() {
+        let command = selectedShortcut.command
+        ble.sendKeyTap(modifiers: command.modifiers, hidKeycode: command.keycode)
     }
 
     private func handleReturnKey() {
@@ -332,9 +346,8 @@ struct ContentView: View {
         for character in insertedCharacters {
             if let inferredLayout = KeyboardLayout.inferred(from: character),
                inferredLayout != activeLayout {
-                if let layoutCommand = selectedShortcut.command {
-                    taps.append((layoutCommand.modifiers, layoutCommand.keycode))
-                }
+                let layoutCommand = selectedShortcut.command
+                taps.append((layoutCommand.modifiers, layoutCommand.keycode))
                 activeLayout = inferredLayout
             }
 

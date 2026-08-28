@@ -166,11 +166,33 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     }
 
     func sendKeyTap(modifiers: UInt8, hidKeycode: UInt8) {
+        if hidKeycode == 0 {
+            sendModifierChord(modifiers)
+            return
+        }
         writeV2([V2Frame(command: V2.keyTap, payload: [modifiers, hidKeycode])])
     }
 
     func sendKeyTaps(_ taps: [(modifiers: UInt8, keycode: UInt8)]) {
-        writeV2(taps.map { V2Frame(command: V2.keyTap, payload: [$0.modifiers, $0.keycode]) })
+        var frames: [V2Frame] = []
+        for tap in taps {
+            if tap.keycode == 0 {
+                frames.append(V2Frame(command: V2.setModifiers, payload: [tap.modifiers]))
+                frames.append(V2Frame(command: V2.setModifiers, payload: [0]))
+                lastSentModifiersMask = 0
+            } else {
+                frames.append(V2Frame(command: V2.keyTap, payload: [tap.modifiers, tap.keycode]))
+            }
+        }
+        writeV2(frames)
+    }
+
+    private func sendModifierChord(_ modifiers: UInt8) {
+        lastSentModifiersMask = 0
+        writeV2([
+            V2Frame(command: V2.setModifiers, payload: [modifiers]),
+            V2Frame(command: V2.setModifiers, payload: [0])
+        ])
     }
 
     func sendMouseMove(dx: Int8, dy: Int8) {

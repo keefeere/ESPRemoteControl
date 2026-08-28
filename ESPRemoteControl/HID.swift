@@ -49,28 +49,32 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
 }
 
 enum HostLayoutShortcut: String, CaseIterable, Identifiable {
-    case manual
+    case controlShift
+    case altShift
+    case shiftSpace
     case superSpace
-    case controlSpace
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .manual: "Не перемикати"
-        case .superSpace: "Super/Win + Space"
-        case .controlSpace: "Control + Space"
+        case .controlShift: "Ctrl + Shift"
+        case .altShift: "Alt + Shift"
+        case .shiftSpace: "Shift + Space"
+        case .superSpace: "Win + Space"
         }
     }
 
-    var command: HIDCommand? {
+    var command: HIDCommand {
         switch self {
-        case .manual:
-            nil
+        case .controlShift:
+            HIDCommand(modifiers: HID.modLeftCtrl | HID.modLeftShift, keycode: 0)
+        case .altShift:
+            HIDCommand(modifiers: HID.modLeftAlt | HID.modLeftShift, keycode: 0)
+        case .shiftSpace:
+            HIDCommand(modifiers: HID.modLeftShift, keycode: HID.keySpace)
         case .superSpace:
             HIDCommand(modifiers: HID.modLeftGUI, keycode: HID.keySpace)
-        case .controlSpace:
-            HIDCommand(modifiers: HID.modLeftCtrl, keycode: HID.keySpace)
         }
     }
 }

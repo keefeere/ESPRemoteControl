@@ -13,8 +13,9 @@ Unlike software solutions that require network setup or specific operating syste
 
 ## Features
 
-- **English and Ukrainian input** - Physical US and Ukrainian Enhanced HID mappings
-- **Two keyboard modes** - Use the native iOS keyboard or a full-screen remote keyboard
+- **English and Ukrainian input** - Automatic alphabet detection with physical US and Ukrainian Enhanced HID mappings
+- **Two keyboard modes** - Use the native iOS keyboard beside the trackpad or the dedicated full-screen keyboard tab
+- **Layout synchronization** - Configurable Ctrl+Shift, Alt+Shift, Shift+Space, or Win+Space host shortcut
 - **Clipboard typing** - Send text from the iPhone clipboard in one tap
 - **Precision trackpad** - Multi-touch gestures for cursor control, clicking, and scrolling  
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
@@ -78,8 +79,12 @@ To build the same unsigned IPA on a Mac locally:
 
 1. Plug the ESP32 into your target computer or Smart TV via USB
 2. Open the iOS app - it will automatically scan and connect to the ESP32
-3. Select `EN` or `UA` to match the target computer, then type with the iOS keyboard or open the full-screen keyboard
-4. Use the trackpad area for mouse control:
+3. Choose the target computer's layout shortcut in Settings
+4. Type with the native iOS keyboard or use the dedicated keyboard tab:
+   - tap `EN`/`UA` to switch both the phone and target computer
+   - hold `EN`/`UA` to change only the phone indicator
+   - use the globe beside the text field to resend only the host shortcut
+5. Use the trackpad area for mouse control:
    - **Drag** to move cursor
    - **Tap** for left click  
    - **Two-finger tap** for right click

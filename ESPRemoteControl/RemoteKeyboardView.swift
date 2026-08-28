@@ -3,7 +3,7 @@ import SwiftUI
 struct RemoteKeyboardView: View {
     @ObservedObject var ble: BLEKeyboardBridge
     @Binding var layout: KeyboardLayout
-    let onLayoutChange: (KeyboardLayout) -> Void
+    let onLayoutChange: (KeyboardLayout, Bool) -> Void
 
     @State private var shift = false
     @State private var capsLock = false
@@ -75,13 +75,26 @@ struct RemoteKeyboardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Button(layout.shortName) {
-                let next: KeyboardLayout = layout == .englishUS ? .ukrainianEnhanced : .englishUS
-                onLayoutChange(next)
-            }
-            .font(.caption.weight(.bold))
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            Text(layout.shortName)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.accentColor)
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+                .onTapGesture {
+                    changeLayout(synchronizeHost: true)
+                }
+                .onLongPressGesture(minimumDuration: 0.55) {
+                    changeLayout(synchronizeHost: false)
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Розкладка \(layout.shortName)")
+                .accessibilityHint("Натисни для синхронного перемикання; утримуй, щоб змінити лише на телефоні")
+                .accessibilityAction {
+                    changeLayout(synchronizeHost: true)
+                }
         }
         .padding(.horizontal, 4)
     }
@@ -185,6 +198,12 @@ struct RemoteKeyboardView: View {
             stickyModifiers ^= mask
             ble.setModifiers(stickyModifiers)
         }
+    }
+
+    private func changeLayout(synchronizeHost: Bool) {
+        releaseModifiers()
+        let next: KeyboardLayout = layout == .englishUS ? .ukrainianEnhanced : .englishUS
+        onLayoutChange(next, synchronizeHost)
     }
 
     private func sendCharacter(_ character: Character) {
