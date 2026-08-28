@@ -19,11 +19,11 @@ final class BackspaceDetectingTextView: UITextView {
         NSLayoutConstraint.activate([
             placeholderLabel.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
-                constant: textContainerInset.left + textContainer.lineFragmentPadding
+                constant: textContainerInset.left + self.textContainer.lineFragmentPadding
             ),
             placeholderLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailingAnchor,
-                constant: -(textContainerInset.right + textContainer.lineFragmentPadding)
+                constant: -(textContainerInset.right + self.textContainer.lineFragmentPadding)
             ),
             placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top)
         ])
@@ -169,7 +169,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            textView.updatePlaceholder()
+            (textView as? BackspaceDetectingTextView)?.updatePlaceholder()
             guard textView.markedTextRange == nil else { return }
 
             let newText = textView.text ?? ""
