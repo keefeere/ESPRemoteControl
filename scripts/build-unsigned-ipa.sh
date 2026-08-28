@@ -39,5 +39,8 @@ ditto "$app_path" "$build_root/Payload/ESPRemoteControl.app"
   ditto -c -k --sequesterRsrc --keepParent Payload "$ipa_path"
 )
 
-shasum -a 256 "$ipa_path" > "$ipa_path.sha256"
+(
+  cd "$output_dir"
+  shasum -a 256 "$(basename "$ipa_path")" > "$(basename "$ipa_path").sha256"
+)
 echo "Unsigned IPA created at $ipa_path"
