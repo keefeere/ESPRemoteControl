@@ -57,7 +57,9 @@ struct KeyCaptureTextField: UIViewRepresentable {
 
     func updateUIView(_ textField: BackspaceDetectingTextField, context: Context) {
         context.coordinator.parent = self
-        textField.isSecureTextEntry = isSecure
+        if textField.isSecureTextEntry != isSecure {
+            textField.isSecureTextEntry = isSecure
+        }
 
         if textField.text != text {
             textField.text = text
@@ -93,6 +95,20 @@ struct KeyCaptureTextField: UIViewRepresentable {
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             parent.onReturn()
             return false
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            guard !parent.wantsFirstResponder else { return }
+            DispatchQueue.main.async {
+                self.parent.wantsFirstResponder = true
+            }
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            guard parent.wantsFirstResponder else { return }
+            DispatchQueue.main.async {
+                self.parent.wantsFirstResponder = false
+            }
         }
 
         @objc func textFieldDidChange(_ textField: UITextField) {

@@ -5,7 +5,6 @@ struct RemoteKeyboardView: View {
     @Binding var layout: KeyboardLayout
     let onLayoutChange: (KeyboardLayout) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var shift = false
     @State private var capsLock = false
     @State private var stickyModifiers: UInt8 = 0
@@ -13,60 +12,57 @@ struct RemoteKeyboardView: View {
     private var uppercaseLetters: Bool { shift != capsLock }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 10) {
-                    connectionStatus
-                    functionRow
-                    numberRow
+        GeometryReader { geometry in
+            let spacing = geometry.size.height < 600 ? CGFloat(3) : CGFloat(5)
+            let keyHeight = max(
+                27,
+                min(46, (geometry.size.height - 66 - (spacing * 8)) / 8)
+            )
 
-                    ForEach(Array(layout.letterRows.enumerated()), id: \.offset) { rowIndex, row in
-                        HStack(spacing: 5) {
-                            if rowIndex == 2 {
-                                actionKey("⇧", active: shift) {
-                                    shift.toggle()
-                                }
+            VStack(spacing: spacing) {
+                connectionStatus
+                    .frame(height: 38)
+
+                functionRow(
+                    labels: ["Esc", "F1", "F2", "F3", "F4", "F5", "F6"],
+                    keycodes: [HID.keyEscape] + Array(functionKeys.prefix(6)),
+                    height: keyHeight
+                )
+                functionRow(
+                    labels: ["F7", "F8", "F9", "F10", "F11", "F12", "Del"],
+                    keycodes: Array(functionKeys.suffix(6)) + [HID.keyDelete],
+                    height: keyHeight
+                )
+                numberRow(height: keyHeight)
+
+                ForEach(Array(layout.letterRows.enumerated()), id: \.offset) { rowIndex, row in
+                    HStack(spacing: 3) {
+                        if rowIndex == 2 {
+                            actionKey("⇧", active: shift, height: keyHeight) {
+                                shift.toggle()
                             }
+                        }
 
-                            ForEach(Array(row.enumerated()), id: \.offset) { _, character in
-                                characterKey(character)
-                            }
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, character in
+                            characterKey(character, height: keyHeight)
+                        }
 
-                            if rowIndex == 2 {
-                                actionKey("⌫") {
-                                    sendKey(HID.keyBackspace, preserveModifiers: true)
-                                }
+                        if rowIndex == 2 {
+                            actionKey("⌫", height: keyHeight) {
+                                sendKey(HID.keyBackspace, preserveModifiers: true)
                             }
                         }
                     }
-
-                    punctuationRow
-                    modifierRow
-                    navigationRow
-                }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 20)
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Remote Keyboard")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(layout.shortName) {
-                        let next: KeyboardLayout = layout == .englishUS ? .ukrainianEnhanced : .englishUS
-                        onLayoutChange(next)
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") {
-                        releaseModifiers()
-                        dismiss()
-                    }
-                }
+                punctuationRow(height: keyHeight, availableWidth: geometry.size.width - 12)
+                commandRow(height: keyHeight)
             }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
         }
+        .background(Color(.systemGroupedBackground))
+        .onDisappear(perform: releaseModifiers)
     }
 
     private var connectionStatus: some View {
@@ -78,68 +74,75 @@ struct RemoteKeyboardView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer()
-            Text(layout.displayName)
-                .font(.caption.weight(.semibold))
+            Spacer(minLength: 4)
+            Button(layout.shortName) {
+                let next: KeyboardLayout = layout == .englishUS ? .ukrainianEnhanced : .englishUS
+                onLayoutChange(next)
+            }
+            .font(.caption.weight(.bold))
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
     }
 
-    private var functionRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                actionKey("Esc") { sendKey(HID.keyEscape) }
-                ForEach(Array(functionKeys.enumerated()), id: \.offset) { index, keycode in
-                    actionKey("F\(index + 1)") { sendKey(keycode) }
+    private func functionRow(labels: [String], keycodes: [UInt8], height: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(labels.enumerated()), id: \.offset) { index, label in
+                actionKey(label, height: height) {
+                    sendKey(keycodes[index], preserveModifiers: label == "Del")
                 }
             }
         }
     }
 
-    private var numberRow: some View {
+    private func numberRow(height: CGFloat) -> some View {
         let values = shiftedNumberCharacters
-        return HStack(spacing: 5) {
+        return HStack(spacing: 3) {
             ForEach(Array(values.enumerated()), id: \.offset) { _, character in
-                characterKey(character, usesCase: false)
+                characterKey(character, usesCase: false, height: height)
             }
         }
     }
 
-    private var punctuationRow: some View {
-        HStack(spacing: 5) {
+    private func punctuationRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+        let spaceWidth = max(86, availableWidth * 0.30)
+        return HStack(spacing: 3) {
             ForEach(Array(punctuationCharacters.enumerated()), id: \.offset) { _, character in
-                characterKey(character, usesCase: false)
+                characterKey(character, usesCase: false, height: height)
             }
-            actionKey("Space", width: 120) { sendKey(HID.keySpace) }
-            actionKey("↵") { sendKey(HID.keyEnter) }
+            actionKey("Space", width: spaceWidth, height: height) {
+                sendKey(HID.keySpace)
+            }
+            actionKey("↵", height: height) {
+                sendKey(HID.keyEnter)
+            }
         }
     }
 
-    private var modifierRow: some View {
-        HStack(spacing: 6) {
-            modifierKey("Ctrl", mask: HID.modLeftCtrl)
-            modifierKey("Win", mask: HID.modLeftGUI)
-            modifierKey("Alt", mask: HID.modLeftAlt)
-            actionKey("Caps", active: capsLock) {
+    private func commandRow(height: CGFloat) -> some View {
+        HStack(spacing: 3) {
+            modifierKey("Ctrl", mask: HID.modLeftCtrl, height: height)
+            modifierKey("Win", mask: HID.modLeftGUI, height: height)
+            modifierKey("Alt", mask: HID.modLeftAlt, height: height)
+            actionKey("Caps", active: capsLock, height: height) {
                 capsLock.toggle()
             }
-            actionKey("Tab") { sendKey(HID.keyTab) }
+            actionKey("Tab", height: height) { sendKey(HID.keyTab) }
+            actionKey("Home", height: height) { sendKey(HID.keyHome) }
+            actionKey("←", height: height) { sendKey(HID.keyLeftArrow, preserveModifiers: true) }
+            actionKey("↑", height: height) { sendKey(HID.keyUpArrow, preserveModifiers: true) }
+            actionKey("↓", height: height) { sendKey(HID.keyDownArrow, preserveModifiers: true) }
+            actionKey("→", height: height) { sendKey(HID.keyRightArrow, preserveModifiers: true) }
+            actionKey("End", height: height) { sendKey(HID.keyEnd) }
         }
     }
 
-    private var navigationRow: some View {
-        HStack(spacing: 6) {
-            actionKey("Home") { sendKey(HID.keyHome) }
-            actionKey("←") { sendKey(HID.keyLeftArrow, preserveModifiers: true) }
-            actionKey("↑") { sendKey(HID.keyUpArrow, preserveModifiers: true) }
-            actionKey("↓") { sendKey(HID.keyDownArrow, preserveModifiers: true) }
-            actionKey("→") { sendKey(HID.keyRightArrow, preserveModifiers: true) }
-            actionKey("End") { sendKey(HID.keyEnd) }
-            actionKey("Del") { sendKey(HID.keyDelete, preserveModifiers: true) }
-        }
-    }
-
-    private func characterKey(_ base: Character, usesCase: Bool = true) -> some View {
+    private func characterKey(
+        _ base: Character,
+        usesCase: Bool = true,
+        height: CGFloat
+    ) -> some View {
         let character: Character
         if usesCase, uppercaseLetters {
             character = Character(String(base).uppercased())
@@ -151,8 +154,8 @@ struct RemoteKeyboardView: View {
             sendCharacter(character)
         } label: {
             Text(String(character))
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .frame(maxWidth: .infinity, minHeight: 46)
+                .font(.system(size: height < 34 ? 14 : 17, weight: .medium, design: .rounded))
+                .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(RemoteKeyButtonStyle())
@@ -162,20 +165,23 @@ struct RemoteKeyboardView: View {
         _ title: String,
         active: Bool = false,
         width: CGFloat? = nil,
+        height: CGFloat,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .frame(maxWidth: width == nil ? .infinity : nil, minHeight: 42)
+                .font(.system(size: height < 34 ? 9 : 11, weight: .semibold, design: .rounded))
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+                .frame(maxWidth: width == nil ? .infinity : nil, minHeight: height, maxHeight: height)
                 .frame(width: width)
                 .contentShape(Rectangle())
         }
         .buttonStyle(RemoteKeyButtonStyle(active: active))
     }
 
-    private func modifierKey(_ title: String, mask: UInt8) -> some View {
-        actionKey(title, active: stickyModifiers & mask != 0) {
+    private func modifierKey(_ title: String, mask: UInt8, height: CGFloat) -> some View {
+        actionKey(title, active: stickyModifiers & mask != 0, height: height) {
             stickyModifiers ^= mask
             ble.setModifiers(stickyModifiers)
         }
@@ -248,7 +254,7 @@ private struct RemoteKeyButtonStyle: ButtonStyle {
                     ? Color.accentColor.opacity(configuration.isPressed ? 0.72 : 1)
                     : Color(.secondarySystemGroupedBackground).opacity(configuration.isPressed ? 0.62 : 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
     }
 }

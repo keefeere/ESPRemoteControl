@@ -33,6 +33,19 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
             [Array("йцукенгшщзхї"), Array("фівапролджє"), Array("ячсмитьбю")]
         }
     }
+
+    /// Infers only from letters. Digits, whitespace and punctuation keep the
+    /// current layout because they do not identify a keyboard alphabet.
+    static func inferred(from character: Character) -> KeyboardLayout? {
+        if Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").contains(character) {
+            return .englishUS
+        }
+        if Set("абвгґдеєжзиіїйклмнопрстуфхцчшщьюяАБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ")
+            .contains(character) {
+            return .ukrainianEnhanced
+        }
+        return nil
+    }
 }
 
 enum HostLayoutShortcut: String, CaseIterable, Identifiable {

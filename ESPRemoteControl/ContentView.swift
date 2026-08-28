@@ -11,7 +11,6 @@ struct ContentView: View {
     @State private var wantsFocus = false
     @State private var isSecureInput = false
     @State private var selectedTab = 0
-    @State private var showsFullKeyboard = false
     @State private var showsSettings = false
     @State private var inputWarning: String?
 
@@ -21,21 +20,18 @@ struct ContentView: View {
                 .tabItem { Label("Ввід", systemImage: "keyboard") }
                 .tag(0)
 
-            NavigationStack {
-                ScrollView {
-                    ControlPadPage(ble: ble)
-                        .padding(.top, 12)
-                        .padding(.bottom, 24)
-                }
-                .scrollIndicators(.hidden)
-                .navigationTitle("Клавіші")
-                .navigationBarTitleDisplayMode(.inline)
-            }
-            .tabItem { Label("Клавіші", systemImage: "command") }
+            RemoteKeyboardView(
+                ble: ble,
+                layout: layoutBinding,
+                onLayoutChange: { selectLayout($0, synchronizeHost: true) }
+            )
+            .tabItem { Label("Клавіатура", systemImage: "keyboard.fill") }
             .tag(1)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            connectionHeader
+            if selectedTab == 0 {
+                connectionHeader
+            }
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue != 0 {
@@ -46,13 +42,6 @@ struct ContentView: View {
             ble.start()
         }
         .onOpenURL(perform: handleIncomingURL)
-        .fullScreenCover(isPresented: $showsFullKeyboard) {
-            RemoteKeyboardView(
-                ble: ble,
-                layout: layoutBinding,
-                onLayoutChange: { selectLayout($0, synchronizeHost: true) }
-            )
-        }
         .sheet(isPresented: $showsSettings) {
             settingsView
         }
@@ -120,13 +109,9 @@ struct ContentView: View {
                 Label("Клавіатура", systemImage: "character.cursor.ibeam")
                     .font(.headline)
                 Spacer()
-                Picker("Розкладка", selection: layoutBinding) {
-                    ForEach(KeyboardLayout.allCases) { layout in
-                        Text(layout.shortName).tag(layout)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 116)
+                Text("Авто · \(selectedLayout.shortName)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
@@ -170,14 +155,6 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Spacer()
-
-                Button {
-                    wantsFocus = false
-                    showsFullKeyboard = true
-                } label: {
-                    Label("На весь екран", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-                .buttonStyle(.borderedProminent)
             }
             .font(.caption.weight(.semibold))
 
@@ -186,7 +163,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else {
-                Text("Розкладка застосунку має збігатися з розкладкою цільового пристрою.")
+                Text("EN/UA визначається за літерами. Перемикання на комп’ютері задається в налаштуваннях.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -277,7 +254,7 @@ struct ContentView: View {
                 }
 
                 Section("Версія") {
-                    LabeledContent("ESP Remote Control", value: "1.1")
+                    LabeledContent("ESP Remote Control", value: "1.1.1")
                     Text("Іконка клавіатури: Tabler Icons, MIT License.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -345,6 +322,7 @@ struct ContentView: View {
         let insertedCharacters = newText.dropFirst(commonPrefixLength)
         var taps: [(modifiers: UInt8, keycode: UInt8)] = []
         var unsupported: [Character] = []
+        var activeLayout = selectedLayout
 
         taps.append(contentsOf: repeatElement(
             (modifiers: UInt8(0), keycode: HID.keyBackspace),
@@ -352,11 +330,23 @@ struct ContentView: View {
         ))
 
         for character in insertedCharacters {
-            if let command = HID.mapCharacterToHID(character, layout: selectedLayout) {
+            if let inferredLayout = KeyboardLayout.inferred(from: character),
+               inferredLayout != activeLayout {
+                if let layoutCommand = selectedShortcut.command {
+                    taps.append((layoutCommand.modifiers, layoutCommand.keycode))
+                }
+                activeLayout = inferredLayout
+            }
+
+            if let command = HID.mapCharacterToHID(character, layout: activeLayout) {
                 taps.append((command.modifiers, command.keycode))
             } else {
                 unsupported.append(character)
             }
+        }
+
+        if activeLayout != selectedLayout {
+            layoutRawValue = activeLayout.rawValue
         }
 
         if !taps.isEmpty {
