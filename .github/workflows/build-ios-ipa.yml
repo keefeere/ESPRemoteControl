@@ -11,6 +11,7 @@ on:
       - "ESPRemoteControl/**"
       - "ESPRemoteControl.xcodeproj/**"
       - "scripts/build-unsigned-ipa.sh"
+      - "scripts/update-sidestore-source.py"
       - ".github/workflows/build-ios-ipa.yml"
 
 permissions:
@@ -24,6 +25,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -46,3 +49,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/ESPRemoteControl-unsigned.ipa dist/ESPRemoteControl-unsigned.ipa.sha256 --generate-notes
+
+      - name: Publish update to SideStore source
+        if: startsWith(github.ref, 'refs/tags/ios-v')
+        run: |
+          version="${GITHUB_REF_NAME#ios-v}"
+          ipa_size="$(stat -f '%z' dist/ESPRemoteControl-unsigned.ipa)"
+          download_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/ESPRemoteControl-unsigned.ipa"
+
+          git switch --force-create sidestore-source-update origin/main
+          python3 scripts/update-sidestore-source.py \
+            --source sidestore-source.json \
+            --version "$version" \
+            --date "$(date -u +%F)" \
+            --download-url "$download_url" \
+            --size "$ipa_size" \
+            --description "ESP Remote Control ${version}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sidestore-source.json
+          git commit -m "Update SideStore source for ${GITHUB_REF_NAME}"
+          git push origin HEAD:main

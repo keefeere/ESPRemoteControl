@@ -69,6 +69,24 @@ Tagged builds named `ios-v*` are also attached to a GitHub Release:
 ios-v1.0.0
 ```
 
+#### Automatic SideStore updates
+
+Add the repository's AltSource to SideStore once:
+
+```text
+https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/sidestore-source.json
+```
+
+Or open this one-tap URL on the iPhone:
+
+```text
+sidestore://source?url=https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/sidestore-source.json
+```
+
+Every tagged build updates this source after its IPA is attached to the GitHub
+Release. SideStore will then detect the new version; enable LocalDevVPN and
+confirm the update to sign and install it.
+
 To build the same unsigned IPA on a Mac locally:
 
 ```bash
