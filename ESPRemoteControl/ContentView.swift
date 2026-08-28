@@ -136,6 +136,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .padding(.top, 4)
                 .accessibilityLabel("Перемкнути розкладку на комп’ютері")
+                .help("Надіслати скорочення зміни мови на комп’ютер")
 
                 Button {
                     isSecureInput.toggle()
@@ -146,6 +147,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .padding(.top, 4)
                 .accessibilityLabel(isSecureInput ? "Показати текст" : "Приховати текст")
+                .help(isSecureInput ? "Показати текст" : "Приховати текст")
             }
             .padding(.horizontal, 12)
             .background(Color(.secondarySystemGroupedBackground))
@@ -193,7 +195,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else {
-                Text("EN/UA визначається за літерами. Перемикання на комп’ютері задається в налаштуваннях.")
+                Text("Скорочення зміни мови на комп’ютері — кнопка праворуч. Мова тексту визначається автоматично за літерами.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
