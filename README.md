@@ -23,7 +23,7 @@ Unlike software solutions that require network setup or specific operating syste
 ## Hardware Requirements
 
 - **ESP32-S3** development board (must have native USB support)
-- **iPhone** running iOS 14+ 
+- **iPhone** running iOS 17+
 - USB-C cable to connect ESP32 to target computer
 
 Popular ESP32-S3 boards that work:
@@ -50,6 +50,26 @@ Popular ESP32-S3 boards that work:
 1. Open `ESPRemoteControl.xcodeproj` in Xcode
 2. Connect your iPhone and build/install the app
 3. Grant Bluetooth permissions when prompted
+
+#### SideStore without a permanent Mac
+
+The `Build unsigned iOS IPA` GitHub Actions workflow builds an unsigned
+`ESPRemoteControl-unsigned.ipa` on a `macos-26` runner. Run the workflow from
+the repository's Actions tab, download the artifact, and install the IPA with
+SideStore. SideStore can then refresh the app's development signature without
+rebuilding it.
+
+Tagged builds named `ios-v*` are also attached to a GitHub Release:
+
+```text
+ios-v1.0.0
+```
+
+To build the same unsigned IPA on a Mac locally:
+
+```bash
+./scripts/build-unsigned-ipa.sh
+```
 
 ### 3. Connect and Use
 

@@ -1,1 +1,11 @@
 .aider*
+
+# Xcode
+DerivedData/
+build/
+dist/
+*.xcuserstate
+xcuserdata/
+
+# Arduino build output
+sketch_uid_keyboard_ble/build/
