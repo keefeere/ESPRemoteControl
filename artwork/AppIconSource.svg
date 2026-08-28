@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#36A3FF"/>
+      <stop offset="0.52" stop-color="#5856D6"/>
+      <stop offset="1" stop-color="#AF52DE"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#161047" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <circle cx="220" cy="180" r="250" fill="#FFFFFF" opacity="0.08"/>
+  <circle cx="870" cy="830" r="330" fill="#170A53" opacity="0.12"/>
+
+  <!-- Keyboard outline adapted from Tabler Icons' keyboard.svg (MIT). -->
+  <g transform="translate(128 128) scale(32)" fill="none" stroke="#FFFFFF"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)">
+    <path d="M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2l0 -8"/>
+    <path d="M6 10l0 .01"/>
+    <path d="M10 10l0 .01"/>
+    <path d="M14 10l0 .01"/>
+    <path d="M18 10l0 .01"/>
+    <path d="M6 14l0 .01"/>
+    <path d="M18 14l0 .01"/>
+    <path d="M10 14l4 .01"/>
+  </g>
+</svg>

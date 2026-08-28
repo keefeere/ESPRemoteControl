@@ -1,92 +1,77 @@
-//
-//  KeyCaptureTextField.swift
-//  ESPRemoteControl
-//
-//  Created by Ruben Kostandyan on 14/12/2025.
-//
-
 import SwiftUI
 import UIKit
 
-/// Custom UITextField that can detect backspace even when empty
 final class BackspaceDetectingTextField: UITextField {
-    var onDeleteBackward: (() -> Void)?
-    
+    var onDeleteBackwardWhenEmpty: (() -> Void)?
+
     override func deleteBackward() {
         let wasEmpty = text?.isEmpty ?? true
         super.deleteBackward()
-        // If field was empty, still notify about backspace
         if wasEmpty {
-            onDeleteBackward?()
+            onDeleteBackwardWhenEmpty?()
         }
     }
 }
 
-/// A SwiftUI wrapper around UITextField that:
-/// - becomes first responder on launch (native keyboard immediately)
-/// - allows natural typing, paste, etc.
-/// - reports text changes to parent for processing
-/// - displays masked bullets for privacy
+/// A real text field used as a remote typing composer. Unlike the original
+/// masked implementation, its backing text always matches what UIKit sees,
+/// which keeps non-Latin keyboards, marked text, paste and prediction sane.
 struct KeyCaptureTextField: UIViewRepresentable {
     @Binding var text: String
     @Binding var wantsFirstResponder: Bool
-    
-    var onTextChange: (String, String) -> Void  // (oldText, newText)
+
+    var isSecure: Bool
+    var onTextChange: (String, String) -> Void
     var onReturn: () -> Void
-    var onBackspaceWhenEmpty: () -> Void  // Called when backspace pressed on empty field
+    var onBackspaceWhenEmpty: () -> Void
 
     func makeUIView(context: Context) -> BackspaceDetectingTextField {
-        let tf = BackspaceDetectingTextField(frame: .zero)
-        tf.delegate = context.coordinator
+        let textField = BackspaceDetectingTextField(frame: .zero)
+        textField.delegate = context.coordinator
+        textField.borderStyle = .none
+        textField.font = UIFont.systemFont(ofSize: 18)
+        textField.textColor = .label
+        textField.tintColor = .systemBlue
+        textField.placeholder = "Введіть або вставте текст…"
+        textField.keyboardType = .default
+        textField.autocorrectionType = .no
+        textField.spellCheckingType = .no
+        textField.smartQuotesType = .no
+        textField.smartDashesType = .no
+        textField.smartInsertDeleteType = .no
+        textField.textContentType = .none
+        textField.autocapitalizationType = .sentences
+        textField.returnKeyType = .send
+        textField.clearButtonMode = .whileEditing
 
-        tf.borderStyle = .none
-        tf.font = UIFont.monospacedSystemFont(ofSize: 20, weight: .semibold)
-        tf.textColor = .label
-        tf.tintColor = .clear  // Hide cursor for cleaner look with bullets
-        
-        // Prevent text field from expanding based on content
-        tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        // Allow any keyboard - user can switch to emoji, numbers, symbols, etc.
-        tf.keyboardType = .default
-        tf.autocorrectionType = .no
-        tf.spellCheckingType = .no
-        tf.smartQuotesType = .no
-        tf.smartDashesType = .no
-        tf.smartInsertDeleteType = .no
-        tf.textContentType = .none
-        tf.autocapitalizationType = .sentences
-        tf.returnKeyType = .send
-        
-        // Handle backspace when empty
-        tf.onDeleteBackward = { [context] in
-            context.coordinator.handleBackspaceWhenEmpty()
+        textField.onDeleteBackwardWhenEmpty = {
+            context.coordinator.parent.onBackspaceWhenEmpty()
         }
-
-        // Add target for text changes
-        tf.addTarget(context.coordinator, action: #selector(Coordinator.textFieldDidChange(_:)), for: .editingChanged)
-
-        return tf
+        textField.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.textFieldDidChange(_:)),
+            for: .editingChanged
+        )
+        return textField
     }
 
-    func updateUIView(_ uiView: BackspaceDetectingTextField, context: Context) {
-        // Display bullets instead of actual text for privacy
-        let bulletDisplay = text.isEmpty ? "" : String(repeating: "•", count: text.count)
-        if uiView.text != bulletDisplay {
-            uiView.text = bulletDisplay
-        }
-        
-        // Sync coordinator's internal text with binding
-        context.coordinator.syncInternalText(text)
+    func updateUIView(_ textField: BackspaceDetectingTextField, context: Context) {
+        context.coordinator.parent = self
+        textField.isSecureTextEntry = isSecure
 
-        if wantsFirstResponder, !uiView.isFirstResponder {
+        if textField.text != text {
+            textField.text = text
+            context.coordinator.lastCommittedText = text
+        }
+
+        if wantsFirstResponder, !textField.isFirstResponder {
             DispatchQueue.main.async {
-                _ = uiView.becomeFirstResponder()
+                textField.becomeFirstResponder()
+                context.coordinator.moveCaretToEnd(in: textField)
             }
-        } else if !wantsFirstResponder, uiView.isFirstResponder {
+        } else if !wantsFirstResponder, textField.isFirstResponder {
             DispatchQueue.main.async {
-                _ = uiView.resignFirstResponder()
+                textField.resignFirstResponder()
             }
         }
     }
@@ -97,19 +82,12 @@ struct KeyCaptureTextField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         var parent: KeyCaptureTextField
-        private var internalText: String = ""
+        var lastCommittedText: String
+        private var isMovingSelection = false
 
         init(parent: KeyCaptureTextField) {
             self.parent = parent
-            self.internalText = parent.text
-        }
-        
-        func syncInternalText(_ text: String) {
-            internalText = text
-        }
-        
-        func handleBackspaceWhenEmpty() {
-            parent.onBackspaceWhenEmpty()
+            self.lastCommittedText = parent.text
         }
 
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -117,38 +95,34 @@ struct KeyCaptureTextField: UIViewRepresentable {
             return false
         }
 
-        func textField(_ textField: UITextField,
-                       shouldChangeCharactersIn range: NSRange,
-                       replacementString string: String) -> Bool {
-            // Calculate what the new text would be
-            let currentText = internalText
-            guard let textRange = Range(range, in: currentText) else {
-                return false
-            }
-            
-            let newText = currentText.replacingCharacters(in: textRange, with: string)
-            let oldText = internalText
-            internalText = newText
-            
-            // Report the change
-            parent.onTextChange(oldText, newText)
-            
-            // Update the binding
-            DispatchQueue.main.async {
-                self.parent.text = newText
-            }
-            
-            // We handle the display ourselves (bullets), so return false
-            // Update the bullet display to match the actual text length
-            let bulletDisplay = newText.isEmpty ? "" : String(repeating: "•", count: newText.count)
-            textField.text = bulletDisplay
-            
-            return false
-        }
-        
         @objc func textFieldDidChange(_ textField: UITextField) {
-            // This catches any changes we might have missed (paste via menu, etc.)
-            // Sync internal state if needed
+            // Wait until an IME finishes composing before emitting HID taps.
+            guard textField.markedTextRange == nil else { return }
+
+            let newText = textField.text ?? ""
+            let oldText = lastCommittedText
+            guard newText != oldText else { return }
+
+            lastCommittedText = newText
+            parent.text = newText
+            parent.onTextChange(oldText, newText)
+            moveCaretToEnd(in: textField)
+        }
+
+        func textFieldDidChangeSelection(_ textField: UITextField) {
+            guard textField.markedTextRange == nil, !isMovingSelection else { return }
+            moveCaretToEnd(in: textField)
+        }
+
+        func moveCaretToEnd(in textField: UITextField) {
+            let end = textField.endOfDocument
+            if let selectedRange = textField.selectedTextRange,
+               textField.compare(selectedRange.end, to: end) == .orderedSame {
+                return
+            }
+            isMovingSelection = true
+            textField.selectedTextRange = textField.textRange(from: end, to: end)
+            isMovingSelection = false
         }
     }
 }

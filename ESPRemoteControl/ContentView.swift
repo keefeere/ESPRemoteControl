@@ -1,442 +1,400 @@
-//
-//  ContentView.swift
-//  ESPRemoteControl
-//
-//  Created by Ruben Kostandyan on 14/12/2025.
-//
-
 import SwiftUI
+import UIKit
 
-/// BLE + typing UI + mouse trackpad glued together.
 struct ContentView: View {
     @StateObject private var ble = BLEKeyboardBridge()
 
-    // The actual text content (used for diffing)
-    @State private var inputText: String = ""
+    @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
+    @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.manual.rawValue
 
-    // Auto-focus the field on launch.
-    @State private var wantsFocus: Bool = true
-
-    @State private var pageSelection: Int = 0
+    @State private var inputText = ""
+    @State private var wantsFocus = false
+    @State private var isSecureInput = false
+    @State private var selectedTab = 0
+    @State private var showsFullKeyboard = false
+    @State private var showsSettings = false
+    @State private var inputWarning: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header (fixed at top)
-            headerView
+        TabView(selection: $selectedTab) {
+            inputPage
+                .tabItem { Label("Ввід", systemImage: "keyboard") }
+                .tag(0)
 
-            // Paged content area
-            TabView(selection: $pageSelection) {
-                keyboardAndMousePage
-                    .tag(0)
-
-                controlPadPage
-                    .tag(1)
+            NavigationStack {
+                ScrollView {
+                    ControlPadPage(ble: ble)
+                        .padding(.top, 12)
+                        .padding(.bottom, 24)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("Клавіші")
+                .navigationBarTitleDisplayMode(.inline)
             }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
-            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .tabItem { Label("Клавіші", systemImage: "command") }
+            .tag(1)
         }
-        .onChange(of: pageSelection) { _, newValue in
-            // Close keyboard on page 2; re-open on page 1.
-            wantsFocus = (newValue == 0)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            connectionHeader
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue != 0 {
+                wantsFocus = false
+            }
         }
         .onAppear {
             ble.start()
         }
-    }
-
-    private var headerView: some View {
-        VStack(spacing: 6) {
-            Text("Wireless Input Bridge")
-                .font(.headline)
-
-            Text(ble.statusText)
-                .font(.subheadline)
-                .foregroundStyle(ble.isReady ? .green : .secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
+        .onOpenURL(perform: handleIncomingURL)
+        .fullScreenCover(isPresented: $showsFullKeyboard) {
+            RemoteKeyboardView(
+                ble: ble,
+                layout: layoutBinding,
+                onLayoutChange: { selectLayout($0, synchronizeHost: true) }
+            )
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Divider()
+        .sheet(isPresented: $showsSettings) {
+            settingsView
         }
     }
 
-    private var keyboardAndMousePage: some View {
-        VStack(spacing: 20) {
-            // Keyboard input section
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Keyboard")
-                    .font(.caption)
+    private var inputPage: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    typingCard
+                    trackpadCard
+                    mouseButtons
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 14)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("ESP Remote")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        wantsFocus = false
+                        showsSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+        }
+    }
+
+    private var connectionHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: ble.isReady ? "cable.connector" : "antenna.radiowaves.left.and.right")
+                .foregroundStyle(ble.isReady ? .green : .orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(ble.isReady ? "ESP32 готовий" : "Пошук адаптера")
+                    .font(.subheadline.weight(.semibold))
+                Text(ble.statusText)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                ble.reconnectNow()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Перепідключити ESP32")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) { Divider() }
+    }
 
+    private var typingCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Клавіатура", systemImage: "character.cursor.ibeam")
+                    .font(.headline)
+                Spacer()
+                Picker("Розкладка", selection: layoutBinding) {
+                    ForEach(KeyboardLayout.allCases) { layout in
+                        Text(layout.shortName).tag(layout)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 116)
+            }
+
+            HStack(spacing: 8) {
                 KeyCaptureTextField(
                     text: $inputText,
                     wantsFirstResponder: $wantsFocus,
+                    isSecure: isSecureInput,
                     onTextChange: handleTextChange,
                     onReturn: handleReturnKey,
                     onBackspaceWhenEmpty: handleBackspaceWhenEmpty
                 )
-                .frame(height: 52)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.separator), lineWidth: 0.5)
-                )
-            }
-            .padding(.horizontal)
+                .frame(height: 48)
 
-            // Mouse trackpad section
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Trackpad")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("Tap to click • Two-finger tap for right-click")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                Button {
+                    isSecureInput.toggle()
+                } label: {
+                    Image(systemName: isSecureInput ? "eye.slash" : "eye")
+                        .frame(width: 34, height: 42)
                 }
-                .padding(.horizontal, 4)
-
-                TrackpadView(
-                    onMove: { dx, dy in
-                        ble.sendMouseMove(dx: dx, dy: dy)
-                    },
-                    onTap: { fingerCount in
-                        if fingerCount == 1 {
-                            ble.sendMouseClick(button: 1) // Left click
-                        } else if fingerCount >= 2 {
-                            ble.sendMouseClick(button: 2) // Right click
-                        }
-                    },
-                    onScroll: { dx, dy in
-                        ble.sendMouseScroll(dx: dx, dy: dy)
-                    },
-                    onDragStart: {
-                        ble.sendMouseButtonDown(button: 1) // Left mouse button down
-                    },
-                    onDragEnd: {
-                        ble.sendMouseButtonUp(button: 1) // Left mouse button up
-                    }
-                )
-                .frame(height: 220)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(.separator), lineWidth: 0.5)
-                )
+                .buttonStyle(.plain)
+                .accessibilityLabel(isSecureInput ? "Показати текст" : "Приховати текст")
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 12)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            // Mouse buttons
-            HStack(spacing: 16) {
-                PressableKeyButton(
-                    title: "Left Click",
-                    minHeight: 48,
-                    onPress: { ble.sendMouseButtonDown(button: 1) },
-                    onRelease: { ble.sendMouseButtonUp(button: 1) }
-                )
-                .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                Button {
+                    pasteClipboard()
+                } label: {
+                    Label("Вставити", systemImage: "doc.on.clipboard")
+                }
+                .buttonStyle(.bordered)
 
-                PressableKeyButton(
-                    title: "Right Click",
-                    minHeight: 48,
-                    onPress: { ble.sendMouseButtonDown(button: 2) },
-                    onRelease: { ble.sendMouseButtonUp(button: 2) }
-                )
-                .frame(maxWidth: .infinity)
+                Button {
+                    inputText = ""
+                    inputWarning = nil
+                } label: {
+                    Label("Очистити", systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button {
+                    wantsFocus = false
+                    showsFullKeyboard = true
+                } label: {
+                    Label("На весь екран", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .padding(.horizontal)
+            .font(.caption.weight(.semibold))
 
-            Spacer(minLength: 0)
+            if let inputWarning {
+                Label(inputWarning, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Розкладка застосунку має збігатися з розкладкою цільового пристрою.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(.top, 12)
-        .padding(.bottom, 16)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private var controlPadPage: some View {
-        ScrollView {
-            ControlPadPage(ble: ble)
-                .padding(.top, 12)
-                .padding(.bottom, 24)
+    private var trackpadCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Trackpad", systemImage: "rectangle.and.hand.point.up.left")
+                    .font(.headline)
+                Spacer()
+                Text("1 палець — клік · 2 — правий")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            TrackpadView(
+                onMove: { ble.sendMouseMove(dx: $0, dy: $1) },
+                onTap: { fingers in
+                    ble.sendMouseClick(button: fingers >= 2 ? 2 : 1)
+                },
+                onScroll: { ble.sendMouseScroll(dx: $0, dy: $1) },
+                onDragStart: { ble.sendMouseButtonDown(button: 1) },
+                onDragEnd: { ble.sendMouseButtonUp(button: 1) }
+            )
+            .frame(height: 250)
+            .background(
+                LinearGradient(
+                    colors: [Color.accentColor.opacity(0.10), Color(.tertiarySystemGroupedBackground)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08))
+            }
         }
-        .scrollIndicators(.hidden)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var mouseButtons: some View {
+        HStack(spacing: 12) {
+            PressableKeyButton(
+                title: "Ліва кнопка",
+                minHeight: 48,
+                onPress: { ble.sendMouseButtonDown(button: 1) },
+                onRelease: { ble.sendMouseButtonUp(button: 1) }
+            )
+            .frame(maxWidth: .infinity)
+
+            PressableKeyButton(
+                title: "Права кнопка",
+                minHeight: 48,
+                onPress: { ble.sendMouseButtonDown(button: 2) },
+                onRelease: { ble.sendMouseButtonUp(button: 2) }
+            )
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var settingsView: some View {
+        NavigationStack {
+            Form {
+                Section("Перемикання розкладки на комп’ютері") {
+                    Picker("Комбінація", selection: shortcutBinding) {
+                        ForEach(HostLayoutShortcut.allCases) { shortcut in
+                            Text(shortcut.displayName).tag(shortcut)
+                        }
+                    }
+                    Text("Коли ти натискаєш EN/UA, застосунок може одночасно надіслати системну комбінацію на комп’ютер.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Bluetooth") {
+                    LabeledContent("Стан", value: ble.statusText)
+                    Button("Перепідключити ESP32") {
+                        ble.reconnectNow()
+                    }
+                }
+
+                Section("Версія") {
+                    LabeledContent("ESP Remote Control", value: "1.1")
+                    Text("Іконка клавіатури: Tabler Icons, MIT License.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Налаштування")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Готово") { showsSettings = false }
+                }
+            }
+        }
+    }
+
+    private var selectedLayout: KeyboardLayout {
+        KeyboardLayout(rawValue: layoutRawValue) ?? .englishUS
+    }
+
+    private var selectedShortcut: HostLayoutShortcut {
+        HostLayoutShortcut(rawValue: shortcutRawValue) ?? .manual
+    }
+
+    private var layoutBinding: Binding<KeyboardLayout> {
+        Binding(
+            get: { selectedLayout },
+            set: { selectLayout($0, synchronizeHost: true) }
+        )
+    }
+
+    private var shortcutBinding: Binding<HostLayoutShortcut> {
+        Binding(
+            get: { selectedShortcut },
+            set: { shortcutRawValue = $0.rawValue }
+        )
+    }
+
+    private func selectLayout(_ layout: KeyboardLayout, synchronizeHost: Bool) {
+        guard layout != selectedLayout else { return }
+        layoutRawValue = layout.rawValue
+        inputText = ""
+        inputWarning = nil
+
+        if synchronizeHost, let command = selectedShortcut.command {
+            ble.sendKeyTap(modifiers: command.modifiers, hidKeycode: command.keycode)
+        }
     }
 
     private func handleReturnKey() {
-        ble.sendKeyTap(modifiers: 0x00, hidKeycode: HID.keyEnter)
-        // Don't clear the field - let user continue typing or clear manually
-        // Clearing would trigger the diff logic and send unwanted backspaces
+        ble.sendKeyTap(modifiers: 0, hidKeycode: HID.keyEnter)
     }
 
     private func handleBackspaceWhenEmpty() {
-        // Send backspace even when field is empty (useful for deleting on remote)
-        ble.sendKeyTap(modifiers: 0x00, hidKeycode: HID.keyBackspace)
+        ble.sendKeyTap(modifiers: 0, hidKeycode: HID.keyBackspace)
     }
 
-    /// Process text changes by computing the diff and sending appropriate HID commands.
     private func handleTextChange(oldText: String, newText: String) {
-        // Handle newlines (shouldn't normally happen in single-line field, but just in case)
-        if newText.contains("\n") || newText.contains("\r") {
+        guard !newText.contains("\n"), !newText.contains("\r") else {
             handleReturnKey()
             return
         }
-        
-        // Find common prefix length
-        let commonPrefixLength = zip(oldText, newText).prefix(while: { $0 == $1 }).count
-        
-        // Characters deleted from old text (after common prefix)
+
+        let commonPrefixLength = zip(oldText, newText).prefix { $0 == $1 }.count
         let deletedCount = oldText.count - commonPrefixLength
-        
-        // Characters inserted in new text (after common prefix)
-        let insertedChars = newText.dropFirst(commonPrefixLength)
-        
+        let insertedCharacters = newText.dropFirst(commonPrefixLength)
         var taps: [(modifiers: UInt8, keycode: UInt8)] = []
-        taps.reserveCapacity(deletedCount + insertedChars.count)
+        var unsupported: [Character] = []
 
-        // Backspaces for deleted characters
-        if deletedCount > 0 {
-            for _ in 0..<deletedCount {
-                taps.append((modifiers: 0x00, keycode: HID.keyBackspace))
-            }
-        }
+        taps.append(contentsOf: repeatElement(
+            (modifiers: UInt8(0), keycode: HID.keyBackspace),
+            count: max(0, deletedCount)
+        ))
 
-        // Key taps for inserted characters
-        for ch in insertedChars {
-            if let cmd = HID.mapCharacterToHID(ch) {
-                taps.append((modifiers: cmd.modifiers, keycode: cmd.keycode))
+        for character in insertedCharacters {
+            if let command = HID.mapCharacterToHID(character, layout: selectedLayout) {
+                taps.append((command.modifiers, command.keycode))
+            } else {
+                unsupported.append(character)
             }
-            // Characters without HID mapping (emoji, non-latin, etc.) are silently skipped
         }
 
         if !taps.isEmpty {
             ble.sendKeyTaps(taps)
         }
-    }
-}
 
-// MARK: - Trackpad View
-
-/// A touch-sensitive area that simulates a trackpad for mouse control.
-struct TrackpadView: UIViewRepresentable {
-    var onMove: (Int8, Int8) -> Void
-    var onTap: (Int) -> Void
-    var onScroll: (Int8, Int8) -> Void
-    var onDragStart: () -> Void = {}
-    var onDragEnd: () -> Void = {}
-
-    func makeUIView(context: Context) -> TrackpadUIView {
-        let view = TrackpadUIView()
-        view.onMove = onMove
-        view.onTap = onTap
-        view.onScroll = onScroll
-        view.onDragStart = onDragStart
-        view.onDragEnd = onDragEnd
-        return view
-    }
-
-    func updateUIView(_ uiView: TrackpadUIView, context: Context) {
-        uiView.onMove = onMove
-        uiView.onTap = onTap
-        uiView.onScroll = onScroll
-        uiView.onDragStart = onDragStart
-        uiView.onDragEnd = onDragEnd
-    }
-}
-
-final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
-    var onMove: ((Int8, Int8) -> Void)?
-    var onTap: ((Int) -> Void)?
-    var onScroll: ((Int8, Int8) -> Void)?
-    var onDragStart: (() -> Void)?
-    var onDragEnd: (() -> Void)?
-
-    // Sensitivity multiplier for mouse movement
-    private let sensitivity: CGFloat = 1.5
-    // Scroll sensitivity (lower = more sensitive)
-    private let scrollSensitivity: CGFloat = 0.3
-
-    private var panGesture: UIPanGestureRecognizer!
-    private var tapGesture: UITapGestureRecognizer!
-    private var twoFingerTapGesture: UITapGestureRecognizer!
-    private var twoFingerPanGesture: UIPanGestureRecognizer!
-    private var longPressGesture: UILongPressGestureRecognizer!
-
-    private var lastPanLocation: CGPoint = .zero
-    private var isDragging: Bool = false
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isMultipleTouchEnabled = true
-        backgroundColor = .clear
-        setupGestures()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    private func setupGestures() {
-        // Long press for drag initiation (must be added first so it can be required to fail by tap)
-        longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-        longPressGesture.minimumPressDuration = 0.25
-        longPressGesture.delegate = self
-        addGestureRecognizer(longPressGesture)
-
-        // Single finger pan for mouse movement
-        panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        panGesture.maximumNumberOfTouches = 1
-        panGesture.delegate = self
-        panGesture.require(toFail: longPressGesture) // Don't start pan if long press might happen
-        addGestureRecognizer(panGesture)
-
-        // Single tap for left click
-        tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        tapGesture.numberOfTapsRequired = 1
-        tapGesture.numberOfTouchesRequired = 1
-        tapGesture.delegate = self
-        addGestureRecognizer(tapGesture)
-
-        // Two finger tap for right click
-        twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
-        twoFingerTapGesture.numberOfTapsRequired = 1
-        twoFingerTapGesture.numberOfTouchesRequired = 2
-        twoFingerTapGesture.delegate = self
-        addGestureRecognizer(twoFingerTapGesture)
-
-        // Two finger pan for scrolling
-        twoFingerPanGesture = UIPanGestureRecognizer(target: self, action: #selector(handleTwoFingerPan))
-        twoFingerPanGesture.minimumNumberOfTouches = 2
-        twoFingerPanGesture.maximumNumberOfTouches = 2
-        twoFingerPanGesture.delegate = self
-        addGestureRecognizer(twoFingerPanGesture)
-    }
-
-    // MARK: - Gesture Handlers
-
-    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        switch gesture.state {
-        case .began:
-            lastPanLocation = gesture.location(in: self)
-        case .changed:
-            let location = gesture.location(in: self)
-            let deltaX = location.x - lastPanLocation.x
-            let deltaY = location.y - lastPanLocation.y
-
-            let clampedX = Int8(clamping: Int(deltaX * sensitivity))
-            let clampedY = Int8(clamping: Int(deltaY * sensitivity))
-
-            if clampedX != 0 || clampedY != 0 {
-                onMove?(clampedX, clampedY)
-            }
-            lastPanLocation = location
-        default:
-            break
-        }
-    }
-
-    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        if gesture.state == .ended {
-            onTap?(1)
-        }
-    }
-
-    @objc private func handleTwoFingerTap(_ gesture: UITapGestureRecognizer) {
-        if gesture.state == .ended {
-            onTap?(2)
-        }
-    }
-
-    @objc private func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
-        switch gesture.state {
-        case .began:
-            lastPanLocation = gesture.location(in: self)
-        case .changed:
-            let location = gesture.location(in: self)
-            let deltaX = location.x - lastPanLocation.x
-            let deltaY = location.y - lastPanLocation.y
-
-            let scrollX = Int8(clamping: Int(deltaX * scrollSensitivity))
-            let scrollY = Int8(clamping: Int(-deltaY * scrollSensitivity)) // Invert for natural scrolling
-
-            if scrollX != 0 || scrollY != 0 {
-                onScroll?(scrollX, scrollY)
-            }
-            lastPanLocation = location
-        default:
-            break
-        }
-    }
-
-    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        switch gesture.state {
-        case .began:
-            isDragging = true
-            lastPanLocation = gesture.location(in: self)
-            onDragStart?()
-        case .changed:
-            let location = gesture.location(in: self)
-            let deltaX = location.x - lastPanLocation.x
-            let deltaY = location.y - lastPanLocation.y
-
-            let clampedX = Int8(clamping: Int(deltaX * sensitivity))
-            let clampedY = Int8(clamping: Int(deltaY * sensitivity))
-
-            if clampedX != 0 || clampedY != 0 {
-                onMove?(clampedX, clampedY)
-            }
-            lastPanLocation = location
-        case .ended, .cancelled:
-            if isDragging {
-                onDragEnd?()
-                isDragging = false
-            }
-        default:
-            break
-        }
-    }
-
-    // MARK: - UIGestureRecognizerDelegate
-
-    // This is key: our gestures should be required to fail before parent gestures (like TabView's scroll) can begin
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // If the other recognizer is not one of ours, require our gesture to fail first
-        if otherGestureRecognizer.view !== self {
-            return true
-        }
-        return false
-    }
-
-    // Allow our tap gestures to work alongside pan (so you can tap without waiting for pan to fail)
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Allow simultaneous recognition only between our own gestures
-        return otherGestureRecognizer.view === self
-    }
-
-    // Ensure our gestures always begin when touch is in our bounds
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        return bounds.contains(touch.location(in: self))
-    }
-}
-
-// Helper for clamping Int to Int8 range
-private extension Int8 {
-    init(clamping value: Int) {
-        if value > Int(Int8.max) {
-            self = Int8.max
-        } else if value < Int(Int8.min) {
-            self = Int8.min
+        if unsupported.isEmpty {
+            inputWarning = nil
         } else {
-            self = Int8(value)
+            let sample = String(unsupported.prefix(6))
+            inputWarning = "Немає HID-клавіш для: \(sample)"
         }
+    }
+
+    private func pasteClipboard() {
+        guard let clipboardText = UIPasteboard.general.string, !clipboardText.isEmpty else {
+            inputWarning = "Буфер обміну порожній"
+            return
+        }
+        let oldText = inputText
+        let newText = oldText + clipboardText
+        inputText = newText
+        handleTextChange(oldText: oldText, newText: newText)
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme == "espremote", url.host == "send",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let text = components.queryItems?.first(where: { $0.name == "text" })?.value,
+              !text.isEmpty else {
+            return
+        }
+
+        selectedTab = 0
+        let oldText = inputText
+        let newText = oldText + text
+        inputText = newText
+        handleTextChange(oldText: oldText, newText: newText)
     }
 }
 

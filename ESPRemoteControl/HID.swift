@@ -1,30 +1,80 @@
-//
-//  HID.swift
-//  ESPRemoteControl
-//
-//  Created by Ruben Kostandyan on 14/12/2025.
-//
-
 import Foundation
 
-struct HIDCommand {
+struct HIDCommand: Equatable {
     let modifiers: UInt8
     let keycode: UInt8
 }
 
-/// Comprehensive USB HID Usage ID mapping for standard US keyboard layout.
+enum KeyboardLayout: String, CaseIterable, Identifiable {
+    case englishUS
+    case ukrainianEnhanced
+
+    var id: String { rawValue }
+
+    var shortName: String {
+        switch self {
+        case .englishUS: "EN"
+        case .ukrainianEnhanced: "UA"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .englishUS: "English (US)"
+        case .ukrainianEnhanced: "Українська"
+        }
+    }
+
+    var letterRows: [[Character]] {
+        switch self {
+        case .englishUS:
+            [Array("qwertyuiop"), Array("asdfghjkl"), Array("zxcvbnm")]
+        case .ukrainianEnhanced:
+            [Array("йцукенгшщзхї"), Array("фівапролджє"), Array("ячсмитьбю")]
+        }
+    }
+}
+
+enum HostLayoutShortcut: String, CaseIterable, Identifiable {
+    case manual
+    case superSpace
+    case controlSpace
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .manual: "Не перемикати"
+        case .superSpace: "Super/Win + Space"
+        case .controlSpace: "Control + Space"
+        }
+    }
+
+    var command: HIDCommand? {
+        switch self {
+        case .manual:
+            nil
+        case .superSpace:
+            HIDCommand(modifiers: HID.modLeftGUI, keycode: HID.keySpace)
+        case .controlSpace:
+            HIDCommand(modifiers: HID.modLeftCtrl, keycode: HID.keySpace)
+        }
+    }
+}
+
+/// USB HID Usage IDs and character mappings for physical US and Ukrainian
+/// Enhanced layouts. HID transports key positions, not Unicode characters,
+/// so the selected layout must match the target computer.
 enum HID {
-    // Modifiers bitmask (standard HID)
-    static let modLeftCtrl: UInt8  = 0x01
+    static let modLeftCtrl: UInt8 = 0x01
     static let modLeftShift: UInt8 = 0x02
-    static let modLeftAlt: UInt8   = 0x04
-    static let modLeftGUI: UInt8   = 0x08
+    static let modLeftAlt: UInt8 = 0x04
+    static let modLeftGUI: UInt8 = 0x08
     static let modRightCtrl: UInt8 = 0x10
     static let modRightShift: UInt8 = 0x20
-    static let modRightAlt: UInt8  = 0x40
-    static let modRightGUI: UInt8  = 0x80
+    static let modRightAlt: UInt8 = 0x40
+    static let modRightGUI: UInt8 = 0x80
 
-    // Keycodes (USB HID Usage IDs)
     static let keyA: UInt8 = 0x04
     static let keyB: UInt8 = 0x05
     static let keyC: UInt8 = 0x06
@@ -68,17 +118,17 @@ enum HID {
     static let keyBackspace: UInt8 = 0x2A
     static let keyTab: UInt8 = 0x2B
     static let keySpace: UInt8 = 0x2C
-    static let keyMinus: UInt8 = 0x2D          // - and _
-    static let keyEqual: UInt8 = 0x2E          // = and +
-    static let keyLeftBracket: UInt8 = 0x2F    // [ and {
-    static let keyRightBracket: UInt8 = 0x30   // ] and }
-    static let keyBackslash: UInt8 = 0x31      // \ and |
-    static let keySemicolon: UInt8 = 0x33      // ; and :
-    static let keyQuote: UInt8 = 0x34          // ' and "
-    static let keyGrave: UInt8 = 0x35          // ` and ~
-    static let keyComma: UInt8 = 0x36          // , and <
-    static let keyPeriod: UInt8 = 0x37         // . and >
-    static let keySlash: UInt8 = 0x38          // / and ?
+    static let keyMinus: UInt8 = 0x2D
+    static let keyEqual: UInt8 = 0x2E
+    static let keyLeftBracket: UInt8 = 0x2F
+    static let keyRightBracket: UInt8 = 0x30
+    static let keyBackslash: UInt8 = 0x31
+    static let keySemicolon: UInt8 = 0x33
+    static let keyQuote: UInt8 = 0x34
+    static let keyGrave: UInt8 = 0x35
+    static let keyComma: UInt8 = 0x36
+    static let keyPeriod: UInt8 = 0x37
+    static let keySlash: UInt8 = 0x38
 
     static let keyCapsLock: UInt8 = 0x39
     static let keyF1: UInt8 = 0x3A
@@ -108,78 +158,100 @@ enum HID {
     static let keyDownArrow: UInt8 = 0x51
     static let keyUpArrow: UInt8 = 0x52
 
-    // Character to HID mapping dictionary for fast lookup
-    private static let charMap: [Character: HIDCommand] = {
-        var map = [Character: HIDCommand]()
-        
-        // Lowercase letters
-        for (i, c) in "abcdefghijklmnopqrstuvwxyz".enumerated() {
-            map[c] = HIDCommand(modifiers: 0x00, keycode: UInt8(0x04 + i))
-        }
-        
-        // Uppercase letters
-        for (i, c) in "ABCDEFGHIJKLMNOPQRSTUVWXYZ".enumerated() {
-            map[c] = HIDCommand(modifiers: modLeftShift, keycode: UInt8(0x04 + i))
-        }
-        
-        // Digits
-        map["1"] = HIDCommand(modifiers: 0x00, keycode: key1)
-        map["2"] = HIDCommand(modifiers: 0x00, keycode: key2)
-        map["3"] = HIDCommand(modifiers: 0x00, keycode: key3)
-        map["4"] = HIDCommand(modifiers: 0x00, keycode: key4)
-        map["5"] = HIDCommand(modifiers: 0x00, keycode: key5)
-        map["6"] = HIDCommand(modifiers: 0x00, keycode: key6)
-        map["7"] = HIDCommand(modifiers: 0x00, keycode: key7)
-        map["8"] = HIDCommand(modifiers: 0x00, keycode: key8)
-        map["9"] = HIDCommand(modifiers: 0x00, keycode: key9)
-        map["0"] = HIDCommand(modifiers: 0x00, keycode: key0)
-        
-        // Shifted number row: ! @ # $ % ^ & * ( )
-        map["!"] = HIDCommand(modifiers: modLeftShift, keycode: key1)
-        map["@"] = HIDCommand(modifiers: modLeftShift, keycode: key2)
-        map["#"] = HIDCommand(modifiers: modLeftShift, keycode: key3)
-        map["$"] = HIDCommand(modifiers: modLeftShift, keycode: key4)
-        map["%"] = HIDCommand(modifiers: modLeftShift, keycode: key5)
-        map["^"] = HIDCommand(modifiers: modLeftShift, keycode: key6)
-        map["&"] = HIDCommand(modifiers: modLeftShift, keycode: key7)
-        map["*"] = HIDCommand(modifiers: modLeftShift, keycode: key8)
-        map["("] = HIDCommand(modifiers: modLeftShift, keycode: key9)
-        map[")"] = HIDCommand(modifiers: modLeftShift, keycode: key0)
-        
-        // Punctuation (unshifted)
-        map["-"] = HIDCommand(modifiers: 0x00, keycode: keyMinus)
-        map["="] = HIDCommand(modifiers: 0x00, keycode: keyEqual)
-        map["["] = HIDCommand(modifiers: 0x00, keycode: keyLeftBracket)
-        map["]"] = HIDCommand(modifiers: 0x00, keycode: keyRightBracket)
-        map["\\"] = HIDCommand(modifiers: 0x00, keycode: keyBackslash)
-        map[";"] = HIDCommand(modifiers: 0x00, keycode: keySemicolon)
-        map["'"] = HIDCommand(modifiers: 0x00, keycode: keyQuote)
-        map["`"] = HIDCommand(modifiers: 0x00, keycode: keyGrave)
-        map[","] = HIDCommand(modifiers: 0x00, keycode: keyComma)
-        map["."] = HIDCommand(modifiers: 0x00, keycode: keyPeriod)
-        map["/"] = HIDCommand(modifiers: 0x00, keycode: keySlash)
-        
-        // Punctuation (shifted)
-        map["_"] = HIDCommand(modifiers: modLeftShift, keycode: keyMinus)
-        map["+"] = HIDCommand(modifiers: modLeftShift, keycode: keyEqual)
-        map["{"] = HIDCommand(modifiers: modLeftShift, keycode: keyLeftBracket)
-        map["}"] = HIDCommand(modifiers: modLeftShift, keycode: keyRightBracket)
-        map["|"] = HIDCommand(modifiers: modLeftShift, keycode: keyBackslash)
-        map[":"] = HIDCommand(modifiers: modLeftShift, keycode: keySemicolon)
-        map["\""] = HIDCommand(modifiers: modLeftShift, keycode: keyQuote)
-        map["~"] = HIDCommand(modifiers: modLeftShift, keycode: keyGrave)
-        map["<"] = HIDCommand(modifiers: modLeftShift, keycode: keyComma)
-        map[">"] = HIDCommand(modifiers: modLeftShift, keycode: keyPeriod)
-        map["?"] = HIDCommand(modifiers: modLeftShift, keycode: keySlash)
-        
-        // Whitespace
-        map[" "] = HIDCommand(modifiers: 0x00, keycode: keySpace)
-        map["\t"] = HIDCommand(modifiers: 0x00, keycode: keyTab)
-        
-        return map
-    }()
+    private static let englishUSMap = makeEnglishUSMap()
+    private static let ukrainianEnhancedMap = makeUkrainianEnhancedMap()
 
-    static func mapCharacterToHID(_ ch: Character) -> HIDCommand? {
-        return charMap[ch]
+    static func mapCharacterToHID(
+        _ character: Character,
+        layout: KeyboardLayout = .englishUS
+    ) -> HIDCommand? {
+        switch layout {
+        case .englishUS:
+            englishUSMap[character]
+        case .ukrainianEnhanced:
+            ukrainianEnhancedMap[character]
+        }
+    }
+
+    private static func makeEnglishUSMap() -> [Character: HIDCommand] {
+        var map: [Character: HIDCommand] = [:]
+
+        for (index, character) in "abcdefghijklmnopqrstuvwxyz".enumerated() {
+            map[character] = HIDCommand(modifiers: 0, keycode: UInt8(0x04 + index))
+        }
+        for (index, character) in "ABCDEFGHIJKLMNOPQRSTUVWXYZ".enumerated() {
+            map[character] = HIDCommand(modifiers: modLeftShift, keycode: UInt8(0x04 + index))
+        }
+
+        addNumberRow(to: &map)
+        add([
+            ("-", keyMinus), ("=", keyEqual), ("[", keyLeftBracket), ("]", keyRightBracket),
+            ("\\", keyBackslash), (";", keySemicolon), ("'", keyQuote), ("`", keyGrave),
+            (",", keyComma), (".", keyPeriod), ("/", keySlash)
+        ], modifiers: 0, to: &map)
+        add([
+            ("_", keyMinus), ("+", keyEqual), ("{", keyLeftBracket), ("}", keyRightBracket),
+            ("|", keyBackslash), (":", keySemicolon), ("\"", keyQuote), ("~", keyGrave),
+            ("<", keyComma), (">", keyPeriod), ("?", keySlash),
+            ("!", key1), ("@", key2), ("#", key3), ("$", key4), ("%", key5),
+            ("^", key6), ("&", key7), ("*", key8), ("(", key9), (")", key0)
+        ], modifiers: modLeftShift, to: &map)
+        addWhitespace(to: &map)
+        return map
+    }
+
+    private static func makeUkrainianEnhancedMap() -> [Character: HIDCommand] {
+        var map: [Character: HIDCommand] = [:]
+
+        let letters: [(Character, UInt8)] = [
+            ("й", keyQ), ("ц", keyW), ("у", keyE), ("к", keyR), ("е", keyT),
+            ("н", keyY), ("г", keyU), ("ш", keyI), ("щ", keyO), ("з", keyP),
+            ("х", keyLeftBracket), ("ї", keyRightBracket), ("ґ", keyBackslash),
+            ("ф", keyA), ("і", keyS), ("в", keyD), ("а", keyF), ("п", keyG),
+            ("р", keyH), ("о", keyJ), ("л", keyK), ("д", keyL), ("ж", keySemicolon),
+            ("є", keyQuote), ("я", keyZ), ("ч", keyX), ("с", keyC), ("м", keyV),
+            ("и", keyB), ("т", keyN), ("ь", keyM), ("б", keyComma), ("ю", keyPeriod)
+        ]
+
+        for (character, keycode) in letters {
+            map[character] = HIDCommand(modifiers: 0, keycode: keycode)
+            let uppercase = Character(String(character).uppercased())
+            map[uppercase] = HIDCommand(modifiers: modLeftShift, keycode: keycode)
+        }
+
+        addNumberRow(to: &map)
+        add([
+            ("'", keyGrave), ("’", keyGrave), ("-", keyMinus), ("=", keyEqual),
+            (".", keySlash)
+        ], modifiers: 0, to: &map)
+        add([
+            ("_", keyMinus), ("+", keyEqual), (",", keySlash), ("!", key1),
+            ("\"", key2), ("№", key3), (";", key4), ("%", key5), (":", key6),
+            ("?", key7), ("*", key8), ("(", key9), (")", key0)
+        ], modifiers: modLeftShift, to: &map)
+        addWhitespace(to: &map)
+        return map
+    }
+
+    private static func addNumberRow(to map: inout [Character: HIDCommand]) {
+        add([
+            ("1", key1), ("2", key2), ("3", key3), ("4", key4), ("5", key5),
+            ("6", key6), ("7", key7), ("8", key8), ("9", key9), ("0", key0)
+        ], modifiers: 0, to: &map)
+    }
+
+    private static func addWhitespace(to map: inout [Character: HIDCommand]) {
+        map[" "] = HIDCommand(modifiers: 0, keycode: keySpace)
+        map["\t"] = HIDCommand(modifiers: 0, keycode: keyTab)
+    }
+
+    private static func add(
+        _ entries: [(Character, UInt8)],
+        modifiers: UInt8,
+        to map: inout [Character: HIDCommand]
+    ) {
+        for (character, keycode) in entries {
+            map[character] = HIDCommand(modifiers: modifiers, keycode: keycode)
+        }
     }
 }
