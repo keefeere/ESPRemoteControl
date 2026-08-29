@@ -45,8 +45,9 @@ jobs:
           merged_bin="$(find build/esp32-s3-zero -maxdepth 1 -name '*.merged.bin' -print -quit)"
           test -n "$merged_bin"
           cp "$merged_bin" dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin
-          sha256sum dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin \
-            > dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin.sha256
+          cd dist
+          sha256sum ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin \
+            > ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin.sha256
 
       - name: Upload firmware
         uses: actions/upload-artifact@v7
