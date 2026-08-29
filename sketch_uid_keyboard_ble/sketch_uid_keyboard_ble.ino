@@ -10,6 +10,7 @@
 
 // ---- USB HID Keyboard & Mouse (Arduino-ESP32 core) ----
 #include "USB.h"
+#include "USBHID.h"
 #include "USBHIDKeyboard.h"
 #include "USBHIDMouse.h"
 
@@ -52,14 +53,24 @@ static const uint8_t V2_MOUSE_UP = 0x14;      // payload: [button]
 // =====================
 USBHIDKeyboard Keyboard;
 USBHIDMouse Mouse;
+USBHID HidProbe;
 
 // A warm reboot of some hosts leaves ESP32-S3 TinyUSB mounted but unable to
 // deliver HID reports in pre-OS screens. A hardware reset recovers it, so do
-// the same in software after a previously mounted USB host disappears.
+// the same in software after a previously mounted USB host disappears or
+// stops completing HID IN transfers.
 static constexpr uint32_t kUsbRestartDelayMs = 250;
+static constexpr uint32_t kHidProbeIntervalMs = 500;
+static constexpr uint32_t kHidProbeTimeoutMs = 150;
+static constexpr uint32_t kHidProbeQuietPeriodMs = 250;
+static constexpr uint8_t kHidProbeFailureLimit = 2;
 static volatile bool gUsbWasMounted = false;
+static volatile bool gUsbMounted = false;
+static volatile bool gUsbSuspended = false;
 static volatile bool gUsbRestartRequested = false;
 static volatile uint32_t gUsbStoppedAtMs = 0;
+static volatile uint32_t gLastBleCommandAtMs = 0;
+static volatile uint8_t gHidProbeFailures = 0;
 
 static void requestUsbRecovery() {
   if (gUsbRestartRequested) return;
@@ -78,14 +89,30 @@ static void usbEventCallback(
   switch (eventId) {
     case ARDUINO_USB_STARTED_EVENT:
       gUsbWasMounted = true;
+      gUsbMounted = true;
+      gUsbSuspended = false;
+      gHidProbeFailures = 0;
       Serial.println("USB mounted.");
       break;
 
     case ARDUINO_USB_STOPPED_EVENT:
+      gUsbMounted = false;
+      gUsbSuspended = false;
       Serial.println("USB unmounted.");
       if (gUsbWasMounted) {
         requestUsbRecovery();
       }
+      break;
+
+    case ARDUINO_USB_SUSPEND_EVENT:
+      gUsbSuspended = true;
+      Serial.println("USB suspended.");
+      break;
+
+    case ARDUINO_USB_RESUME_EVENT:
+      gUsbSuspended = false;
+      gHidProbeFailures = 0;
+      Serial.println("USB resumed.");
       break;
 
     default:
@@ -95,6 +122,24 @@ static void usbEventCallback(
 
 static uint8_t gModifiersMask = 0x00;
 static bool gKeysDown[256] = { false };
+
+static bool keyboardIsIdle() {
+  if (gModifiersMask != 0) return false;
+
+  for (bool keyDown : gKeysDown) {
+    if (keyDown) return false;
+  }
+  return true;
+}
+
+static bool sendHidProbe() {
+  hid_keyboard_report_t report = {};
+  return HidProbe.SendReport(
+    HID_REPORT_ID_KEYBOARD,
+    &report,
+    sizeof(report),
+    kHidProbeTimeoutMs);
+}
 
 static void setModifiers(uint8_t newMask) {
   uint8_t diff = gModifiersMask ^ newMask;
@@ -204,6 +249,8 @@ NimBLECharacteristic* pWriteChar = nullptr;
 
 class WriteCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    gLastBleCommandAtMs = millis();
+
     std::string v = pCharacteristic->getValue();
     if (v.size() < 3) return;
 
@@ -339,6 +386,7 @@ static void setupUsbHid() {
   USB.onEvent(usbEventCallback);
   Keyboard.begin();
   Mouse.begin();
+  HidProbe.begin();
   USB.begin();
 
   Serial.println("USB HID Keyboard & Mouse started.");
@@ -355,6 +403,31 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t lastHidProbeAtMs = 0;
+
+  if (!gUsbRestartRequested
+      && gUsbMounted
+      && !gUsbSuspended
+      && keyboardIsIdle()
+      && (uint32_t)(millis() - gLastBleCommandAtMs) >= kHidProbeQuietPeriodMs
+      && (uint32_t)(millis() - lastHidProbeAtMs) >= kHidProbeIntervalMs) {
+    lastHidProbeAtMs = millis();
+
+    if (sendHidProbe()) {
+      gHidProbeFailures = 0;
+    } else {
+      ++gHidProbeFailures;
+      Serial.printf(
+        "HID probe failed (%u/%u).\n",
+        (unsigned)gHidProbeFailures,
+        (unsigned)kHidProbeFailureLimit);
+
+      if (gHidProbeFailures >= kHidProbeFailureLimit) {
+        requestUsbRecovery();
+      }
+    }
+  }
+
   if (gUsbRestartRequested
       && (uint32_t)(millis() - gUsbStoppedAtMs) >= kUsbRestartDelayMs) {
     Serial.println("Restarting ESP32-S3 to recover USB HID...");
