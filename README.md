@@ -23,6 +23,7 @@ Unlike software solutions that require network setup or specific operating syste
 - **Zero configuration** - No drivers, no network setup, just plug and play
 - **Low latency** - Direct Bluetooth LE connection for responsive input
 - **Reliable reconnect** - Remembers the last ESP32 and reconnects with backoff
+- **Warm-reboot recovery** - Recovers a stalled USB HID endpoint when a host reboots without removing USB power
 - **Optional privacy mask** - Keep the typing composer visible or mask it when entering passwords
 - **Hardware key hold** - Every on-screen key sends real HID key-down/key-up events, including multi-finger chords; modifiers can also be tapped to latch
 
@@ -33,6 +34,7 @@ Unlike software solutions that require network setup or specific operating syste
 - USB-C cable to connect ESP32 to target computer
 
 Popular ESP32-S3 boards that work:
+- Waveshare ESP32-S3-Zero
 - ESP32-S3-DevKitC-1
 - Adafruit QT Py ESP32-S3
 - Seeed Studio XIAO ESP32S3
@@ -50,6 +52,22 @@ Popular ESP32-S3 boards that work:
 4. Open `sketch_uid_keyboard_ble/sketch_uid_keyboard_ble.ino`
 5. Select your ESP32-S3 board and set `Tools > USB Mode > USB-OTG (TinyUSB)`
 6. Upload the sketch
+
+For the Waveshare ESP32-S3-Zero, the `Build ESP32-S3 firmware` GitHub Actions
+workflow also produces a complete 4 MB merged image and its SHA-256 checksum.
+Flash the downloaded image from the ROM bootloader with:
+
+```bash
+esptool \
+  --chip esp32s3 \
+  --port /dev/ttyACM0 \
+  --before no-reset \
+  --after no-reset \
+  write-flash 0x0 ESPRemoteControl-ESP32-S3-Zero.bin
+```
+
+Press RESET after flashing. The serial device number can change after USB
+re-enumeration, so verify the port before writing.
 
 ### 2. Install the iOS App
 
@@ -129,6 +147,7 @@ The ESP32 acts as both a Bluetooth peripheral (receiving from iPhone) and USB HI
 - **Protocol**: Batched TLV command frames over Bluetooth LE, with compatibility for the original 3-byte protocol
 - **Battery**: ESP32 powered by target computer via USB
 - **Compatibility**: Works with any OS that supports USB HID (Windows, macOS, Linux, etc.)
+- **USB recovery**: Idle keyboard reports act as a health check; two consecutive transfer timeouts restart the ESP32-S3 so keyboard and mouse remain available across a host warm reboot. Verified on ASUS ROG Xbox Ally X, including pre-OS input.
 
 ## Project Structure
 
@@ -166,6 +185,10 @@ ESPRemoteControl/
 - Move iPhone closer to ESP32
 - Check for Bluetooth interference from other devices
 - Restart both devices
+
+**Keyboard or mouse stops working after a host reboot:**
+- Use a current firmware build; it includes automatic recovery for stalled USB HID transfers
+- If recovery still fails, press the ESP32 RESET button once and report the host model and firmware build
 
 ## Contributing
 

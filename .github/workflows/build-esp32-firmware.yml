@@ -44,17 +44,17 @@ jobs:
 
           merged_bin="$(find build/esp32-s3-zero -maxdepth 1 -name '*.merged.bin' -print -quit)"
           test -n "$merged_bin"
-          cp "$merged_bin" dist/ESPRemoteControl-ESP32-S3-Zero-hid-watchdog-v2.bin
+          cp "$merged_bin" dist/ESPRemoteControl-ESP32-S3-Zero.bin
           cd dist
-          sha256sum ESPRemoteControl-ESP32-S3-Zero-hid-watchdog-v2.bin \
-            > ESPRemoteControl-ESP32-S3-Zero-hid-watchdog-v2.bin.sha256
+          sha256sum ESPRemoteControl-ESP32-S3-Zero.bin \
+            > ESPRemoteControl-ESP32-S3-Zero.bin.sha256
 
       - name: Upload firmware
         uses: actions/upload-artifact@v7
         with:
-          name: ESPRemoteControl-ESP32-S3-Zero-hid-watchdog-v2
+          name: ESPRemoteControl-ESP32-S3-Zero-firmware
           path: |
-            dist/ESPRemoteControl-ESP32-S3-Zero-hid-watchdog-v2.bin
-            dist/ESPRemoteControl-ESP32-S3-Zero-hid-watchdog-v2.bin.sha256
+            dist/ESPRemoteControl-ESP32-S3-Zero.bin
+            dist/ESPRemoteControl-ESP32-S3-Zero.bin.sha256
           if-no-files-found: error
           retention-days: 30
