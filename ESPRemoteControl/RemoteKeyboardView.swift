@@ -17,11 +17,13 @@ struct RemoteKeyboardView: View {
     @State private var usedMomentaryModifiers: UInt8 = 0
     @State private var modifierPressStartedAt: [UInt8: TimeInterval] = [:]
     @State private var pressedKeycodes: Set<UInt8> = []
+    @AppStorage("keyboardLandscapeLock") private var landscapeLocked = false
 
     private var effectiveModifiers: UInt8 { stickyModifiers | momentaryModifiers }
     private var shiftIsActive: Bool { effectiveModifiers & HID.modLeftShift != 0 }
     private var uppercaseLetters: Bool { shiftIsActive != capsLock }
     private let keySpacing: CGFloat = 3
+    private let cursorClusterGap: CGFloat = 8
 
     var body: some View {
         GeometryReader { geometry in
@@ -51,10 +53,10 @@ struct RemoteKeyboardView: View {
                     functionRow(
                         labels: ["Esc"]
                             + (1...12).map { "F\($0)" }
-                            + ["Home", "End", "Del"],
+                            + ["Ins", "Home", "End", "Del"],
                         keycodes: [HID.keyEscape]
                             + functionKeys
-                            + [HID.keyHome, HID.keyEnd, HID.keyDelete],
+                            + [HID.keyInsert, HID.keyHome, HID.keyEnd, HID.keyDelete],
                         height: keyHeight
                     )
                 } else {
@@ -66,9 +68,9 @@ struct RemoteKeyboardView: View {
                         height: keyHeight
                     )
                     functionRow(
-                        labels: ["F7", "F8", "F9", "F10", "F11", "F12", "Del", "End"],
+                        labels: ["F7", "F8", "F9", "F10", "F11", "F12", "Ins", "Del", "End"],
                         keycodes: Array(functionKeys.suffix(6))
-                            + [HID.keyDelete, HID.keyEnd],
+                            + [HID.keyInsert, HID.keyDelete, HID.keyEnd],
                         height: keyHeight
                     )
                 }
@@ -95,6 +97,12 @@ struct RemoteKeyboardView: View {
             .padding(.vertical, 5)
         }
         .background(Color(.systemGroupedBackground))
+        .onAppear {
+            AppOrientationLock.setLandscapeLocked(landscapeLocked)
+        }
+        .onChange(of: landscapeLocked) { _, isLocked in
+            AppOrientationLock.setLandscapeLocked(isLocked)
+        }
         .onDisappear(perform: releaseAllInput)
     }
 
@@ -108,32 +116,41 @@ struct RemoteKeyboardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Text(layout.shortName)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.accentColor)
-                .clipShape(Capsule())
-                .contentShape(Capsule())
-                .onTapGesture {
-                    changeLayout(synchronizeHost: true)
-                }
-                .onLongPressGesture(minimumDuration: 0.55) {
-                    changeLayout(synchronizeHost: false)
-                }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("Розкладка \(layout.shortName)")
-                .accessibilityHint("Натисни для синхронного перемикання; утримуй, щоб змінити лише на телефоні")
-                .accessibilityAction {
-                    changeLayout(synchronizeHost: true)
-                }
+            orientationLockButton
         }
         .padding(.horizontal, 4)
     }
 
+    private var orientationLockButton: some View {
+        Button {
+            landscapeLocked.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "rectangle.landscape")
+                Image(systemName: landscapeLocked ? "lock.fill" : "lock.open")
+            }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(landscapeLocked ? Color.white : Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                landscapeLocked
+                    ? Color.accentColor
+                    : Color.accentColor.opacity(0.16)
+            )
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            landscapeLocked
+                ? "Вимкнути фіксацію горизонтальної орієнтації"
+                : "Зафіксувати горизонтальну орієнтацію"
+        )
+    }
+
     private func functionRow(labels: [String], keycodes: [UInt8], height: CGFloat) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: keySpacing) {
             ForEach(Array(labels.enumerated()), id: \.offset) { index, label in
                 actionKey(
                     label,
@@ -226,13 +243,10 @@ struct RemoteKeyboardView: View {
 
     private func shiftRow(height: CGFloat, availableWidth: CGFloat) -> some View {
         let keys = bottomTypingKeys
-        let commandWidths = resolvedWidths(
-            weights: commandRowWeights,
-            availableWidth: availableWidth
-        )
+        let commandWidths = commandRowWidths(availableWidth: availableWidth)
         let arrowWidths = Array(commandWidths.suffix(3))
         let arrowClusterWidth = arrowWidths[1] + arrowWidths[2] + keySpacing
-        let typingWidth = availableWidth - arrowClusterWidth - keySpacing
+        let typingWidth = availableWidth - arrowClusterWidth - cursorClusterGap
         let typingWeights = [CGFloat(1.55)]
             + Array(repeating: CGFloat(1), count: keys.count)
         let typingWidths = resolvedWidths(
@@ -240,22 +254,25 @@ struct RemoteKeyboardView: View {
             availableWidth: typingWidth
         )
 
-        return HStack(spacing: keySpacing) {
-            modifierKey(
-                "Shift",
-                mask: HID.modLeftShift,
-                width: typingWidths[0],
-                height: height
-            )
-
-            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
-                characterKey(
-                    key.character,
-                    usesCase: key.usesCase,
-                    width: typingWidths[index + 1],
+        return HStack(spacing: cursorClusterGap) {
+            HStack(spacing: keySpacing) {
+                modifierKey(
+                    "Shift",
+                    mask: HID.modLeftShift,
+                    width: typingWidths[0],
                     height: height
                 )
+
+                ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+                    characterKey(
+                        key.character,
+                        usesCase: key.usesCase,
+                        width: typingWidths[index + 1],
+                        height: height
+                    )
+                }
             }
+            .frame(width: typingWidth, height: height)
 
             HStack(spacing: keySpacing) {
                 actionKey(
@@ -273,20 +290,26 @@ struct RemoteKeyboardView: View {
     }
 
     private func commandRow(height: CGFloat, availableWidth: CGFloat) -> some View {
-        let widths = resolvedWidths(
-            weights: commandRowWeights,
-            availableWidth: availableWidth
-        )
+        let widths = commandRowWidths(availableWidth: availableWidth)
+        let primaryWidth = widths.prefix(5).reduce(0, +) + (keySpacing * 4)
+        let arrowClusterWidth = widths.suffix(3).reduce(0, +) + (keySpacing * 2)
 
-        return HStack(spacing: keySpacing) {
-            layoutKey(width: widths[0], height: height)
-            modifierKey("Ctrl", mask: HID.modLeftCtrl, width: widths[1], height: height)
-            modifierKey("Win", mask: HID.modLeftGUI, width: widths[2], height: height)
-            modifierKey("Alt", mask: HID.modLeftAlt, width: widths[3], height: height)
-            actionKey("Space", keycode: HID.keySpace, width: widths[4], height: height)
-            actionKey("←", keycode: HID.keyLeftArrow, width: widths[5], height: height)
-            actionKey("↓", keycode: HID.keyDownArrow, width: widths[6], height: height)
-            actionKey("→", keycode: HID.keyRightArrow, width: widths[7], height: height)
+        return HStack(spacing: cursorClusterGap) {
+            HStack(spacing: keySpacing) {
+                layoutKey(width: widths[0], height: height)
+                modifierKey("Ctrl", mask: HID.modLeftCtrl, width: widths[1], height: height)
+                modifierKey("Win", mask: HID.modLeftGUI, width: widths[2], height: height)
+                modifierKey("Alt", mask: HID.modLeftAlt, width: widths[3], height: height)
+                actionKey("Space", keycode: HID.keySpace, width: widths[4], height: height)
+            }
+            .frame(width: primaryWidth, height: height)
+
+            HStack(spacing: keySpacing) {
+                actionKey("←", keycode: HID.keyLeftArrow, width: widths[5], height: height)
+                actionKey("↓", keycode: HID.keyDownArrow, width: widths[6], height: height)
+                actionKey("→", keycode: HID.keyRightArrow, width: widths[7], height: height)
+            }
+            .frame(width: arrowClusterWidth, height: height)
         }
     }
 
@@ -486,7 +509,7 @@ struct RemoteKeyboardView: View {
     }
 
     private var commandRowWeights: [CGFloat] {
-        [1.35, 1, 1, 1, 3.2, 1, 1, 1]
+        [1.35, 1, 1, 1, 3.2, 0.8, 0.8, 0.8]
     }
 
     private var topTypingKeys: [TypingKey] {
@@ -544,6 +567,18 @@ struct RemoteKeyboardView: View {
 
         let trailing = shiftIsActive ? Array("_+") : Array("-=")
         return [leading] + numbers + trailing
+    }
+
+    private func commandRowWidths(availableWidth: CGFloat) -> [CGFloat] {
+        let internalGapCount = commandRowWeights.count - 2
+        let contentWidth = max(
+            0,
+            availableWidth
+                - (keySpacing * CGFloat(internalGapCount))
+                - cursorClusterGap
+        )
+        let totalWeight = commandRowWeights.reduce(0, +)
+        return commandRowWeights.map { contentWidth * ($0 / totalWeight) }
     }
 
     private func resolvedWidths(
