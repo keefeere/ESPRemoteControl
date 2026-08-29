@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 
+private struct TypingKey {
+    let character: Character
+    let usesCase: Bool
+}
+
 struct RemoteKeyboardView: View {
     @ObservedObject var ble: BLEKeyboardBridge
     @Binding var layout: KeyboardLayout
@@ -16,55 +21,69 @@ struct RemoteKeyboardView: View {
     private var effectiveModifiers: UInt8 { stickyModifiers | momentaryModifiers }
     private var shiftIsActive: Bool { effectiveModifiers & HID.modLeftShift != 0 }
     private var uppercaseLetters: Bool { shiftIsActive != capsLock }
+    private let keySpacing: CGFloat = 3
 
     var body: some View {
         GeometryReader { geometry in
+            let usesWideLayout = geometry.size.width >= 600
+            let showsTrackpad = geometry.size.height > geometry.size.width
+            let keyboardRowCount = usesWideLayout ? 6 : 7
             let spacing = geometry.size.height < 600 ? CGFloat(3) : CGFloat(5)
+            let statusHeight = usesWideLayout ? CGFloat(32) : CGFloat(38)
             let keyHeight = max(
                 27,
-                min(46, (geometry.size.height - 66 - (spacing * 8)) / 8)
+                min(
+                    usesWideLayout ? 46 : 48,
+                    (geometry.size.height
+                        - statusHeight
+                        - 12
+                        - (spacing * CGFloat(keyboardRowCount + 1)))
+                        / CGFloat(keyboardRowCount)
+                )
             )
+            let availableWidth = geometry.size.width - 12
 
             VStack(spacing: spacing) {
                 connectionStatus
-                    .frame(height: 38)
+                    .frame(height: statusHeight)
 
-                functionRow(
-                    labels: ["Esc", "F1", "F2", "F3", "F4", "F5", "F6"],
-                    keycodes: [HID.keyEscape] + Array(functionKeys.prefix(6)),
-                    height: keyHeight
-                )
-                functionRow(
-                    labels: ["F7", "F8", "F9", "F10", "F11", "F12", "Del"],
-                    keycodes: Array(functionKeys.suffix(6)) + [HID.keyDelete],
-                    height: keyHeight
-                )
-                numberRow(height: keyHeight)
-
-                ForEach(Array(layout.letterRows.enumerated()), id: \.offset) { rowIndex, row in
-                    HStack(spacing: 3) {
-                        if rowIndex == 2 {
-                            modifierKey("⇧", mask: HID.modLeftShift, height: keyHeight)
-                        }
-
-                        ForEach(Array(row.enumerated()), id: \.offset) { _, character in
-                            characterKey(character, height: keyHeight)
-                        }
-
-                        if rowIndex == 2 {
-                            actionKey(
-                                "⌫",
-                                keycode: HID.keyBackspace,
-                                height: keyHeight
-                            )
-                        }
-                    }
+                if usesWideLayout {
+                    functionRow(
+                        labels: ["Esc"]
+                            + (1...12).map { "F\($0)" }
+                            + ["Home", "End", "Del"],
+                        keycodes: [HID.keyEscape]
+                            + functionKeys
+                            + [HID.keyHome, HID.keyEnd, HID.keyDelete],
+                        height: keyHeight
+                    )
+                } else {
+                    functionRow(
+                        labels: ["Esc", "F1", "F2", "F3", "F4", "F5", "F6", "Home"],
+                        keycodes: [HID.keyEscape]
+                            + Array(functionKeys.prefix(6))
+                            + [HID.keyHome],
+                        height: keyHeight
+                    )
+                    functionRow(
+                        labels: ["F7", "F8", "F9", "F10", "F11", "F12", "Del", "End"],
+                        keycodes: Array(functionKeys.suffix(6))
+                            + [HID.keyDelete, HID.keyEnd],
+                        height: keyHeight
+                    )
                 }
 
-                punctuationRow(height: keyHeight, availableWidth: geometry.size.width - 12)
-                commandRow(height: keyHeight)
+                numberRow(
+                    height: keyHeight,
+                    availableWidth: availableWidth,
+                    includesOuterSymbols: usesWideLayout
+                )
+                tabRow(height: keyHeight, availableWidth: availableWidth)
+                homeRow(height: keyHeight, availableWidth: availableWidth)
+                shiftRow(height: keyHeight, availableWidth: availableWidth)
+                commandRow(height: keyHeight, availableWidth: availableWidth)
 
-                if geometry.size.height > geometry.size.width {
+                if showsTrackpad {
                     keyboardTrackpad
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .frame(minHeight: 72)
@@ -125,45 +144,149 @@ struct RemoteKeyboardView: View {
         }
     }
 
-    private func numberRow(height: CGFloat) -> some View {
-        let values = shiftedNumberCharacters
-        return HStack(spacing: 3) {
-            ForEach(Array(values.enumerated()), id: \.offset) { _, character in
-                characterKey(character, usesCase: false, height: height)
+    private func numberRow(
+        height: CGFloat,
+        availableWidth: CGFloat,
+        includesOuterSymbols: Bool
+    ) -> some View {
+        let values = numberRowCharacters(includesOuterSymbols: includesOuterSymbols)
+        let weights = Array(repeating: CGFloat(1), count: values.count) + [1.8]
+        let widths = resolvedWidths(weights: weights, availableWidth: availableWidth)
+
+        return HStack(spacing: keySpacing) {
+            ForEach(Array(values.enumerated()), id: \.offset) { index, character in
+                characterKey(
+                    character,
+                    usesCase: false,
+                    width: widths[index],
+                    height: height
+                )
+            }
+            actionKey(
+                "⌫",
+                keycode: HID.keyBackspace,
+                width: widths[values.count],
+                height: height
+            )
+        }
+    }
+
+    private func tabRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+        let keys = topTypingKeys
+        let weights = [CGFloat(1.35)] + Array(repeating: CGFloat(1), count: keys.count)
+        let widths = resolvedWidths(weights: weights, availableWidth: availableWidth)
+
+        return HStack(spacing: keySpacing) {
+            actionKey("Tab", keycode: HID.keyTab, width: widths[0], height: height)
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+                characterKey(
+                    key.character,
+                    usesCase: key.usesCase,
+                    width: widths[index + 1],
+                    height: height
+                )
             }
         }
     }
 
-    private func punctuationRow(height: CGFloat, availableWidth: CGFloat) -> some View {
-        let spaceWidth = max(86, availableWidth * 0.30)
-        return HStack(spacing: 3) {
-            ForEach(Array(punctuationCharacters.enumerated()), id: \.offset) { _, character in
-                characterKey(character, usesCase: false, height: height)
-            }
-            actionKey("Space", keycode: HID.keySpace, width: spaceWidth, height: height)
-            actionKey("↵", keycode: HID.keyEnter, height: height)
-        }
-    }
+    private func homeRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+        let keys = homeTypingKeys
+        let weights = [CGFloat(1.45)]
+            + Array(repeating: CGFloat(1), count: keys.count)
+            + [1.9]
+        let widths = resolvedWidths(weights: weights, availableWidth: availableWidth)
 
-    private func commandRow(height: CGFloat) -> some View {
-        HStack(spacing: 3) {
-            modifierKey("Ctrl", mask: HID.modLeftCtrl, height: height)
-            modifierKey("Win", mask: HID.modLeftGUI, height: height)
-            modifierKey("Alt", mask: HID.modLeftAlt, height: height)
+        return HStack(spacing: keySpacing) {
             actionKey(
                 "Caps",
                 keycode: HID.keyCapsLock,
                 active: capsLock,
+                width: widths[0],
                 height: height,
                 onReleased: { capsLock.toggle() }
             )
-            actionKey("Tab", keycode: HID.keyTab, height: height)
-            actionKey("Home", keycode: HID.keyHome, height: height)
-            actionKey("←", keycode: HID.keyLeftArrow, height: height)
-            actionKey("↑", keycode: HID.keyUpArrow, height: height)
-            actionKey("↓", keycode: HID.keyDownArrow, height: height)
-            actionKey("→", keycode: HID.keyRightArrow, height: height)
-            actionKey("End", keycode: HID.keyEnd, height: height)
+
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+                characterKey(
+                    key.character,
+                    usesCase: key.usesCase,
+                    width: widths[index + 1],
+                    height: height
+                )
+            }
+
+            actionKey(
+                "Enter",
+                keycode: HID.keyEnter,
+                width: widths[keys.count + 1],
+                height: height
+            )
+        }
+    }
+
+    private func shiftRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+        let keys = bottomTypingKeys
+        let commandWidths = resolvedWidths(
+            weights: commandRowWeights,
+            availableWidth: availableWidth
+        )
+        let arrowWidths = Array(commandWidths.suffix(3))
+        let arrowClusterWidth = arrowWidths[1] + arrowWidths[2] + keySpacing
+        let typingWidth = availableWidth - arrowClusterWidth - keySpacing
+        let typingWeights = [CGFloat(1.55)]
+            + Array(repeating: CGFloat(1), count: keys.count)
+        let typingWidths = resolvedWidths(
+            weights: typingWeights,
+            availableWidth: typingWidth
+        )
+
+        return HStack(spacing: keySpacing) {
+            modifierKey(
+                "Shift",
+                mask: HID.modLeftShift,
+                width: typingWidths[0],
+                height: height
+            )
+
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+                characterKey(
+                    key.character,
+                    usesCase: key.usesCase,
+                    width: typingWidths[index + 1],
+                    height: height
+                )
+            }
+
+            HStack(spacing: keySpacing) {
+                actionKey(
+                    "↑",
+                    keycode: HID.keyUpArrow,
+                    width: arrowWidths[1],
+                    height: height
+                )
+                Color.clear
+                    .frame(width: arrowWidths[2], height: height)
+                    .accessibilityHidden(true)
+            }
+            .frame(width: arrowClusterWidth, height: height)
+        }
+    }
+
+    private func commandRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+        let widths = resolvedWidths(
+            weights: commandRowWeights,
+            availableWidth: availableWidth
+        )
+
+        return HStack(spacing: keySpacing) {
+            layoutKey(width: widths[0], height: height)
+            modifierKey("Ctrl", mask: HID.modLeftCtrl, width: widths[1], height: height)
+            modifierKey("Win", mask: HID.modLeftGUI, width: widths[2], height: height)
+            modifierKey("Alt", mask: HID.modLeftAlt, width: widths[3], height: height)
+            actionKey("Space", keycode: HID.keySpace, width: widths[4], height: height)
+            actionKey("←", keycode: HID.keyLeftArrow, width: widths[5], height: height)
+            actionKey("↓", keycode: HID.keyDownArrow, width: widths[6], height: height)
+            actionKey("→", keycode: HID.keyRightArrow, width: widths[7], height: height)
         }
     }
 
@@ -205,6 +328,7 @@ struct RemoteKeyboardView: View {
     private func characterKey(
         _ base: Character,
         usesCase: Bool = true,
+        width: CGFloat? = nil,
         height: CGFloat
     ) -> some View {
         let character: Character
@@ -231,7 +355,8 @@ struct RemoteKeyboardView: View {
                 releaseKey(command.keycode)
             }
         )
-        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
+        .frame(maxWidth: width == nil ? .infinity : nil, minHeight: height, maxHeight: height)
+        .frame(width: width)
     }
 
     private func actionKey(
@@ -258,7 +383,24 @@ struct RemoteKeyboardView: View {
         .frame(width: width)
     }
 
-    private func modifierKey(_ title: String, mask: UInt8, height: CGFloat) -> some View {
+    private func layoutKey(width: CGFloat, height: CGFloat) -> some View {
+        PressableKeyButton(
+            title: "UA/EN",
+            isCompact: true,
+            fontSize: height < 34 ? 8 : 10,
+            minHeight: height,
+            onPress: {},
+            onRelease: { changeLayout(synchronizeHost: true) }
+        )
+        .frame(width: width, height: height)
+    }
+
+    private func modifierKey(
+        _ title: String,
+        mask: UInt8,
+        width: CGFloat? = nil,
+        height: CGFloat
+    ) -> some View {
         PressableKeyButton(
             title: title,
             isActive: effectiveModifiers & mask != 0,
@@ -267,7 +409,8 @@ struct RemoteKeyboardView: View {
             onPress: { beginModifierPress(mask) },
             onRelease: { endModifierPress(mask) }
         )
-        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
+        .frame(maxWidth: width == nil ? .infinity : nil, minHeight: height, maxHeight: height)
+        .frame(width: width)
     }
 
     private func beginModifierPress(_ mask: UInt8) {
@@ -342,13 +485,76 @@ struct RemoteKeyboardView: View {
         }
     }
 
-    private var punctuationCharacters: [Character] {
+    private var commandRowWeights: [CGFloat] {
+        [1.35, 1, 1, 1, 3.2, 1, 1, 1]
+    }
+
+    private var topTypingKeys: [TypingKey] {
+        var keys = layout.letterRows[0].map {
+            TypingKey(character: $0, usesCase: true)
+        }
         switch layout {
         case .englishUS:
-            return Array(",./'")
+            let punctuation = shiftIsActive ? Array("{}|") : Array("[]\\")
+            keys += punctuation.map { TypingKey(character: $0, usesCase: false) }
         case .ukrainianEnhanced:
-            return [",", ".", "'", "ґ"]
+            keys.append(TypingKey(character: "ґ", usesCase: true))
         }
+        return keys
+    }
+
+    private var homeTypingKeys: [TypingKey] {
+        var keys = layout.letterRows[1].map {
+            TypingKey(character: $0, usesCase: true)
+        }
+        if layout == .englishUS {
+            let punctuation = shiftIsActive ? Array(":\"") : Array(";'")
+            keys += punctuation.map { TypingKey(character: $0, usesCase: false) }
+        }
+        return keys
+    }
+
+    private var bottomTypingKeys: [TypingKey] {
+        var keys = layout.letterRows[2].map {
+            TypingKey(character: $0, usesCase: true)
+        }
+        switch layout {
+        case .englishUS:
+            let punctuation = shiftIsActive ? Array("<>?") : Array(",./")
+            keys += punctuation.map { TypingKey(character: $0, usesCase: false) }
+        case .ukrainianEnhanced:
+            keys.append(
+                TypingKey(character: shiftIsActive ? "," : ".", usesCase: false)
+            )
+        }
+        return keys
+    }
+
+    private func numberRowCharacters(includesOuterSymbols: Bool) -> [Character] {
+        let numbers = shiftedNumberCharacters
+        guard includesOuterSymbols else { return numbers }
+
+        let leading: Character
+        switch layout {
+        case .englishUS:
+            leading = shiftIsActive ? "~" : "`"
+        case .ukrainianEnhanced:
+            leading = "'"
+        }
+
+        let trailing = shiftIsActive ? Array("_+") : Array("-=")
+        return [leading] + numbers + trailing
+    }
+
+    private func resolvedWidths(
+        weights: [CGFloat],
+        availableWidth: CGFloat
+    ) -> [CGFloat] {
+        guard !weights.isEmpty else { return [] }
+        let gapsWidth = keySpacing * CGFloat(weights.count - 1)
+        let contentWidth = max(0, availableWidth - gapsWidth)
+        let totalWeight = weights.reduce(0, +)
+        return weights.map { contentWidth * ($0 / totalWeight) }
     }
 
     private var functionKeys: [UInt8] {
