@@ -1,0 +1,59 @@
+name: Build ESP32-S3 firmware
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "sketch_uid_keyboard_ble/**"
+      - ".github/workflows/build-esp32-firmware.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: "1.5.1"
+
+      - name: Install ESP32 core and libraries
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+          arduino-cli lib install "NimBLE-Arduino@2.5.1"
+
+      - name: Compile merged flash image
+        run: |
+          mkdir -p build/esp32-s3-zero dist
+          arduino-cli compile \
+            --fqbn esp32:esp32:waveshare_esp32_s3_zero \
+            --board-options USBMode=default,CDCOnBoot=cdc,PSRAM=enabled,FlashMode=qio \
+            --export-binaries \
+            --output-dir build/esp32-s3-zero \
+            sketch_uid_keyboard_ble
+
+          merged_bin="$(find build/esp32-s3-zero -maxdepth 1 -name '*.merged.bin' -print -quit)"
+          test -n "$merged_bin"
+          cp "$merged_bin" dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin
+          sha256sum dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin \
+            > dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin.sha256
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: ESPRemoteControl-ESP32-S3-Zero-usb-recovery
+          path: |
+            dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin
+            dist/ESPRemoteControl-ESP32-S3-Zero-usb-recovery.bin.sha256
+          if-no-files-found: error
+          retention-days: 30

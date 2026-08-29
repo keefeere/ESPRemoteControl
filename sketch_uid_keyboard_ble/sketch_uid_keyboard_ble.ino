@@ -53,6 +53,46 @@ static const uint8_t V2_MOUSE_UP = 0x14;      // payload: [button]
 USBHIDKeyboard Keyboard;
 USBHIDMouse Mouse;
 
+// A warm reboot of some hosts leaves ESP32-S3 TinyUSB mounted but unable to
+// deliver HID reports in pre-OS screens. A hardware reset recovers it, so do
+// the same in software after a previously mounted USB host disappears.
+static constexpr uint32_t kUsbRestartDelayMs = 250;
+static volatile bool gUsbWasMounted = false;
+static volatile bool gUsbRestartRequested = false;
+static volatile uint32_t gUsbStoppedAtMs = 0;
+
+static void requestUsbRecovery() {
+  if (gUsbRestartRequested) return;
+
+  gUsbStoppedAtMs = millis();
+  gUsbRestartRequested = true;
+}
+
+static void usbEventCallback(
+  void*,
+  esp_event_base_t eventBase,
+  int32_t eventId,
+  void*) {
+  if (eventBase != ARDUINO_USB_EVENTS) return;
+
+  switch (eventId) {
+    case ARDUINO_USB_STARTED_EVENT:
+      gUsbWasMounted = true;
+      Serial.println("USB mounted.");
+      break;
+
+    case ARDUINO_USB_STOPPED_EVENT:
+      Serial.println("USB unmounted.");
+      if (gUsbWasMounted) {
+        requestUsbRecovery();
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
 static uint8_t gModifiersMask = 0x00;
 static bool gKeysDown[256] = { false };
 
@@ -296,6 +336,7 @@ static void setupBle() {
 }
 
 static void setupUsbHid() {
+  USB.onEvent(usbEventCallback);
   Keyboard.begin();
   Mouse.begin();
   USB.begin();
@@ -314,5 +355,12 @@ void setup() {
 }
 
 void loop() {
+  if (gUsbRestartRequested
+      && (uint32_t)(millis() - gUsbStoppedAtMs) >= kUsbRestartDelayMs) {
+    Serial.println("Restarting ESP32-S3 to recover USB HID...");
+    delay(20);
+    ESP.restart();
+  }
+
   delay(20);
 }
