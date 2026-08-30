@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var ble = BLEKeyboardBridge()
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
@@ -13,6 +14,8 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showsSettings = false
     @State private var inputWarning: String?
+    @State private var pendingSharedText: String?
+    @State private var pendingTextIsPersisted = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -39,8 +42,23 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            restoreSharedPreferences()
             ble.start()
+            importPendingShareIfNeeded()
         }
+        .onChange(of: ble.isReady) { _, isReady in
+            if isReady {
+                sendPendingSharedTextIfNeeded()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                restoreSharedPreferences()
+                importPendingShareIfNeeded()
+            }
+        }
+        .onChange(of: layoutRawValue) { _, _ in synchronizeSharedPreferences() }
+        .onChange(of: shortcutRawValue) { _, _ in synchronizeSharedPreferences() }
         .onOpenURL(perform: handleIncomingURL)
         .sheet(isPresented: $showsSettings) {
             settingsView
@@ -286,7 +304,7 @@ struct ContentView: View {
                 }
 
                 Section("Версія") {
-                    LabeledContent("ESP Remote Control", value: "1.1.3")
+                    LabeledContent("ESP Remote Control", value: appVersion)
                     Text("Іконка клавіатури: Tabler Icons, MIT License.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -308,6 +326,10 @@ struct ContentView: View {
 
     private var selectedShortcut: HostLayoutShortcut {
         HostLayoutShortcut(rawValue: shortcutRawValue) ?? .controlSpace
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
 
     private var layoutBinding: Binding<KeyboardLayout> {
@@ -349,40 +371,27 @@ struct ContentView: View {
     }
 
     private func handleTextChange(oldText: String, newText: String) {
-        guard !newText.contains("\n"), !newText.contains("\r") else {
-            handleReturnKey()
-            return
-        }
-
         let commonPrefixLength = zip(oldText, newText).prefix { $0 == $1 }.count
         let deletedCount = oldText.count - commonPrefixLength
         let insertedCharacters = newText.dropFirst(commonPrefixLength)
         var taps: [(modifiers: UInt8, keycode: UInt8)] = []
         var unsupported: [Character] = []
-        var activeLayout = selectedLayout
 
         taps.append(contentsOf: repeatElement(
             (modifiers: UInt8(0), keycode: HID.keyBackspace),
             count: max(0, deletedCount)
         ))
 
-        for character in insertedCharacters {
-            if let inferredLayout = KeyboardLayout.inferred(from: character),
-               inferredLayout != activeLayout {
-                let layoutCommand = selectedShortcut.command
-                taps.append((layoutCommand.modifiers, layoutCommand.keycode))
-                activeLayout = inferredLayout
-            }
+        let plan = TextTypingPlanner.makePlan(
+            for: String(insertedCharacters),
+            startingLayout: selectedLayout,
+            layoutShortcut: selectedShortcut
+        )
+        taps.append(contentsOf: plan.taps)
+        unsupported.append(contentsOf: plan.unsupportedCharacters)
 
-            if let command = HID.mapCharacterToHID(character, layout: activeLayout) {
-                taps.append((command.modifiers, command.keycode))
-            } else {
-                unsupported.append(character)
-            }
-        }
-
-        if activeLayout != selectedLayout {
-            layoutRawValue = activeLayout.rawValue
+        if plan.finalLayout != selectedLayout {
+            layoutRawValue = plan.finalLayout.rawValue
         }
 
         if !taps.isEmpty {
@@ -416,7 +425,60 @@ struct ContentView: View {
             return
         }
 
+        queueOrSendSharedText(text, persisted: false)
+    }
+
+    private func restoreSharedPreferences() {
+        if let layout = ShareBridgeState.storedTargetLayout {
+            layoutRawValue = layout.rawValue
+        }
+        if let shortcut = ShareBridgeState.storedLayoutShortcut {
+            shortcutRawValue = shortcut.rawValue
+        }
+        synchronizeSharedPreferences()
+    }
+
+    private func synchronizeSharedPreferences() {
+        ShareBridgeState.targetLayout = selectedLayout
+        ShareBridgeState.layoutShortcut = selectedShortcut
+    }
+
+    private func importPendingShareIfNeeded() {
+        guard pendingSharedText == nil, let text = ShareBridgeState.pendingText else { return }
+        queueOrSendSharedText(text, persisted: true)
+    }
+
+    private func queueOrSendSharedText(_ text: String, persisted: Bool) {
         selectedTab = 0
+        guard ble.isReady else {
+            if let pendingSharedText {
+                self.pendingSharedText = pendingSharedText + "\n" + text
+            } else {
+                pendingSharedText = text
+            }
+            pendingTextIsPersisted = pendingTextIsPersisted || persisted
+            inputWarning = "Спільний текст очікує підключення до ESP32"
+            return
+        }
+
+        appendAndSend(text)
+        if persisted {
+            ShareBridgeState.clearPendingText()
+        }
+    }
+
+    private func sendPendingSharedTextIfNeeded() {
+        guard ble.isReady, let text = pendingSharedText else { return }
+        let shouldClearPersistedText = pendingTextIsPersisted
+        pendingSharedText = nil
+        pendingTextIsPersisted = false
+        appendAndSend(text)
+        if shouldClearPersistedText {
+            ShareBridgeState.clearPendingText()
+        }
+    }
+
+    private func appendAndSend(_ text: String) {
         let oldText = inputText
         let newText = oldText + text
         inputText = newText

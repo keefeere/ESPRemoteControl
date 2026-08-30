@@ -9,6 +9,8 @@ on:
       - "ios-v*"
     paths:
       - "ESPRemoteControl/**"
+      - "ESPRemoteControlShare/**"
+      - "Shared/**"
       - "ESPRemoteControl.xcodeproj/**"
       - "scripts/build-unsigned-ipa.sh"
       - "scripts/update-sidestore-source.py"

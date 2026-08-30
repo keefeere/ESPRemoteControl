@@ -219,8 +219,10 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         guard let central, central.state == .poweredOn else { return }
         guard peripheral?.state != .connecting, peripheral?.state != .connected else { return }
 
-        if let identifierString = UserDefaults.standard.string(forKey: lastPeripheralKey),
-           let identifier = UUID(uuidString: identifierString),
+        let identifier = ShareBridgeState.lastPeripheralIdentifier
+            ?? UserDefaults.standard.string(forKey: lastPeripheralKey).flatMap(UUID.init(uuidString:))
+
+        if let identifier,
            let remembered = central.retrievePeripherals(withIdentifiers: [identifier]).first {
             peripheral = remembered
             remembered.delegate = self
@@ -318,6 +320,7 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
         reconnectWorkItem = nil
         reconnectAttempt = 0
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: lastPeripheralKey)
+        ShareBridgeState.lastPeripheralIdentifier = peripheral.identifier
         statusText = "Bluetooth: перевірка сервісу…"
         peripheral.delegate = self
         peripheral.discoverServices([serviceUUID])
