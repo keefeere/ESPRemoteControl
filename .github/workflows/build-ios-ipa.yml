@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - feature/share-extension-1.2
     tags:
       - "ios-v*"
     paths:
