@@ -19,6 +19,14 @@
       ],
       "versions": [
         {
+          "version": "1.2.0",
+          "date": "2026-08-31",
+          "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v1.2.0/ESPRemoteControl-unsigned.ipa",
+          "size": 433868,
+          "minOSVersion": "17.0",
+          "localizedDescription": "ESP Remote Control 1.2.0"
+        },
+        {
           "version": "1.1.5",
           "date": "2026-08-29",
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v1.1.5/ESPRemoteControl-unsigned.ipa",
