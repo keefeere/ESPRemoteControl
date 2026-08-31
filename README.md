@@ -203,7 +203,6 @@ This project solves a real problem with a unique hardware approach. Contribution
 
 ## Roadmap
 
-- **v1.2 (in development)** - iOS Share Extension for text and URLs
 - **v2** - Direct BLE HID mode that works without the ESP32 adapter
 - **v3** - Optional LAN host mode for exact Unicode and bidirectional clipboard
 
