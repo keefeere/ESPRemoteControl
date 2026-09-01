@@ -71,7 +71,7 @@ final class ShareBLETransmitter: NSObject {
     private func connectToBridge() {
         guard let central, central.state == .poweredOn else { return }
 
-        if let identifier = ShareBridgeState.lastPeripheralIdentifier,
+        if let identifier = ShareExtensionPreferences.lastPeripheralIdentifier,
            let remembered = central.retrievePeripherals(withIdentifiers: [identifier]).first {
             peripheral = remembered
             remembered.delegate = self
@@ -209,7 +209,7 @@ extension ShareBLETransmitter: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        ShareBridgeState.lastPeripheralIdentifier = peripheral.identifier
+        ShareExtensionPreferences.lastPeripheralIdentifier = peripheral.identifier
         onStatusChange?("Перевірка BLE-сервісу…")
         peripheral.discoverServices([serviceUUID])
     }

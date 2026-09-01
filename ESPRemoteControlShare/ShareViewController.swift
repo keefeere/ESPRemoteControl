@@ -9,7 +9,7 @@ final class ShareViewController: UIViewController {
     private let sendButton = UIButton(type: .system)
     private let closeButton = UIButton(type: .system)
 
-    private var selectedShortcut = ShareBridgeState.layoutShortcut
+    private var selectedShortcut = ShareExtensionPreferences.layoutShortcut
     private var fallbackAttributedText: [String] = []
     private var transmitter: ShareBLETransmitter?
     private var isSending = false
@@ -22,8 +22,6 @@ final class ShareViewController: UIViewController {
 
     private func configureUI() {
         view.backgroundColor = .systemGroupedBackground
-        preferredContentSize = CGSize(width: 0, height: 520)
-
         let titleLabel = UILabel()
         titleLabel.text = "ESP Remote Control"
         titleLabel.font = .preferredFont(forTextStyle: .title2)
@@ -43,7 +41,7 @@ final class ShareViewController: UIViewController {
         textView.delegate = self
         textView.accessibilityLabel = "Текст для надсилання"
 
-        layoutControl.selectedSegmentIndex = ShareBridgeState.targetLayout == .ukrainianEnhanced ? 1 : 0
+        layoutControl.selectedSegmentIndex = ShareExtensionPreferences.targetLayout == .ukrainianEnhanced ? 1 : 0
         layoutControl.accessibilityLabel = "Поточна розкладка комп’ютера"
 
         let layoutLabel = UILabel()
@@ -243,7 +241,7 @@ final class ShareViewController: UIViewController {
         )
 
         guard !plan.taps.isEmpty else {
-            finishWithError("Для цього тексту немає підтримуваних HID-клавіш.", text: text)
+            finishWithError("Для цього тексту немає підтримуваних HID-клавіш.")
             return
         }
 
@@ -256,9 +254,8 @@ final class ShareViewController: UIViewController {
             guard let self else { return }
             switch result {
             case .success:
-                ShareBridgeState.targetLayout = plan.finalLayout
-                ShareBridgeState.layoutShortcut = selectedShortcut
-                ShareBridgeState.removeQueuedText(text)
+                ShareExtensionPreferences.targetLayout = plan.finalLayout
+                ShareExtensionPreferences.layoutShortcut = selectedShortcut
                 statusLabel.text = plan.unsupportedCharacters.isEmpty
                     ? "Надіслано"
                     : "Надіслано; пропущено: \(String(plan.unsupportedCharacters.prefix(6)))"
@@ -266,12 +263,12 @@ final class ShareViewController: UIViewController {
                     self?.extensionContext?.completeRequest(returningItems: nil)
                 }
             case .failure(let error):
-                finishWithError(error.localizedDescription, text: text)
+                finishWithError(error.localizedDescription)
             }
         }
     }
 
-    private func finishWithError(_ message: String, text: String) {
+    private func finishWithError(_ message: String) {
         isSending = false
         layoutControl.isEnabled = true
         shortcutButton.isEnabled = true
@@ -281,11 +278,7 @@ final class ShareViewController: UIViewController {
         configuration?.title = "Повторити"
         sendButton.configuration = configuration
 
-        if ShareBridgeState.enqueue(text) {
-            statusLabel.text = "\(message). Текст збережено — відкрийте ESP Remote."
-        } else {
-            statusLabel.text = "\(message). Текст не втрачено; можна повторити."
-        }
+        statusLabel.text = "\(message). Текст не втрачено; можна повторити."
     }
 
     @objc private func closeTapped() {
