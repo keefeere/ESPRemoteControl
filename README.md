@@ -159,7 +159,7 @@ ESPRemoteControl/
 │   ├── ContentView.swift       # Main UI with keyboard and trackpad
 │   └── BLEKeyboardBridge.swift # Bluetooth LE communication
 ├── ESPRemoteControlShare/      # Embedded iOS Share Extension
-├── Shared/                     # HID mapping, typing plan, shared handoff state
+├── Shared/                     # HID mapping and typing plan shared by both targets
 └── sketch_uid_keyboard_ble/    # ESP32-S3 Arduino firmware
     └── sketch_uid_keyboard_ble.ino
 ```

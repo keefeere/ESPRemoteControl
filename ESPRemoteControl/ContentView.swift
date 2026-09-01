@@ -2,7 +2,6 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
-    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var ble = BLEKeyboardBridge()
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
@@ -14,8 +13,6 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showsSettings = false
     @State private var inputWarning: String?
-    @State private var pendingSharedText: String?
-    @State private var pendingTextIsPersisted = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -42,23 +39,8 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            restoreSharedPreferences()
             ble.start()
-            importPendingShareIfNeeded()
         }
-        .onChange(of: ble.isReady) { _, isReady in
-            if isReady {
-                sendPendingSharedTextIfNeeded()
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                restoreSharedPreferences()
-                importPendingShareIfNeeded()
-            }
-        }
-        .onChange(of: layoutRawValue) { _, _ in synchronizeSharedPreferences() }
-        .onChange(of: shortcutRawValue) { _, _ in synchronizeSharedPreferences() }
         .onOpenURL(perform: handleIncomingURL)
         .sheet(isPresented: $showsSettings) {
             settingsView
@@ -425,57 +407,8 @@ struct ContentView: View {
             return
         }
 
-        queueOrSendSharedText(text, persisted: false)
-    }
-
-    private func restoreSharedPreferences() {
-        if let layout = ShareBridgeState.storedTargetLayout {
-            layoutRawValue = layout.rawValue
-        }
-        if let shortcut = ShareBridgeState.storedLayoutShortcut {
-            shortcutRawValue = shortcut.rawValue
-        }
-        synchronizeSharedPreferences()
-    }
-
-    private func synchronizeSharedPreferences() {
-        ShareBridgeState.targetLayout = selectedLayout
-        ShareBridgeState.layoutShortcut = selectedShortcut
-    }
-
-    private func importPendingShareIfNeeded() {
-        guard pendingSharedText == nil, let text = ShareBridgeState.pendingText else { return }
-        queueOrSendSharedText(text, persisted: true)
-    }
-
-    private func queueOrSendSharedText(_ text: String, persisted: Bool) {
         selectedTab = 0
-        guard ble.isReady else {
-            if let pendingSharedText {
-                self.pendingSharedText = pendingSharedText + "\n" + text
-            } else {
-                pendingSharedText = text
-            }
-            pendingTextIsPersisted = pendingTextIsPersisted || persisted
-            inputWarning = "Спільний текст очікує підключення до ESP32"
-            return
-        }
-
         appendAndSend(text)
-        if persisted {
-            ShareBridgeState.clearPendingText()
-        }
-    }
-
-    private func sendPendingSharedTextIfNeeded() {
-        guard ble.isReady, let text = pendingSharedText else { return }
-        let shouldClearPersistedText = pendingTextIsPersisted
-        pendingSharedText = nil
-        pendingTextIsPersisted = false
-        appendAndSend(text)
-        if shouldClearPersistedText {
-            ShareBridgeState.clearPendingText()
-        }
     }
 
     private func appendAndSend(_ text: String) {
