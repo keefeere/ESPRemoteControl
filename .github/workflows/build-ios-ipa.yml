@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/share-extension-ldid-1.2.3
     tags:
       - "ios-v*"
     paths:
