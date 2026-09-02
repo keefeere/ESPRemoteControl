@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/share-extension-codesigning-1.2.2
     tags:
       - "ios-v*"
     paths:
