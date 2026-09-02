@@ -31,6 +31,20 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 
+# Give every Mach-O a valid ad-hoc signature before packaging. SideStore replaces
+# these signatures with the user's development certificate; pre-signing provides
+# a valid LC_CODE_SIGNATURE slot for reliable nested-extension re-signing.
+share_extension_path="$app_path/PlugIns/ESPRemoteControlShare.appex"
+if [[ ! -d "$share_extension_path" ]]; then
+  echo "Built Share Extension was not found at $share_extension_path" >&2
+  exit 1
+fi
+
+codesign --force --sign - --timestamp=none "$share_extension_path"
+codesign --force --sign - --timestamp=none "$app_path"
+codesign --verify --strict --verbose=2 "$share_extension_path"
+codesign --verify --deep --strict --verbose=2 "$app_path"
+
 mkdir -p "$build_root/Payload" "$output_dir"
 ditto "$app_path" "$build_root/Payload/ESPRemoteControl.app"
 
