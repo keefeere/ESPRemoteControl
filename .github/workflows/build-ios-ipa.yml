@@ -33,6 +33,9 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Install ldid
+        run: brew install ldid
+
       - name: Build unsigned IPA
         run: ./scripts/build-unsigned-ipa.sh
 
