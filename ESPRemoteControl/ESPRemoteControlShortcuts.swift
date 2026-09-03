@@ -30,7 +30,7 @@ final class ShortcutInbox: ObservableObject {
 
 struct SendToESPRemoteControlIntent: AppIntent {
     static var title: LocalizedStringResource = "Send to ESP Remote"
-    static var description = IntentDescription("Opens ESP Remote Control and types the supplied text through the connected ESP32 bridge.")
+    static var description = IntentDescription("Opens ESP Remote Control and types the supplied text through the selected Bluetooth connection.")
     static var openAppWhenRun = true
 
     @Parameter(title: "Text")

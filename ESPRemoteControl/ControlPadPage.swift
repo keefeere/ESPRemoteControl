@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ControlPadPage: View {
-    @ObservedObject var ble: BLEKeyboardBridge
+    @ObservedObject var ble: RemoteInputController
 
     @State private var latchedModifiers: UInt8 = 0x00
     @State private var momentaryModifiers: UInt8 = 0x00

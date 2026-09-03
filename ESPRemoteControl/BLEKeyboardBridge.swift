@@ -2,19 +2,6 @@ import Combine
 import CoreBluetooth
 import Foundation
 
-protocol InputTransport: AnyObject {
-    func start()
-    func sendKeyDown(modifiersMask: UInt8, keycode: UInt8)
-    func sendKeyUp(keycode: UInt8)
-    func sendKeyTap(modifiers: UInt8, hidKeycode: UInt8)
-    func sendKeyTaps(_ taps: [(modifiers: UInt8, keycode: UInt8)])
-    func sendMouseMove(dx: Int8, dy: Int8)
-    func sendMouseScroll(dx: Int8, dy: Int8)
-    func sendMouseClick(button: UInt8)
-    func sendMouseButtonDown(button: UInt8)
-    func sendMouseButtonUp(button: UInt8)
-}
-
 /// CoreBluetooth central for the ESP32-S3 BLE-to-USB bridge.
 final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     private let serviceUUID = CBUUID(string: "2D2A0001-8A5A-4E76-A2E3-1E57D9A1B001")
@@ -33,8 +20,14 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
 
     private var pendingWrites: [Data] = []
     private var writeWithResponseInFlight = false
+    private var isRunning = false
+    private var possiblyHeldKeys: Set<UInt8> = []
+    private var stopCompletion: (() -> Void)?
+    private var stopDeadline: DispatchWorkItem?
+    private var finishingStop = false
 
     func start() {
+        isRunning = true
         guard central == nil else {
             if central?.state == .poweredOn, !isReady {
                 connectToRememberedBridgeOrScan()
@@ -52,7 +45,56 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         )
     }
 
+    func stop(completion: @escaping () -> Void) {
+        isRunning = false
+        reconnectWorkItem?.cancel()
+        central?.stopScan()
+        stopCompletion = completion
+        releaseAllInput()
+        isReady = false
+        let deadline = DispatchWorkItem { [weak self] in self?.finishStop() }
+        stopDeadline = deadline
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: deadline)
+        finishStopIfDrained()
+    }
+
+    func releaseAllInput() {
+        // Include keys whose key-up may still be in the discarded write queue.
+        pendingWrites.removeAll()
+        let releases = possiblyHeldKeys.sorted().map { V2Frame(command: V2.keyUp, payload: [$0]) }
+        lastSentModifiersMask = 0
+        writeV2(releases + [
+            V2Frame(command: V2.setModifiers, payload: [0]),
+            V2Frame(command: V2.mouseButtonUp, payload: [7])
+        ])
+    }
+
+    private func finishStopIfDrained() {
+        guard stopCompletion != nil, !finishingStop,
+              pendingWrites.isEmpty, !writeWithResponseInFlight else { return }
+        finishingStop = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.finishStop() }
+    }
+
+    private func finishStop() {
+        guard let completion = stopCompletion else { return }
+        stopCompletion = nil
+        stopDeadline?.cancel()
+        stopDeadline = nil
+        central?.stopScan()
+        peripheral?.delegate = nil
+        if let peripheral { central?.cancelPeripheralConnection(peripheral) }
+        central?.delegate = nil
+        central = nil
+        peripheral = nil
+        resetConnectionState()
+        finishingStop = false
+        completion()
+    }
+
     func reconnectNow() {
+        guard isRunning else { return }
+        releaseAllInput()
         reconnectWorkItem?.cancel()
         reconnectWorkItem = nil
         reconnectAttempt = 0
@@ -143,6 +185,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         @unknown default:
             break
         }
+        finishStopIfDrained()
     }
 
     private func modifierFrameIfNeeded(_ mask: UInt8) -> [V2Frame] {
@@ -156,6 +199,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     }
 
     func sendKeyDown(modifiersMask: UInt8, keycode: UInt8) {
+        if isReady, keycode != 0 { possiblyHeldKeys.insert(keycode) }
         var frames = modifierFrameIfNeeded(modifiersMask)
         frames.append(V2Frame(command: V2.keyDown, payload: [keycode]))
         writeV2(frames)
@@ -216,6 +260,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     }
 
     private func connectToRememberedBridgeOrScan() {
+        guard isRunning else { return }
         guard let central, central.state == .poweredOn else { return }
         guard peripheral?.state != .connecting, peripheral?.state != .connected else { return }
 
@@ -244,6 +289,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     }
 
     private func scheduleReconnect() {
+        guard isRunning else { return }
         reconnectWorkItem?.cancel()
         reconnectAttempt += 1
         let delay = min(pow(2, Double(reconnectAttempt - 1)), 8)
@@ -262,11 +308,13 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         pendingWrites.removeAll()
         writeWithResponseInFlight = false
         lastSentModifiersMask = 0
+        possiblyHeldKeys.removeAll()
     }
 }
 
 extension BLEKeyboardBridge: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard isRunning else { return }
         switch central.state {
         case .poweredOn:
             connectToRememberedBridgeOrScan()
@@ -306,6 +354,7 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
+        guard isRunning else { return }
         self.peripheral = peripheral
         peripheral.delegate = self
         statusText = "Bluetooth: підключення до ESP32…"
@@ -314,6 +363,7 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        guard isRunning else { central.cancelPeripheralConnection(peripheral); return }
         reconnectWorkItem?.cancel()
         reconnectWorkItem = nil
         reconnectAttempt = 0
@@ -392,5 +442,6 @@ extension BLEKeyboardBridge: CBPeripheralDelegate {
         if error == nil {
             drainWriteQueue(type: .withResponse)
         }
+        finishStopIfDrained()
     }
 }

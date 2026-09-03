@@ -7,7 +7,7 @@ private struct TypingKey {
 }
 
 struct RemoteKeyboardView: View {
-    @ObservedObject var ble: BLEKeyboardBridge
+    @ObservedObject var ble: RemoteInputController
     @Binding var layout: KeyboardLayout
     let onLayoutChange: (KeyboardLayout, Bool) -> Void
 
@@ -103,19 +103,20 @@ struct RemoteKeyboardView: View {
         .onChange(of: landscapeLocked) { _, isLocked in
             AppOrientationLock.setLandscapeLocked(isLocked)
         }
+        .onChange(of: ble.inputEpoch) { _, _ in
+            // The controller already released the old route. Only clear UI state.
+            pressedKeycodes.removeAll()
+            stickyModifiers = 0
+            momentaryModifiers = 0
+            usedMomentaryModifiers = 0
+            modifierPressStartedAt.removeAll()
+        }
         .onDisappear(perform: releaseAllInput)
     }
 
     private var connectionStatus: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(ble.isReady ? .green : .orange)
-                .frame(width: 8, height: 8)
-            Text(ble.statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 4)
+            ConnectionStatusView(input: ble, compact: true)
             orientationLockButton
         }
         .padding(.horizontal, 4)
@@ -444,8 +445,7 @@ struct RemoteKeyboardView: View {
     }
 
     private func endModifierPress(_ mask: UInt8) {
-        let startedAt = modifierPressStartedAt.removeValue(forKey: mask)
-            ?? ProcessInfo.processInfo.systemUptime
+        guard let startedAt = modifierPressStartedAt.removeValue(forKey: mask) else { return }
         let heldLongEnough = ProcessInfo.processInfo.systemUptime - startedAt >= 0.35
         let wasUsedForChord = usedMomentaryModifiers & mask != 0
         usedMomentaryModifiers &= ~mask

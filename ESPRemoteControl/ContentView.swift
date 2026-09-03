@@ -3,7 +3,7 @@ import AppIntents
 import UIKit
 
 struct ContentView: View {
-    @StateObject private var ble = BLEKeyboardBridge()
+    @StateObject private var ble = RemoteInputController()
     @StateObject private var shortcutInbox = ShortcutInbox.shared
 
     @Environment(\.scenePhase) private var scenePhase
@@ -52,6 +52,8 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 receiveShortcutTextIfNeeded()
+            } else if newPhase == .background {
+                ble.enteredBackground()
             }
         }
         .onChange(of: shortcutInbox.pendingText) { _, _ in
@@ -96,31 +98,11 @@ struct ContentView: View {
     }
 
     private var connectionHeader: some View {
-        HStack(spacing: 10) {
-            Image(systemName: ble.isReady ? "cable.connector" : "antenna.radiowaves.left.and.right")
-                .foregroundStyle(ble.isReady ? .green : .orange)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(ble.isReady ? "ESP32 готовий" : "Пошук адаптера")
-                    .font(.subheadline.weight(.semibold))
-                Text(ble.statusText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button {
-                ble.reconnectNow()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .buttonStyle(.bordered)
-            .accessibilityLabel("Перепідключити ESP32")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) { Divider() }
+        ConnectionStatusView(input: ble)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .bottom) { Divider() }
     }
 
     private var typingCard: some View {
@@ -216,7 +198,7 @@ struct ContentView: View {
                         Label("Текст із Shortcuts готовий", systemImage: "square.and.arrow.down")
                             .font(.caption.weight(.semibold))
                         Spacer()
-                        Text(ble.isReady ? "Надсилання…" : "Очікується ESP32")
+                        Text(ble.isReady ? "Надсилання…" : "Очікується підключення")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -339,10 +321,7 @@ struct ContentView: View {
                 }
 
                 Section("Bluetooth") {
-                    LabeledContent("Стан", value: ble.statusText)
-                    Button("Перепідключити ESP32") {
-                        ble.reconnectNow()
-                    }
+                    ConnectionStatusView(input: ble)
                 }
 
                 Section("Shortcuts") {
