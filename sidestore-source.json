@@ -8,7 +8,7 @@
       "bundleIdentifier": "com.keefeere.ESPRemoteControl",
       "developerName": "keefeere",
       "subtitle": "iPhone keyboard and trackpad over ESP32",
-      "localizedDescription": "Control a USB host from an iPhone through an ESP32-S3 BLE-to-USB HID bridge. Includes English and Ukrainian input, an iOS Share Extension for text and URLs, a trackpad, a full-screen keyboard, clipboard typing, and automatic reconnect.",
+      "localizedDescription": "Control a USB host from an iPhone through an ESP32-S3 BLE-to-USB HID bridge. Includes English and Ukrainian input, a Shortcuts action for text and URLs, a trackpad, a full-screen keyboard, clipboard typing, and automatic reconnect.",
       "iconURL": "https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/ESPRemoteControl/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#445BE7",
       "permissions": [
