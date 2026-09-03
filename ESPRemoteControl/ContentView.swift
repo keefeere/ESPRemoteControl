@@ -3,6 +3,9 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var ble = BLEKeyboardBridge()
+    @StateObject private var shortcutInbox = ShortcutInbox.shared
+
+    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
     @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.controlSpace.rawValue
@@ -13,6 +16,8 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showsSettings = false
     @State private var inputWarning: String?
+    @State private var pendingShortcutText: String?
+    @State private var shortcutStatus: String?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -38,8 +43,22 @@ struct ContentView: View {
                 wantsFocus = false
             }
         }
+        .onChange(of: ble.isReady) { _, isReady in
+            if isReady {
+                sendPendingShortcutTextIfPossible()
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                receiveShortcutTextIfNeeded()
+            }
+        }
+        .onChange(of: shortcutInbox.pendingText) { _, _ in
+            receiveShortcutTextIfNeeded()
+        }
         .onAppear {
             ble.start()
+            receiveShortcutTextIfNeeded()
         }
         .onOpenURL(perform: handleIncomingURL)
         .sheet(isPresented: $showsSettings) {
@@ -190,6 +209,46 @@ struct ContentView: View {
             }
             .font(.caption.weight(.semibold))
 
+            if let pendingShortcutText {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Текст із Shortcuts готовий", systemImage: "square.and.arrow.down")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Text(ble.isReady ? "Надсилання…" : "Очікується ESP32")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(pendingShortcutText)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button("Надіслати") {
+                            sendPendingShortcutTextIfPossible()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!ble.isReady)
+
+                        Button("Скасувати", role: .destructive) {
+                            self.pendingShortcutText = nil
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(10)
+                .background(Color.accentColor.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            if let shortcutStatus {
+                Label(shortcutStatus, systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
             if let inputWarning {
                 Label(inputWarning, systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -283,6 +342,13 @@ struct ContentView: View {
                     Button("Перепідключити ESP32") {
                         ble.reconnectNow()
                     }
+                }
+
+                Section("Shortcuts") {
+                    Text("Щоб надсилати з меню Share, у Shortcuts додай дію «Send to ESP», підстав «Shortcut Input» у поле Text і в Details увімкни Show in Share Sheet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ShortcutsLink()
                 }
 
                 Section("Версія") {
@@ -399,6 +465,33 @@ struct ContentView: View {
         handleTextChange(oldText: oldText, newText: newText)
     }
 
+    private func receiveShortcutTextIfNeeded() {
+        guard let text = shortcutInbox.takePendingText() else { return }
+        queueIncomingText(text)
+    }
+
+    private func queueIncomingText(_ text: String) {
+        guard !text.isEmpty else { return }
+        selectedTab = 0
+        wantsFocus = false
+        shortcutStatus = nil
+
+        if let pendingShortcutText, !pendingShortcutText.isEmpty {
+            self.pendingShortcutText = pendingShortcutText + "\n" + text
+        } else {
+            pendingShortcutText = text
+        }
+
+        sendPendingShortcutTextIfPossible()
+    }
+
+    private func sendPendingShortcutTextIfPossible() {
+        guard ble.isReady, let text = pendingShortcutText, !text.isEmpty else { return }
+        pendingShortcutText = nil
+        appendAndSend(text)
+        shortcutStatus = "Надіслано з Shortcuts"
+    }
+
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme == "espremote", url.host == "send",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -407,8 +500,7 @@ struct ContentView: View {
             return
         }
 
-        selectedTab = 0
-        appendAndSend(text)
+        queueIncomingText(text)
     }
 
     private func appendAndSend(_ text: String) {
