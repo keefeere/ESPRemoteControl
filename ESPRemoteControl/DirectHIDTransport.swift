@@ -17,7 +17,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     private enum Attribute {
         case input(HIDInputChannel), leds, protocolMode, controlPoint
-        case reportMap, information, battery, manufacturer, model
+        case reportMap, information, battery, manufacturer, model, pnpID
     }
     private static func uuid(_ short: String) -> CBUUID {
         CBUUID(string: "0000\(short)-0000-1000-8000-00805F9B34FB")
@@ -203,7 +203,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         let info = CBMutableService(type: Self.uuid("180A"), primary: true)
         info.characteristics = [
             characteristic("2A29", .manufacturer, properties: .read, permissions: .readable),
-            characteristic("2A24", .model, properties: .read, permissions: .readable)
+            characteristic("2A24", .model, properties: .read, permissions: .readable),
+            characteristic("2A50", .pnpID, properties: .read, permissions: .readable)
         ]
         let battery = CBMutableService(type: Self.uuid("180F"), primary: true)
         battery.characteristics = [characteristic("2A19", .battery, properties: .read, permissions: .readable)]
@@ -457,7 +458,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
-        guard peripheral === manager, isRunning, service === addingService else { return }
+        guard peripheral === manager, isRunning, service.uuid == addingService?.uuid else { return }
         if let error {
             lastError = "Не вдалося створити HID: \(error.localizedDescription)"
             record("Service \(service.uuid): \(error.localizedDescription)")
@@ -532,6 +533,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
         case .manufacturer: value = Data("ESP Remote Control".utf8)
         case .model: value = Data("Direct HID v2".utf8)
+        // Prototype identity, not a claim to another manufacturer's USB VID.
+        case .pnpID: value = Data([1, 0xFF, 0xFF, 1, 0, 0, 2])
         }
         guard request.offset <= value.count else {
             peripheral.respond(to: request, withResult: .invalidOffset)
@@ -601,6 +604,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 case "2A19": attribute = .battery
                 case "2A29": attribute = .manufacturer
                 case "2A24": attribute = .model
+                case "2A50": attribute = .pnpID
                 case "2A4D":
                     let descriptor = item.descriptors?.first { Self.shortUUID($0.uuid) == "2908" }
                     if let bytes = descriptor?.value as? Data, bytes.count == 2 {
@@ -617,7 +621,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 }
             }
         }
-        servicesInstalled = inputs.count == 4 && attributes.count == 13
+        servicesInstalled = inputs.count == 4 && attributes.count == 14
         record(servicesInstalled ? "Restored GATT services" : "GATT restore incomplete; will rebuild")
     }
 
