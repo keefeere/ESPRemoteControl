@@ -31,8 +31,15 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 
-# Fake-sign the main executable before packaging. SideStore replaces this
-# signature with the user’s development certificate during installation.
+# Fake-sign both executables before packaging. SideStore replaces these
+# signatures with the user development certificate during installation.
+share_extension_path="$app_path/PlugIns/ESPRemoteControlShare.appex"
+if [[ ! -d "$share_extension_path" ]]; then
+  echo "Built Share Extension was not found at $share_extension_path" >&2
+  exit 1
+fi
+
+ldid -S "$share_extension_path/ESPRemoteControlShare"
 ldid -S "$app_path/ESPRemoteControl"
 
 mkdir -p "$build_root/Payload" "$output_dir"

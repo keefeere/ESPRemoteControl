@@ -7,16 +7,36 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A12000000000000000000001 /* ESPRemoteControlShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A12000000000000000000002 /* ESPRemoteControlShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A1200000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E85CFC5B2EEEED5F00727C31 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1200000000000000000000A;
+			remoteInfo = ESPRemoteControlShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		A12000000000000000000009 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A12000000000000000000001 /* ESPRemoteControlShare.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		E85CFC632EEEED5F00727C31 /* ESPRemoteControl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ESPRemoteControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A12000000000000000000002 /* ESPRemoteControlShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ESPRemoteControlShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -27,6 +47,13 @@
 			);
 			target = E85CFC622EEEED5F00727C31 /* ESPRemoteControl */;
 		};
+		A12000000000000000000003 /* Exceptions for "ESPRemoteControlShare" folder in "ESPRemoteControlShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A1200000000000000000000A /* ESPRemoteControlShare */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -36,6 +63,14 @@
 				E851CA6A2EEEF59700DAE355 /* Exceptions for "ESPRemoteControl" folder in "ESPRemoteControl" target */,
 			);
 			path = ESPRemoteControl;
+			sourceTree = "<group>";
+		};
+		A12000000000000000000004 /* ESPRemoteControlShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A12000000000000000000003 /* Exceptions for "ESPRemoteControlShare" folder in "ESPRemoteControlShare" target */,
+			);
+			path = ESPRemoteControlShare;
 			sourceTree = "<group>";
 		};
 		A12000000000000000000005 /* Shared */ = {
@@ -53,6 +88,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A12000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -60,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				E85CFC652EEEED5F00727C31 /* ESPRemoteControl */,
+				A12000000000000000000004 /* ESPRemoteControlShare */,
 				A12000000000000000000005 /* Shared */,
 				E85CFC642EEEED5F00727C31 /* Products */,
 			);
@@ -69,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				E85CFC632EEEED5F00727C31 /* ESPRemoteControl.app */,
+				A12000000000000000000002 /* ESPRemoteControlShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,10 +127,12 @@
 				E85CFC5F2EEEED5F00727C31 /* Sources */,
 				E85CFC602EEEED5F00727C31 /* Frameworks */,
 				E85CFC612EEEED5F00727C31 /* Resources */,
+				A12000000000000000000009 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1200000000000000000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				E85CFC652EEEED5F00727C31 /* ESPRemoteControl */,
@@ -99,6 +145,29 @@
 			productReference = E85CFC632EEEED5F00727C31 /* ESPRemoteControl.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1200000000000000000000A /* ESPRemoteControlShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1200000000000000000000F /* Build configuration list for PBXNativeTarget "ESPRemoteControlShare" */;
+			buildPhases = (
+				A12000000000000000000007 /* Sources */,
+				A12000000000000000000006 /* Frameworks */,
+				A12000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A12000000000000000000004 /* ESPRemoteControlShare */,
+				A12000000000000000000005 /* Shared */,
+			);
+			name = ESPRemoteControlShare;
+			packageProductDependencies = (
+			);
+			productName = ESPRemoteControlShare;
+			productReference = A12000000000000000000002 /* ESPRemoteControlShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -110,6 +179,9 @@
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					E85CFC622EEEED5F00727C31 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					A1200000000000000000000A = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -129,12 +201,20 @@
 			projectRoot = "";
 			targets = (
 				E85CFC622EEEED5F00727C31 /* ESPRemoteControl */,
+				A1200000000000000000000A /* ESPRemoteControlShare */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		E85CFC612EEEED5F00727C31 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A12000000000000000000008 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -151,9 +231,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A12000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A1200000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1200000000000000000000A /* ESPRemoteControlShare */;
+			targetProxy = A1200000000000000000000B /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -284,7 +376,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -300,7 +392,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.1;
+				MARKETING_VERSION = 2.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.keefeere.ESPRemoteControl;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -319,7 +411,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -335,9 +427,69 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.1;
+				MARKETING_VERSION = 2.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.keefeere.ESPRemoteControl;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A1200000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ESPRemoteControlShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ESP Remote";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.keefeere.ESPRemoteControl.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1200000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ESPRemoteControlShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ESP Remote";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.keefeere.ESPRemoteControl.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -365,6 +517,15 @@
 			buildConfigurations = (
 				E85CFC6F2EEEED6000727C31 /* Debug */,
 				E85CFC702EEEED6000727C31 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1200000000000000000000F /* Build configuration list for PBXNativeTarget "ESPRemoteControlShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1200000000000000000000D /* Debug */,
+				A1200000000000000000000E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
