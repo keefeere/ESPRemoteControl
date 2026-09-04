@@ -259,7 +259,7 @@ struct ContentView: View {
                             return
                         }
                         guard !Task.isCancelled else { return }
-                        sendStatus = nil
+                        self.sendStatus = nil
                     }
             }
 
