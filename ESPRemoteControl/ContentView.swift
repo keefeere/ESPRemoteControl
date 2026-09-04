@@ -207,7 +207,7 @@ struct ContentView: View {
             if let pendingShortcutText {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("Текст із Shortcuts готовий", systemImage: "square.and.arrow.down")
+                        Label("Переданий текст готовий", systemImage: "square.and.arrow.down")
                             .font(.caption.weight(.semibold))
                         Spacer()
                         Text(ble.isReady ? "Надсилання…" : "Очікується підключення")
@@ -483,14 +483,11 @@ struct ContentView: View {
         guard ble.isReady, let text = pendingShortcutText, !text.isEmpty else { return }
         pendingShortcutText = nil
         appendAndSend(text)
-        shortcutStatus = "Надіслано з Shortcuts"
+        shortcutStatus = "Надіслано через \(ble.mode.title)"
     }
 
     private func handleIncomingURL(_ url: URL) {
-        guard url.scheme == "espremote", url.host == "send",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let text = components.queryItems?.first(where: { $0.name == "text" })?.value,
-              !text.isEmpty else {
+        guard let text = ShareTextHandoff.text(from: url) else {
             return
         }
 

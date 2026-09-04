@@ -3,16 +3,11 @@ import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
     private let textView = UITextView()
-    private let outputControl = UISegmentedControl(items: ["ESP32", "Bluetooth"])
-    private let layoutControl = UISegmentedControl(items: ["EN", "UA"])
     private let statusLabel = UILabel()
-    private let shortcutButton = UIButton(type: .system)
     private let sendButton = UIButton(type: .system)
     private let closeButton = UIButton(type: .system)
 
-    private var selectedShortcut = ShareExtensionPreferences.layoutShortcut
     private var fallbackAttributedText: [String] = []
-    private var transmitter: ShareTextTransmitter?
     private var isSending = false
 
     override func viewDidLoad() {
@@ -23,13 +18,14 @@ final class ShareViewController: UIViewController {
 
     private func configureUI() {
         view.backgroundColor = .systemGroupedBackground
+
         let titleLabel = UILabel()
         titleLabel.text = "ESP Remote Control"
         titleLabel.font = .preferredFont(forTextStyle: .title2)
         titleLabel.adjustsFontForContentSizeCategory = true
 
         let subtitleLabel = UILabel()
-        subtitleLabel.text = "Надіслати текст або посилання через ESP32 чи напряму Bluetooth"
+        subtitleLabel.text = "Текст буде передано в ESP Remote. Застосунок використає вибраний там Bluetooth-вихід."
         subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.numberOfLines = 0
@@ -42,24 +38,13 @@ final class ShareViewController: UIViewController {
         textView.delegate = self
         textView.accessibilityLabel = "Текст для надсилання"
 
-        outputControl.selectedSegmentIndex = ShareExtensionPreferences.outputRoute == .directBluetooth ? 1 : 0
-        outputControl.accessibilityLabel = "Вихід для тексту"
-        outputControl.addTarget(self, action: #selector(outputChanged), for: .valueChanged)
-
-        layoutControl.selectedSegmentIndex = ShareExtensionPreferences.targetLayout == .ukrainianEnhanced ? 1 : 0
-        layoutControl.accessibilityLabel = "Поточна розкладка комп’ютера"
-
-        let layoutLabel = UILabel()
-        layoutLabel.text = "Поточна розкладка на комп’ютері"
-        layoutLabel.font = .preferredFont(forTextStyle: .subheadline)
-
         statusLabel.text = "Завантаження…"
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
         statusLabel.textColor = .secondaryLabel
         statusLabel.numberOfLines = 2
 
         var sendConfiguration = UIButton.Configuration.filled()
-        sendConfiguration.title = "Надіслати"
+        sendConfiguration.title = "Передати в ESP Remote"
         sendConfiguration.image = UIImage(systemName: "paperplane.fill")
         sendConfiguration.imagePadding = 8
         sendButton.configuration = sendConfiguration
@@ -68,36 +53,6 @@ final class ShareViewController: UIViewController {
 
         closeButton.setTitle("Закрити", for: .normal)
         closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-
-        let layoutRow = UIStackView(arrangedSubviews: [layoutLabel, layoutControl])
-        layoutRow.axis = .horizontal
-        layoutRow.alignment = .center
-        layoutRow.spacing = 12
-        layoutLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        layoutControl.setContentHuggingPriority(.required, for: .horizontal)
-
-        let outputLabel = UILabel()
-        outputLabel.text = "Вихід"
-        outputLabel.font = .preferredFont(forTextStyle: .subheadline)
-
-        let outputRow = UIStackView(arrangedSubviews: [outputLabel, outputControl])
-        outputRow.axis = .horizontal
-        outputRow.alignment = .center
-        outputRow.spacing = 12
-        outputLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        outputControl.setContentHuggingPriority(.required, for: .horizontal)
-
-        let shortcutLabel = UILabel()
-        shortcutLabel.text = "Перемикання розкладки"
-        shortcutLabel.font = .preferredFont(forTextStyle: .subheadline)
-        configureShortcutMenu()
-
-        let shortcutRow = UIStackView(arrangedSubviews: [shortcutLabel, shortcutButton])
-        shortcutRow.axis = .horizontal
-        shortcutRow.alignment = .center
-        shortcutRow.spacing = 12
-        shortcutLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        shortcutButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let buttonRow = UIStackView(arrangedSubviews: [closeButton, sendButton])
         buttonRow.axis = .horizontal
@@ -108,10 +63,7 @@ final class ShareViewController: UIViewController {
         let stack = UIStackView(arrangedSubviews: [
             titleLabel,
             subtitleLabel,
-            outputRow,
             textView,
-            layoutRow,
-            shortcutRow,
             statusLabel,
             buttonRow
         ])
@@ -145,7 +97,6 @@ final class ShareViewController: UIViewController {
         let extensionItems = extensionContext?.inputItems.compactMap { $0 as? NSExtensionItem } ?? []
         let providers = extensionItems.flatMap { $0.attachments ?? [] }
         fallbackAttributedText = extensionItems.compactMap { $0.attributedContentText?.string }
-
         loadProviderText(providers, index: 0, collected: [])
     }
 
@@ -206,28 +157,12 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func configureShortcutMenu() {
-        var configuration = UIButton.Configuration.bordered()
-        configuration.title = selectedShortcut.displayName
-        shortcutButton.configuration = configuration
-        shortcutButton.showsMenuAsPrimaryAction = true
-        shortcutButton.menu = UIMenu(children: HostLayoutShortcut.allCases.map { shortcut in
-            UIAction(
-                title: shortcut.displayName,
-                state: shortcut == selectedShortcut ? .on : .off
-            ) { [weak self] _ in
-                self?.selectedShortcut = shortcut
-                self?.configureShortcutMenu()
-            }
-        })
-    }
-
     private func updateReadyState() {
         let hasText = !textView.text.isEmpty
         sendButton.isEnabled = hasText && !isSending
         if !isSending {
             statusLabel.text = hasText
-                ? "Готово. За потреби відредагуйте текст перед надсиланням."
+                ? "Готово. За потреби відредагуйте текст перед передаванням."
                 : "У спільному елементі немає тексту або URL."
         }
     }
@@ -236,92 +171,50 @@ final class ShareViewController: UIViewController {
         let text = textView.text ?? ""
         guard !text.isEmpty, text.count <= 2_000 else {
             statusLabel.text = text.isEmpty
-                ? "Введіть текст для надсилання."
+                ? "Введіть текст для передавання."
                 : "Скоротіть текст до 2000 символів."
+            return
+        }
+        guard let handoffURL = ShareTextHandoff.url(for: text) else {
+            finishWithError("Не вдалося підготувати текст")
+            return
+        }
+        guard let extensionContext else {
+            finishWithError("Share Extension недоступний")
             return
         }
 
         view.endEditing(true)
         isSending = true
         sendButton.isEnabled = false
-        outputControl.isEnabled = false
-        layoutControl.isEnabled = false
-        shortcutButton.isEnabled = false
         closeButton.isEnabled = false
+        statusLabel.text = "Відкриваємо ESP Remote…"
 
-        let startingLayout: KeyboardLayout = layoutControl.selectedSegmentIndex == 1
-            ? .ukrainianEnhanced
-            : .englishUS
-        let plan = TextTypingPlanner.makePlan(
-            for: text,
-            startingLayout: startingLayout,
-            layoutShortcut: selectedShortcut
-        )
-
-        guard !plan.taps.isEmpty else {
-            finishWithError("Для цього тексту немає підтримуваних HID-клавіш.")
-            return
-        }
-
-        if ShareExtensionPreferences.outputRoute == .directBluetooth, plan.taps.count > 600 {
-            finishWithError("Для прямого Bluetooth надішліть до 600 клавіш за раз.")
-            return
-        }
-
-        let transmitter: ShareTextTransmitter = ShareExtensionPreferences.outputRoute == .directBluetooth
-            ? ShareDirectHIDTransmitter()
-            : ShareBLETransmitter()
-        self.transmitter = transmitter
-        transmitter.onStatusChange = { [weak self] status in
-            self?.statusLabel.text = status
-        }
-        transmitter.send(plan.taps) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success:
-                ShareExtensionPreferences.targetLayout = plan.finalLayout
-                ShareExtensionPreferences.layoutShortcut = selectedShortcut
-                let routeName = ShareExtensionPreferences.outputRoute == .directBluetooth
-                    ? "напряму Bluetooth"
-                    : "через ESP32"
-                statusLabel.text = plan.unsupportedCharacters.isEmpty
-                    ? "Надіслано \(routeName)"
-                    : "Надіслано \(routeName); пропущено: \(String(plan.unsupportedCharacters.prefix(6)))"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-                    self?.extensionContext?.completeRequest(returningItems: nil)
+        extensionContext.open(handoffURL) { [weak self] opened in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard opened else {
+                    self.finishWithError("Не вдалося відкрити ESP Remote")
+                    return
                 }
-            case .failure(let error):
-                finishWithError(error.localizedDescription)
+                self.statusLabel.text = "Передано в ESP Remote"
+                self.extensionContext?.completeRequest(returningItems: nil)
             }
         }
     }
 
     private func finishWithError(_ message: String) {
         isSending = false
-        outputControl.isEnabled = true
-        layoutControl.isEnabled = true
-        shortcutButton.isEnabled = true
-        closeButton.isEnabled = true
         sendButton.isEnabled = true
+        closeButton.isEnabled = true
         var configuration = sendButton.configuration
         configuration?.title = "Повторити"
         sendButton.configuration = configuration
-
         statusLabel.text = "\(message). Текст не втрачено; можна повторити."
     }
 
     @objc private func closeTapped() {
-        transmitter?.cancel()
         extensionContext?.completeRequest(returningItems: nil)
-    }
-
-    @objc private func outputChanged() {
-        ShareExtensionPreferences.outputRoute = outputControl.selectedSegmentIndex == 1
-            ? .directBluetooth
-            : .espBridge
-        statusLabel.text = ShareExtensionPreferences.outputRoute == .directBluetooth
-            ? "Прямий Bluetooth: дочекайтеся підключення клавіатури на комп’ютері."
-            : "ESP32: буде знайдено найближчий міст."
     }
 }
 

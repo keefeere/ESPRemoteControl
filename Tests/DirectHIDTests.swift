@@ -14,7 +14,8 @@ struct DirectHIDTests {
         descriptorSizes()
         savedHosts()
         advertisingLifecycle()
-        print("PASS: HID reports, held input, FIFO backpressure, host isolation, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
+        shareHandoff()
+        print("PASS: HID reports, held input, FIFO backpressure, host isolation, boot mode, descriptor sizes, saved hosts, advertising lifecycle, Share handoff")
     }
 
     static func keyboardTransitions() {
@@ -164,6 +165,16 @@ struct DirectHIDTests {
         advertising = HIDAdvertisingState(isAdvertising: true)
         check(advertising.update(wanted: true) == nil, "Restored advertising must not start a second request")
         check(advertising.update(wanted: false) == .stop, "Restored advertising can be stopped after forget")
+    }
+
+    static func shareHandoff() {
+        let text = "Привіт, Mac! https://example.com/?a=1&b=2"
+        guard let url = ShareTextHandoff.url(for: text) else {
+            preconditionFailure("Share handoff URL must be created")
+        }
+        check(ShareTextHandoff.text(from: url) == text, "Share handoff preserves Unicode and URL query characters")
+        check(ShareTextHandoff.text(from: URL(string: "espremote://other?text=test")!) == nil,
+              "Only the app's Share handoff route is accepted")
     }
 
     /// Parse HID short items independently of the encoder. The host will use
