@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
     private let textView = UITextView()
+    private let outputControl = UISegmentedControl(items: ["ESP32", "Bluetooth"])
     private let layoutControl = UISegmentedControl(items: ["EN", "UA"])
     private let statusLabel = UILabel()
     private let shortcutButton = UIButton(type: .system)
@@ -11,7 +12,7 @@ final class ShareViewController: UIViewController {
 
     private var selectedShortcut = ShareExtensionPreferences.layoutShortcut
     private var fallbackAttributedText: [String] = []
-    private var transmitter: ShareBLETransmitter?
+    private var transmitter: ShareTextTransmitter?
     private var isSending = false
 
     override func viewDidLoad() {
@@ -28,7 +29,7 @@ final class ShareViewController: UIViewController {
         titleLabel.adjustsFontForContentSizeCategory = true
 
         let subtitleLabel = UILabel()
-        subtitleLabel.text = "Надіслати текст або посилання на комп’ютер через ESP32"
+        subtitleLabel.text = "Надіслати текст або посилання через ESP32 чи напряму Bluetooth"
         subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.numberOfLines = 0
@@ -40,6 +41,10 @@ final class ShareViewController: UIViewController {
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 10, bottom: 12, right: 10)
         textView.delegate = self
         textView.accessibilityLabel = "Текст для надсилання"
+
+        outputControl.selectedSegmentIndex = ShareExtensionPreferences.outputRoute == .directBluetooth ? 1 : 0
+        outputControl.accessibilityLabel = "Вихід для тексту"
+        outputControl.addTarget(self, action: #selector(outputChanged), for: .valueChanged)
 
         layoutControl.selectedSegmentIndex = ShareExtensionPreferences.targetLayout == .ukrainianEnhanced ? 1 : 0
         layoutControl.accessibilityLabel = "Поточна розкладка комп’ютера"
@@ -71,6 +76,17 @@ final class ShareViewController: UIViewController {
         layoutLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         layoutControl.setContentHuggingPriority(.required, for: .horizontal)
 
+        let outputLabel = UILabel()
+        outputLabel.text = "Вихід"
+        outputLabel.font = .preferredFont(forTextStyle: .subheadline)
+
+        let outputRow = UIStackView(arrangedSubviews: [outputLabel, outputControl])
+        outputRow.axis = .horizontal
+        outputRow.alignment = .center
+        outputRow.spacing = 12
+        outputLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        outputControl.setContentHuggingPriority(.required, for: .horizontal)
+
         let shortcutLabel = UILabel()
         shortcutLabel.text = "Перемикання розкладки"
         shortcutLabel.font = .preferredFont(forTextStyle: .subheadline)
@@ -92,6 +108,7 @@ final class ShareViewController: UIViewController {
         let stack = UIStackView(arrangedSubviews: [
             titleLabel,
             subtitleLabel,
+            outputRow,
             textView,
             layoutRow,
             shortcutRow,
@@ -227,6 +244,7 @@ final class ShareViewController: UIViewController {
         view.endEditing(true)
         isSending = true
         sendButton.isEnabled = false
+        outputControl.isEnabled = false
         layoutControl.isEnabled = false
         shortcutButton.isEnabled = false
         closeButton.isEnabled = false
@@ -245,7 +263,14 @@ final class ShareViewController: UIViewController {
             return
         }
 
-        let transmitter = ShareBLETransmitter()
+        if ShareExtensionPreferences.outputRoute == .directBluetooth, plan.taps.count > 600 {
+            finishWithError("Для прямого Bluetooth надішліть до 600 клавіш за раз.")
+            return
+        }
+
+        let transmitter: ShareTextTransmitter = ShareExtensionPreferences.outputRoute == .directBluetooth
+            ? ShareDirectHIDTransmitter()
+            : ShareBLETransmitter()
         self.transmitter = transmitter
         transmitter.onStatusChange = { [weak self] status in
             self?.statusLabel.text = status
@@ -256,9 +281,12 @@ final class ShareViewController: UIViewController {
             case .success:
                 ShareExtensionPreferences.targetLayout = plan.finalLayout
                 ShareExtensionPreferences.layoutShortcut = selectedShortcut
+                let routeName = ShareExtensionPreferences.outputRoute == .directBluetooth
+                    ? "напряму Bluetooth"
+                    : "через ESP32"
                 statusLabel.text = plan.unsupportedCharacters.isEmpty
-                    ? "Надіслано"
-                    : "Надіслано; пропущено: \(String(plan.unsupportedCharacters.prefix(6)))"
+                    ? "Надіслано \(routeName)"
+                    : "Надіслано \(routeName); пропущено: \(String(plan.unsupportedCharacters.prefix(6)))"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
                     self?.extensionContext?.completeRequest(returningItems: nil)
                 }
@@ -270,6 +298,7 @@ final class ShareViewController: UIViewController {
 
     private func finishWithError(_ message: String) {
         isSending = false
+        outputControl.isEnabled = true
         layoutControl.isEnabled = true
         shortcutButton.isEnabled = true
         closeButton.isEnabled = true
@@ -284,6 +313,15 @@ final class ShareViewController: UIViewController {
     @objc private func closeTapped() {
         transmitter?.cancel()
         extensionContext?.completeRequest(returningItems: nil)
+    }
+
+    @objc private func outputChanged() {
+        ShareExtensionPreferences.outputRoute = outputControl.selectedSegmentIndex == 1
+            ? .directBluetooth
+            : .espBridge
+        statusLabel.text = ShareExtensionPreferences.outputRoute == .directBluetooth
+            ? "Прямий Bluetooth: дочекайтеся підключення клавіатури на комп’ютері."
+            : "ESP32: буде знайдено найближчий міст."
     }
 }
 
