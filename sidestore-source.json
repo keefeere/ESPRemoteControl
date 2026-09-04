@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.0.4/ESPRemoteControl-unsigned.ipa",
           "size": 701658,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.0.4"
+          "localizedDescription": "Restores short taps on UA/EN and the orientation lock. Short UA/EN switches both the screen and host layout; holding changes only the screen. Tap the lock to lock/unlock the current orientation, or hold to force landscape. Short, long, repeated and cancelled presses are now checked in iPhone Simulator UI tests."
         },
         {
           "version": "2.0.3",
