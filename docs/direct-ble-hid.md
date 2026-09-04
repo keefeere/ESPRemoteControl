@@ -6,8 +6,9 @@ tests and the Xcode 26.6 iOS build passed for commit `802bb64`, producing versio
 The user confirmed keyboard and mouse input on a physical iPhone/macOS pair.
 The app reused the pairing created with BlueTouch; input began after toggling
 Bluetooth off and on on the Mac. This records the observation, not a confirmed
-root cause. Linux and Windows testing of this app remains pending. The sections
-below preserve the research evidence and acceptance criteria.
+root cause. The user also confirmed input on Linux, with an inconsistent
+connection process. Windows testing remains pending. The sections below preserve
+the research evidence and acceptance criteria.
 
 ## Decision and evidence
 
@@ -134,3 +135,52 @@ provide arbitrary Unicode or a two-way clipboard protocol. Those remain possible
 future reasons for LAN mode, not prerequisites for the requested keyboard/mouse.
 Pre-OS support in direct Bluetooth mode must be tested per host; the existing
 ESP32 USB mode remains the established path for that use case.
+
+## Saved computers and reconnect diagnostics (2.0.5)
+
+The Bluetooth sheet now keeps multiple computers, shows the selected and
+HID-ready host, and allows selection, a local display name, and “Forget in app”.
+The existing selected host and outgoing connection name migrate on upgrade.
+Input is sent only to the selected host; switching first drains neutral reports
+and discards queued input. A known incoming-only host may still need to initiate
+the link from the computer. Selecting a host does not forcibly disconnect a
+system Bluetooth link owned by the computer or another app.
+
+Names are used only when CoreBluetooth resolves them for the same identifier.
+A `CBCentral` does not provide a friendly name, so incoming hosts can appear as
+“Комп’ютер · <short ID>” until named by the user or discovered by the browser.
+“Forget in app” removes saved selection and automatic reconnect data. Forgetting
+the selected host closes pairing, including after relaunch; stale subscriptions
+cannot immediately add it back. Explicitly opening pairing can add it again.
+System pairing is separate and can be removed in the iPhone/computer's Bluetooth
+settings. The Share extension retains its existing separate preferences container
+and selected host; host management here applies to the main application.
+
+The supplied 2.0.2 Linux log shows both keyboard and mouse subscriptions at
+13:08:37, then both unsubscribing at 13:10:18, followed by an advertising error.
+It contains no error details or peer identities and does not establish a KDE
+Connect conflict. The app now serializes pending advertising starts, handles a
+HID connection becoming ready before advertising completes, and logs shortened
+peer IDs plus error domain/code/message. An outgoing BLE disconnect does not
+clear HID state while the selected host remains subscribed to input reports.
+Apple explicitly notes that
+[`cancelPeripheralConnection`](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/cancelperipheralconnection(_:))
+does not necessarily disconnect the physical link when another app still uses it.
+The [current subscribers](https://developer.apple.com/documentation/corebluetooth/cbmutablecharacteristic/subscribedcentrals)
+and input subscription callbacks remain the authority for HID readiness.
+
+Device acceptance checks for this update:
+
+- Upgrade without deleting the existing Mac/Linux pairing; confirm the current
+  host and assign a name if necessary.
+- Save a second computer, switch in both directions, and verify that held input
+  is released on the old host and new input goes only to the chosen host.
+- Forget an inactive host; verify the active computer keeps working. Forget the
+  active host and relaunch; verify it is not silently selected again.
+- Compare reconnecting with KDE Connect active and inactive, keeping system
+  pairing intact initially. Share the new connection log for each case before
+  concluding that another Bluetooth profile prevents HID.
+
+Host-store migration/isolation/forget and asynchronous advertising ordering have
+automated checks in `Tests/DirectHIDTests.swift`; actual host switching, system
+pairing, and coexistence require physical-device validation.

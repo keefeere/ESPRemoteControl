@@ -12,7 +12,9 @@ struct DirectHIDTests {
         notificationBackpressure()
         hostSelection()
         descriptorSizes()
-        print("PASS: HID reports, held input, FIFO backpressure, host isolation, boot mode, descriptor sizes")
+        savedHosts()
+        advertisingLifecycle()
+        print("PASS: HID reports, held input, FIFO backpressure, host isolation, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
     }
 
     static func keyboardTransitions() {
@@ -107,6 +109,61 @@ struct DirectHIDTests {
         check(session.isReady, "Explicitly selected second host works")
         session = HIDHostSession(preferredHost: nil, allowsPairing: false)
         check(!session.allows(first), "Closed pairing window rejects new hosts")
+    }
+
+    static func savedHosts() {
+        let suite = "HIDHostTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = UUID(), second = UUID()
+        check(HIDHostStore(defaults: defaults).shouldPairOnStart, "Fresh install opens pairing")
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set(first.uuidString, forKey: "directHID.selectedHost")
+        defaults.set(first.uuidString, forKey: "directHID.outgoingHost")
+        defaults.set("MacBook", forKey: "directHID.outgoingHostName")
+        var store = HIDHostStore(defaults: defaults)
+        check(store.selectedHostID == first && store.host(first)?.name == "MacBook", "Upgrade preserves host identity and name")
+        check(store.host(first)?.supportsOutgoingConnection == true, "Upgrade preserves reverse connection capability")
+        store.connected(second, name: nil, supportsOutgoing: false)
+        store.rename(second, to: "  Linux  ")
+        store.updateDiscoveredName("workstation", for: second)
+        store = HIDHostStore(defaults: defaults)
+        check(store.hosts.count == 2 && store.selectedHostID == second, "Multiple hosts and active selection survive relaunch")
+        check(store.host(second)?.name == "Linux", "Learned names do not overwrite a user alias")
+        check(store.host(second)?.supportsOutgoingConnection == false, "Do not invent a reverse connection for an incoming host")
+        store.select(first, name: nil, supportsOutgoing: false)
+        check(store.host(first)?.supportsOutgoingConnection == true, "Selecting a saved host preserves reverse connection capability")
+        store.forget(second)
+        check(store.selectedHostID == first && store.hosts.count == 1, "Forgetting an inactive host preserves active routing")
+        store.forget(first)
+        store = HIDHostStore(defaults: defaults)
+        check(store.hosts.isEmpty && store.selectedHostID == nil, "Forget persists across relaunch")
+        check(!store.shouldPairOnStart, "Forgetting the last host must not immediately accept it again")
+        check(defaults.string(forKey: "directHID.outgoingHost") == nil, "Forget removes legacy reconnect data")
+        var session = HIDHostSession(preferredHost: store.selectedHostID, allowsPairing: store.shouldPairOnStart)
+        check(!session.subscribe(.keyboard, from: first), "Restored subscriptions from a forgotten host are rejected")
+        session.allowsPairing = true
+        check(session.subscribe(.keyboard, from: first), "Explicit pairing can add a forgotten host again")
+        store.connected(second, name: "Linux", supportsOutgoing: false)
+        let extensionStore = HIDHostStore(defaults: defaults, hostKey: "shareDirectHID.selectedHost")
+        check(extensionStore.selectedHostID == nil, "Share selection has a separate namespace")
+    }
+
+    static func advertisingLifecycle() {
+        var advertising = HIDAdvertisingState()
+        check(advertising.update(wanted: true) == .start, "First disconnect starts advertising")
+        check(advertising.update(wanted: true) == nil, "Second unsubscribe cannot duplicate an in-flight start")
+        check(advertising.update(wanted: false) == nil, "Becoming ready waits for pending start callback")
+        check(advertising.didStart(succeeded: true) == .stop, "A start completing after HID is ready is stopped")
+        check(advertising.update(wanted: true) == .start, "Next disconnect can advertise again")
+        check(advertising.didStart(succeeded: false) == nil, "Advertising errors do not cause a retry loop")
+        check(advertising.update(wanted: true) == .start, "Explicit reconnect retries a failed start")
+        check(advertising.didStart(succeeded: true) == nil, "Successful start remains active while waiting")
+        check(advertising.update(wanted: false) == .stop, "Forgetting a host stops advertising")
+        check(advertising.update(wanted: false) == nil, "Closed pairing remains idle")
+        advertising = HIDAdvertisingState(isAdvertising: true)
+        check(advertising.update(wanted: true) == nil, "Restored advertising must not start a second request")
+        check(advertising.update(wanted: false) == .stop, "Restored advertising can be stopped after forget")
     }
 
     /// Parse HID short items independently of the encoder. The host will use

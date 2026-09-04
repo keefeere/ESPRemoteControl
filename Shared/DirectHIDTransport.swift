@@ -12,6 +12,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     @Published private(set) var isPairing = false
     @Published private(set) var lastError: String?
     @Published private(set) var diagnostics: [String] = []
+    @Published private(set) var savedHosts: [SavedHIDHost] = []
+    @Published private(set) var selectedHostID: UUID?
+    @Published private(set) var connectedHostID: UUID?
     let advertisedName = "ESP Remote"
     let browser = BluetoothHostBrowser()
 
@@ -31,7 +34,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         return string
     }
 
-    private let hostKey: String
+    private let hostStore: HIDHostStore
+    private var advertising = HIDAdvertisingState()
+    private var advertisingError: String?
+    private var lastReadyHostID: UUID?
     private var manager: CBPeripheralManager?
     private var isRunning = false
     private var servicesInstalled = false
@@ -54,8 +60,17 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var finishingDrain = false
 
     init(hostKey: String = "directHID.selectedHost") {
-        self.hostKey = hostKey
+        hostStore = HIDHostStore(hostKey: hostKey)
         super.init()
+        savedHosts = hostStore.hosts
+        selectedHostID = hostStore.selectedHostID
+        browser.onDiagnostic = { [weak self] event in self?.record(event) }
+        browser.onNameDiscovered = { [weak self] id, name in
+            guard let self, self.hostStore.host(id) != nil else { return }
+            self.hostStore.updateDiscoveredName(name, for: id)
+            self.savedHosts = self.hostStore.hosts
+            if self.isRunning { self.refreshStatus() }
+        }
         browser.onPoweredOn = { [weak self] in self?.startPeripheral() }
         browser.onUnavailable = { [weak self] message in
             guard let self, self.isRunning else { return }
@@ -72,16 +87,21 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     var diagnosticText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-        return "ESP Remote \(version) · iOS \(UIDevice.current.systemVersion)\n\(statusText)\n" + diagnostics.joined(separator: "\n")
+        let selected = selectedHostID.map { String($0.uuidString.prefix(8)) } ?? "none"
+        let connected = connectedHostID.map { String($0.uuidString.prefix(8)) } ?? "none"
+        return "ESP Remote \(version) · iOS \(UIDevice.current.systemVersion)\n\(statusText)\nSelected: \(selected); HID ready: \(connected)\n" + diagnostics.joined(separator: "\n")
     }
 
     func start() {
         guard !isRunning else { return }
         isRunning = true
         lastError = nil
-        let preferred = UserDefaults.standard.string(forKey: hostKey).flatMap(UUID.init(uuidString:))
-        session = HIDHostSession(preferredHost: preferred, allowsPairing: preferred == nil)
-        isPairing = preferred == nil
+        let preferred = hostStore.selectedHostID
+        session = HIDHostSession(preferredHost: preferred, allowsPairing: hostStore.shouldPairOnStart)
+        isPairing = hostStore.shouldPairOnStart
+        selectedHostID = preferred
+        browser.setKnownHosts(hostStore.hosts)
+        record("Starting HID; selected \(peerTag(preferred)); pairing \(isPairing)")
         statusText = "Запуск прямого Bluetooth…"
         // Register system connection events before exposing HID services.
         browser.start()
@@ -105,6 +125,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.pairingTimer?.cancel()
             self.sendWork?.cancel()
             self.manager?.stopAdvertising()
+            self.advertising = HIDAdvertisingState()
             self.manager?.removeAllServices()
             self.manager?.delegate = nil
             self.manager = nil
@@ -115,14 +136,58 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.attributes.removeAll()
             self.clearInput()
             self.host = nil
+            self.connectedHostID = nil
+            self.lastReadyHostID = nil
             self.isReady = false
             self.statusText = "Прямий Bluetooth вимкнено"
             completion()
         }
     }
 
+    func hostName(for id: UUID) -> String {
+        hostStore.host(id)?.name ?? browser.name(for: id)
+    }
+
+    func renameHost(_ id: UUID, to name: String) {
+        hostStore.rename(id, to: name)
+        savedHosts = hostStore.hosts
+        browser.setKnownHosts(savedHosts)
+        if isRunning { refreshStatus() }
+    }
+
+    func forgetHost(_ id: UUID) {
+        guard afterDrain == nil else { return }
+        let forget = { [weak self] in
+            guard let self else { return }
+            self.hostStore.forget(id)
+            self.savedHosts = self.hostStore.hosts
+            self.browser.forget(id)
+            self.browser.setKnownHosts(self.savedHosts)
+            self.record("Forgot host in app: \(self.peerTag(id)); system bond unchanged")
+        }
+        if session.preferredHost == id || hostStore.selectedHostID == id {
+            drainReleases { [weak self] in
+                guard let self else { return }
+                self.browser.cancelConnection()
+                self.pairingTimer?.cancel()
+                self.host = nil
+                self.session = HIDHostSession(preferredHost: nil, allowsPairing: false)
+                self.isPairing = false
+                self.lastError = nil
+                forget()
+                self.refreshStatus()
+            }
+        } else {
+            forget()
+            if isRunning { refreshStatus() }
+        }
+    }
+
     func beginPairing() { prepareHost(nil) }
-    func connect(to id: UUID) { prepareHost(id) }
+    func connect(to id: UUID) {
+        guard !(session.host == id && session.isReady) else { return }
+        prepareHost(id)
+    }
 
     private func prepareHost(_ id: UUID?) {
         guard canPair, afterDrain == nil else { return }
@@ -133,12 +198,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.host = nil
             self.session = HIDHostSession(preferredHost: id, allowsPairing: true)
             self.isPairing = true
-            self.record(id == nil ? "Pairing window opened" : "Host selected from phone")
-            self.advertise()
+            self.record(id == nil ? "Pairing window opened" : "Host selected: \(self.peerTag(id))")
             self.armPairingTimeout()
             if let id {
+                self.hostStore.select(id, name: self.browser.resolvedName(for: id), supportsOutgoing: false)
+                self.savedHosts = self.hostStore.hosts
+                self.browser.setKnownHosts(self.savedHosts)
                 self.restoreSubscriptions()
-                self.browser.connect(to: id)
+                if !self.session.isReady { self.browser.connect(to: id) }
             }
             self.refreshStatus()
         }
@@ -156,11 +223,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             guard let self else { return }
             self.lastError = nil
             self.host = nil
-            self.session = HIDHostSession(preferredHost: preferred, allowsPairing: preferred == nil)
-            self.isPairing = preferred == nil
+            self.session = HIDHostSession(preferredHost: preferred, allowsPairing: self.isPairing)
+            self.browser.setKnownHosts(self.hostStore.hosts)
             self.restoreSubscriptions()
-            self.advertise()
-            self.browser.reconnectRememberedHost(ifMatching: preferred)
+            if !self.session.isReady { self.browser.reconnectRememberedHost(ifMatching: preferred) }
             self.refreshStatus()
         }
     }
@@ -171,6 +237,17 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             guard let self, self.isPairing, !self.session.isReady else { return }
             self.isPairing = false
             self.session.allowsPairing = false
+            self.record("Pairing window closed")
+            // An incomplete new pairing must not replace the last saved host.
+            if self.session.preferredHost != self.hostStore.selectedHostID {
+                self.drainReleases { [weak self] in
+                    guard let self else { return }
+                    self.host = nil
+                    self.session = HIDHostSession(preferredHost: self.hostStore.selectedHostID, allowsPairing: false)
+                    self.restoreSubscriptions()
+                    self.refreshStatus()
+                }
+            }
             self.refreshStatus()
         }
         pairingTimer = timer
@@ -199,6 +276,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard let manager, manager.state == .poweredOn else { return }
         canPair = false
         servicesInstalled = false
+        manager.stopAdvertising()
+        advertising = HIDAdvertisingState()
         manager.removeAllServices()
         attributes.removeAll()
         inputs.removeAll()
@@ -237,7 +316,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             addingService = nil
             servicesInstalled = true
             canPair = true
-            advertise()
+            refreshStatus()
             if isPairing { armPairingTimeout() }
             browser.reconnectRememberedHost(ifMatching: session.preferredHost)
             return
@@ -247,14 +326,29 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func advertise() {
-        guard isRunning, servicesInstalled, let manager, manager.state == .poweredOn else { return }
-        if !manager.isAdvertising {
+        let wanted = isRunning && servicesInstalled && manager?.state == .poweredOn
+            && !session.isReady && afterDrain == nil && (isPairing || session.preferredHost != nil)
+        applyAdvertising(advertising.update(wanted: wanted))
+    }
+
+    private func applyAdvertising(_ action: HIDAdvertisingState.Action?) {
+        guard let manager else { return }
+        switch action {
+        case .start:
+            record("Advertising requested; selected \(peerTag(session.preferredHost))")
             manager.startAdvertising([
                 CBAdvertisementDataLocalNameKey: advertisedName,
                 CBAdvertisementDataServiceUUIDsKey: [Self.uuid("1812")]
             ])
+        case .stop:
+            manager.stopAdvertising()
+        case nil:
+            break
         }
-        refreshStatus()
+    }
+
+    private func peerTag(_ id: UUID?) -> String {
+        id.map { String($0.uuidString.prefix(8)) } ?? "none"
     }
 
     private func record(_ event: String) {
@@ -263,18 +357,25 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if diagnostics.count > 60 { diagnostics.removeFirst(diagnostics.count - 60) }
     }
 
-    private func refreshStatus() {
+    private func refreshStatus(updateAdvertisement: Bool = true) {
         let ready = isRunning && afterDrain == nil && session.isReady
+        selectedHostID = session.preferredHost
+        connectedHostID = ready ? session.host : nil
         if ready {
             isPairing = false
             session.allowsPairing = false
             pairingTimer?.cancel()
-            manager?.stopAdvertising()
             if let id = session.host {
-                UserDefaults.standard.set(id.uuidString, forKey: hostKey)
+                if lastReadyHostID != id {
+                    lastReadyHostID = id
+                    hostStore.connected(id, name: browser.resolvedName(for: id), supportsOutgoing: browser.requestedHost == id)
+                    savedHosts = hostStore.hosts
+                    record("HID ready: \(peerTag(id))")
+                    browser.resolveName(for: id)
+                }
                 browser.rememberReadyHost(id)
+                statusText = "Підключено · \(hostName(for: id))"
             }
-            statusText = "Клавіатура й миша підключені"
         } else if let lastError {
             statusText = lastError
         } else if afterDrain != nil {
@@ -283,14 +384,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             statusText = "Підготовка Bluetooth…"
         } else if session.suspended {
             statusText = "Комп’ютер призупинив ввід"
-        } else if session.host != nil || browser.requestedHost != nil {
-            statusText = "Очікуємо підключення клавіатури й миші…"
+        } else if let id = session.host ?? browser.requestedHost {
+            statusText = "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
+        } else if let id = session.preferredHost {
+            statusText = "Очікуємо · \(hostName(for: id))"
         } else if isPairing {
             statusText = "Готовий до сполучення · \(advertisedName)"
         } else {
-            statusText = session.preferredHost == nil ? "Відкрий сполучення" : "Очікуємо знайомий комп’ютер"
+            statusText = "Вибери комп’ютер або відкрий сполучення"
         }
+        if !ready { lastReadyHostID = nil }
         isReady = ready
+        if updateAdvertisement { advertise() }
     }
 
     private func clearInput() {
@@ -449,29 +554,39 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     private func disconnected(_ id: UUID) {
         guard session.host == id else { return }
-        record("Host disconnected")
+        // Cancelling our central-role connection does not necessarily close
+        // the host's HID connection to our peripheral role.
+        let stillSubscribed = inputs.contains { channel, characteristic in
+            session.subscriptions.contains(channel)
+                && (characteristic.subscribedCentrals ?? []).contains { $0.identifier == id }
+        }
+        if stillSubscribed {
+            record("BLE link ended; HID subscriptions remain: \(peerTag(id))")
+            return
+        }
+        record("HID disconnected: \(peerTag(id))")
         session.disconnect(id)
         host = nil
         clearInput()
         refreshStatus()
-        advertise()
     }
 
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
         guard peripheral === manager, isRunning else { return }
         record("Peripheral state: \(peripheral.state.rawValue)")
         if peripheral.state == .poweredOn {
+            advertising = HIDAdvertisingState(isAdvertising: peripheral.isAdvertising)
             lastError = nil
             if servicesInstalled {
                 canPair = true
                 restoreSubscriptions()
-                advertise()
             } else {
                 installServices()
             }
         } else {
             canPair = false
             servicesInstalled = false
+            advertising = HIDAdvertisingState()
             addingService = nil
             serviceQueue.removeAll()
             if let id = session.host { session.disconnect(id) }
@@ -498,17 +613,28 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
         guard peripheral === manager, isRunning else { return }
-        if let error { lastError = "Помилка видимості Bluetooth: \(error.localizedDescription)" }
-        record(error == nil ? "Advertising HID" : "Advertising failed")
-        refreshStatus()
+        applyAdvertising(advertising.didStart(succeeded: error == nil))
+        if let error = error as NSError? {
+            advertisingError = "Помилка видимості Bluetooth: \(error.localizedDescription)"
+            if !session.isReady { lastError = advertisingError }
+            record("Advertising failed: \(error.domain)/\(error.code): \(error.localizedDescription)")
+        } else {
+            if lastError == advertisingError { lastError = nil }
+            advertisingError = nil
+            record("Advertising HID")
+        }
+        refreshStatus(updateAdvertisement: false)
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
         guard peripheral === manager, isRunning,
-              case .input(let channel)? = attributes[ObjectIdentifier(characteristic)],
-              session.subscribe(channel, from: central.identifier) else { return }
+              case .input(let channel)? = attributes[ObjectIdentifier(characteristic)] else { return }
+        guard session.subscribe(channel, from: central.identifier) else {
+            record("Ignored subscription: \(peerTag(central.identifier)), \(channel); selected \(peerTag(session.preferredHost))")
+            return
+        }
         host = central
-        record("Subscribed: \(channel)")
+        record("Subscribed: \(channel), host \(peerTag(central.identifier))")
         // A baseline report lets the host finish initializing the input device.
         _ = queue.append([state.keyboard, state.mouse()])
         scheduleSend()
@@ -519,12 +645,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard peripheral === manager, isRunning, session.host == central.identifier,
               case .input(let channel)? = attributes[ObjectIdentifier(characteristic)] else { return }
         session.unsubscribe(channel, from: central.identifier)
-        record("Unsubscribed: \(channel)")
+        record("Unsubscribed: \(channel), host \(peerTag(central.identifier))")
         clearInput()
         if session.host == nil { host = nil }
         refreshStatus()
         releaseAllInput()
-        advertise()
     }
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
@@ -534,6 +659,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
         guard isRunning, session.allows(request.central.identifier) else {
+            record("Read rejected: \(peerTag(request.central.identifier)); selected \(peerTag(session.preferredHost))")
             peripheral.respond(to: request, withResult: .insufficientAuthorization)
             return
         }
@@ -553,7 +679,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             return
         case .reportMap:
             value = RemoteHIDDescriptor.reportMap
-            record("Report map read, offset \(request.offset)")
+            record("Report map read: \(peerTag(request.central.identifier)), offset \(request.offset)")
         case .information: value = Data([0x11, 0x01, 0, 0x02])
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
         case .manufacturer: value = Data("ESP Remote Control".utf8)
