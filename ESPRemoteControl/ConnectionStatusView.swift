@@ -159,6 +159,8 @@ private struct DirectBluetoothSheet: View {
                 Section("Сполучення з комп’ютера") {
                     Text("У налаштуваннях Bluetooth комп’ютера вибери «\(transport.advertisedName)» або ім’я цього iPhone. Підтвердь системний запит, якщо він з’явиться.")
                         .font(.subheadline)
+                    Text("Linux: звичайна команда «З’єднатися» може також увімкнути аудіопрофіль iPhone. Вимкни профіль iPhone у налаштуваннях звуку або підключай лише HID-сервіс.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення") {
                         transport.beginPairing()
                     }
