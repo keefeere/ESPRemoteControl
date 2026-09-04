@@ -31,7 +31,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         return string
     }
 
-    private let hostKey = "directHID.selectedHost"
+    private let hostKey: String
     private var manager: CBPeripheralManager?
     private var isRunning = false
     private var servicesInstalled = false
@@ -49,10 +49,12 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var sendWork: DispatchWorkItem?
     private var pairingTimer: DispatchWorkItem?
     private var afterDrain: (() -> Void)?
+    private var afterInputQueueDrains: (() -> Void)?
     private var drainTimer: DispatchWorkItem?
     private var finishingDrain = false
 
-    override init() {
+    init(hostKey: String = "directHID.selectedHost") {
+        self.hostKey = hostKey
         super.init()
         browser.onPoweredOn = { [weak self] in self?.startPeripheral() }
         browser.onUnavailable = { [weak self] message in
@@ -295,6 +297,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         sendWork?.cancel()
         sendWork = nil
         queue.removeAll()
+        afterInputQueueDrains = nil
         state = HIDInputState()
         lastKeyboard = state.keyboard.data
         lastMouse = state.mouse().data
@@ -351,6 +354,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .sent:
             scheduleSend()
         case .empty:
+            if let completion = afterInputQueueDrains {
+                afterInputQueueDrains = nil
+                completion()
+            }
             if afterDrain != nil, !finishingDrain {
                 finishingDrain = true
                 let work = DispatchWorkItem { [weak self] in self?.finishDrain() }
@@ -409,6 +416,24 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             return
         }
         enqueue(taps.flatMap { state.tap($0.keycode, modifiers: $0.modifiers) })
+    }
+
+    /// Sends a text batch and calls `completion` after all reports have been
+    /// accepted by CoreBluetooth. This is useful to short-lived clients such as
+    /// a Share extension, which must not terminate while reports remain queued.
+    @discardableResult
+    func sendKeyTaps(
+        _ taps: [(modifiers: UInt8, keycode: UInt8)],
+        whenDrained completion: @escaping () -> Void
+    ) -> Bool {
+        guard isReady else { return false }
+        guard taps.count <= queue.capacity / 3 else {
+            lastError = "Текст завеликий. Надішли меншими частинами."
+            return false
+        }
+        afterInputQueueDrains = completion
+        enqueue(taps.flatMap { state.tap($0.keycode, modifiers: $0.modifiers) })
+        return true
     }
     func sendMouseMove(dx: Int8, dy: Int8) { enqueue([state.mouse(dx: dx, dy: dy)]) }
     func sendMouseScroll(dx: Int8, dy: Int8) { enqueue([state.mouse(wheel: dy, pan: dx)]) }

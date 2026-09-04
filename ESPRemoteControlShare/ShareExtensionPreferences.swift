@@ -1,9 +1,24 @@
 import Foundation
 
+enum ShareOutputRoute: String {
+    case espBridge
+    case directBluetooth
+}
+
 enum ShareExtensionPreferences {
     private static let targetLayoutKey = "shareTargetKeyboardLayout"
     private static let layoutShortcutKey = "shareHostLayoutShortcut"
     private static let lastPeripheralKey = "shareLastBridgePeripheralIdentifier"
+    private static let outputRouteKey = "shareOutputRoute"
+
+    static var outputRoute: ShareOutputRoute {
+        get {
+            ShareOutputRoute(rawValue: UserDefaults.standard.string(forKey: outputRouteKey) ?? "") ?? .espBridge
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: outputRouteKey)
+        }
+    }
 
     static var targetLayout: KeyboardLayout {
         get {

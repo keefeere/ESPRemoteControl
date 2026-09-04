@@ -1,7 +1,7 @@
 import CoreBluetooth
 import Foundation
 
-final class ShareBLETransmitter: NSObject {
+final class ShareBLETransmitter: NSObject, ShareTextTransmitter {
     enum TransmitError: LocalizedError {
         case bluetoothUnavailable
         case bridgeUnavailable
