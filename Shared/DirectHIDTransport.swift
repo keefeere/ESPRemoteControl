@@ -25,14 +25,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private static func uuid(_ short: String) -> CBUUID {
         CBUUID(string: "0000\(short)-0000-1000-8000-00805F9B34FB")
     }
-    private static func shortUUID(_ uuid: CBUUID) -> String {
-        let string = uuid.uuidString.uppercased()
-        if string.count == 4 { return string }
-        if string.hasPrefix("0000"), string.hasSuffix("-0000-1000-8000-00805F9B34FB") {
-            return String(string.dropFirst(4).prefix(4))
-        }
-        return string
-    }
 
     private let hostStore: HIDHostStore
     private var advertising = HIDAdvertisingState()
@@ -87,9 +79,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     var diagnosticText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         let selected = selectedHostID.map { String($0.uuidString.prefix(8)) } ?? "none"
         let connected = connectedHostID.map { String($0.uuidString.prefix(8)) } ?? "none"
-        return "ESP Remote \(version) · iOS \(UIDevice.current.systemVersion)\n\(statusText)\nSelected: \(selected); HID ready: \(connected)\n" + diagnostics.joined(separator: "\n")
+        return "ESP Remote \(version) (\(build)) · iOS \(UIDevice.current.systemVersion)\n\(statusText)\nSelected: \(selected); HID ready: \(connected)\n" + diagnostics.joined(separator: "\n")
     }
 
     func start() {
@@ -110,8 +103,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func startPeripheral() {
         guard isRunning, manager == nil else { return }
         UIDevice.current.isBatteryMonitoringEnabled = true
+        // Do not opt in to CoreBluetooth state restoration for this HID GATT
+        // database. iOS can assert while reconstructing a persisted descriptor,
+        // inside handleRestoringState, before willRestoreState reaches the app.
+        // Rebuild services on poweredOn; HIDHostStore independently preserves
+        // computer names/selection, and system Bluetooth bonds remain intact.
+        record("Creating fresh HID peripheral; GATT restoration disabled")
         manager = CBPeripheralManager(delegate: self, queue: .main, options: [
-            CBPeripheralManagerOptionRestoreIdentifierKey: "com.keefeere.ESPRemoteControl.hidPeripheral",
             CBPeripheralManagerOptionShowPowerAlertKey: true
         ])
     }
@@ -204,7 +202,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 self.hostStore.select(id, name: self.browser.resolvedName(for: id), supportsOutgoing: false)
                 self.savedHosts = self.hostStore.hosts
                 self.browser.setKnownHosts(self.savedHosts)
-                self.restoreSubscriptions()
+                self.adoptLiveSubscriptions()
                 if !self.session.isReady { self.browser.connect(to: id) }
             }
             self.refreshStatus()
@@ -225,7 +223,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.host = nil
             self.session = HIDHostSession(preferredHost: preferred, allowsPairing: self.isPairing)
             self.browser.setKnownHosts(self.hostStore.hosts)
-            self.restoreSubscriptions()
+            self.adoptLiveSubscriptions()
             if !self.session.isReady { self.browser.reconnectRememberedHost(ifMatching: preferred) }
             self.refreshStatus()
         }
@@ -244,7 +242,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                     guard let self else { return }
                     self.host = nil
                     self.session = HIDHostSession(preferredHost: self.hostStore.selectedHostID, allowsPairing: false)
-                    self.restoreSubscriptions()
+                    self.adoptLiveSubscriptions()
                     self.refreshStatus()
                 }
             }
@@ -579,7 +577,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             lastError = nil
             if servicesInstalled {
                 canPair = true
-                restoreSubscriptions()
+                adoptLiveSubscriptions()
             } else {
                 installServices()
             }
@@ -736,47 +734,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         refreshStatus()
     }
 
-    func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
-        guard let services = dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService] else { return }
-        attributes.removeAll()
-        inputs.removeAll()
-        for service in services {
-            for item in service.characteristics ?? [] {
-                guard let item = item as? CBMutableCharacteristic else { continue }
-                let attribute: Attribute?
-                switch Self.shortUUID(item.uuid) {
-                case "2A4A": attribute = .information
-                case "2A4B": attribute = .reportMap
-                case "2A4C": attribute = .controlPoint
-                case "2A4E": attribute = .protocolMode
-                case "2A22": attribute = .input(.bootKeyboard)
-                case "2A33": attribute = .input(.bootMouse)
-                case "2A32": attribute = .leds
-                case "2A19": attribute = .battery
-                case "2A29": attribute = .manufacturer
-                case "2A24": attribute = .model
-                case "2A50": attribute = .pnpID
-                case "2A4D":
-                    let descriptor = item.descriptors?.first { Self.shortUUID($0.uuid) == "2908" }
-                    if let bytes = descriptor?.value as? Data, bytes.count == 2 {
-                        if bytes[0] == 1, bytes[1] == 1 { attribute = .input(.keyboard) }
-                        else if bytes[0] == 2, bytes[1] == 1 { attribute = .input(.mouse) }
-                        else if bytes[0] == 1, bytes[1] == 2 { attribute = .leds }
-                        else { attribute = nil }
-                    } else { attribute = nil }
-                default: attribute = nil
-                }
-                if let attribute {
-                    attributes[ObjectIdentifier(item)] = attribute
-                    if case .input(let channel) = attribute { inputs[channel] = item }
-                }
-            }
-        }
-        servicesInstalled = inputs.count == 4 && attributes.count == 14
-        record(servicesInstalled ? "Restored GATT services" : "GATT restore incomplete; will rebuild")
-    }
-
-    private func restoreSubscriptions() {
+    /// Adopt subscriptions on this live manager when switching computers.
+    /// This does not deserialize any preserved CoreBluetooth services.
+    private func adoptLiveSubscriptions() {
         for (channel, characteristic) in inputs {
             for central in characteristic.subscribedCentrals ?? [] {
                 if session.subscribe(channel, from: central.identifier) { host = central }
