@@ -28,6 +28,38 @@ Unlike software solutions that require network setup or specific operating syste
 - **Optional privacy mask** - Keep the typing composer visible or mask it when entering passwords
 - **Hardware key hold** - Every on-screen key sends real HID key-down/key-up events, including multi-finger chords; modifiers can also be tapped to latch
 
+## Experimental v2: direct Bluetooth
+
+The v2 prototype adds a direct BLE HID keyboard/mouse mode. It is implemented
+but still needs validation on physical iPhone/macOS/Linux/Windows combinations.
+ESP32 mode remains the initial default, and the app remembers the selected mode.
+
+1. In the connection status strip, open **ESP** and choose **Прямий Bluetooth**.
+2. Open the pairing button beside the status. To connect from the computer,
+   enable pairing in the app and select **ESP Remote** (or the iPhone name) in
+   the computer's Bluetooth settings. Confirm any system pairing prompt.
+3. To initiate the connection from the iPhone, open Bluetooth settings on the
+   computer, choose **Знайти комп’ютер** in the app, then select the computer.
+   This path needs the host to advertise over BLE. A BLE link alone is not an
+   HID connection; wait until the app reports keyboard and mouse connected.
+4. Use the existing keyboard and trackpad. Return to **ESP-адаптер** to use the
+   USB bridge. Switching releases held input and cancels queued text.
+5. If input does not become ready, use **Поділитися журналом** in the pairing
+   panel. The log includes connection stages, not typed text. During prototype
+   updates a host may retain old GATT services; remove only this app/iPhone
+   pairing on the test host and pair again if necessary.
+
+Pairing is open for two minutes. Once connected, input is pinned to that host;
+use the pairing panel to select a different computer. The app clears held and
+queued input when it moves to the background or loses its HID session.
+
+Run `./scripts/test-direct-hid.sh` on a Swift-equipped machine to check HID report
+encoding, queue backpressure, host selection, and descriptor sizes. The IPA
+workflow runs these checks for pull requests and pushes to the v2 branch before
+building the app. Version 2.0.0 (16) passed these tests and the Xcode 26.6 iOS
+build on 2026-09-04 ([Actions run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
+Physical pairing and input tests remain pending.
+
 ## Hardware Requirements
 
 - **ESP32-S3** development board (must have native USB support)
@@ -205,8 +237,12 @@ This project solves a real problem with a unique hardware approach. Contribution
 
 ## Roadmap
 
-- **v2** - Direct BLE HID mode that works without the ESP32 adapter
-- **v3** - Optional LAN host mode for exact Unicode and bidirectional clipboard
+- **v2 (next)** - Direct BLE HID keyboard and mouse without the ESP32 adapter or a host app. Start with a device-tested HOGP prototype, then integrate the existing keyboard/trackpad, pairing, and reconnect. Validate on macOS, Linux, and Windows; retain ESP32 mode for USB HID and pre-OS input.
+- **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
+
+See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
+the CoreBluetooth approach, evidence, and remaining device checks. Direct mode
+is experimental and needs physical-device validation before becoming the default.
 
 ## Artwork
 

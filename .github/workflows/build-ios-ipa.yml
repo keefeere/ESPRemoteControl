@@ -2,9 +2,18 @@ name: Build unsigned iOS IPA
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "ESPRemoteControl/**"
+      - "Shared/**"
+      - "ESPRemoteControl.xcodeproj/**"
+      - "Tests/**"
+      - "scripts/**"
+      - ".github/workflows/build-ios-ipa.yml"
   push:
     branches:
       - main
+      - codex/v2-direct-ble-hid
     tags:
       - "ios-v*"
     paths:
@@ -12,6 +21,8 @@ on:
       - "ESPRemoteControlShare/**"
       - "Shared/**"
       - "ESPRemoteControl.xcodeproj/**"
+      - "Tests/**"
+      - "scripts/test-direct-hid.sh"
       - "scripts/build-unsigned-ipa.sh"
       - "scripts/update-sidestore-source.py"
       - ".github/workflows/build-ios-ipa.yml"
@@ -32,6 +43,9 @@ jobs:
 
       - name: Show Xcode version
         run: xcodebuild -version
+
+      - name: Test HID reports and session routing
+        run: ./scripts/test-direct-hid.sh
 
       - name: Install ldid
         run: brew install ldid
