@@ -23,6 +23,7 @@ on:
       - "ESPRemoteControl.xcodeproj/**"
       - "Tests/**"
       - "scripts/test-direct-hid.sh"
+      - "scripts/test-press-actions.sh"
       - "scripts/build-unsigned-ipa.sh"
       - "scripts/update-sidestore-source.py"
       - ".github/workflows/build-ios-ipa.yml"
@@ -47,8 +48,22 @@ jobs:
       - name: Test HID reports and session routing
         run: ./scripts/test-direct-hid.sh
 
-      - name: Install ldid
-        run: brew install ldid
+      - name: Install build and UI test tools
+        run: brew install ldid xcodegen
+
+      - name: Test short and long button presses on iPhone Simulator
+        run: ./scripts/test-press-actions.sh
+
+      - name: Upload failed button UI test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: press-actions-test-results
+          path: |
+            dist/press-actions.xcresult
+            dist/press-actions-tests.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build unsigned IPA
         run: ./scripts/build-unsigned-ipa.sh
