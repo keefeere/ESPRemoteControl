@@ -18,7 +18,8 @@ struct ContentView: View {
     @State private var showsSettings = false
     @State private var inputWarning: String?
     @State private var pendingShortcutText: String?
-    @State private var shortcutStatus: String?
+    @State private var sendStatus: String?
+    @State private var sendStatusToken = 0
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -184,6 +185,14 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
+                Button {
+                    resendInputText()
+                } label: {
+                    Label("Надіслати", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(inputText.isEmpty || !ble.isReady)
+
                 Spacer()
 
                 Menu {
@@ -239,10 +248,19 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
-            if let shortcutStatus {
-                Label(shortcutStatus, systemImage: "checkmark.circle")
+            if let sendStatus {
+                Label(sendStatus, systemImage: "checkmark.circle")
                     .font(.caption)
                     .foregroundStyle(.green)
+                    .task(id: sendStatusToken) {
+                        do {
+                            try await Task.sleep(for: .seconds(3))
+                        } catch {
+                            return
+                        }
+                        guard !Task.isCancelled else { return }
+                        sendStatus = nil
+                    }
             }
 
             if let inputWarning {
@@ -418,35 +436,21 @@ struct ContentView: View {
         let deletedCount = oldText.count - commonPrefixLength
         let insertedCharacters = newText.dropFirst(commonPrefixLength)
         var taps: [(modifiers: UInt8, keycode: UInt8)] = []
-        var unsupported: [Character] = []
 
         taps.append(contentsOf: repeatElement(
             (modifiers: UInt8(0), keycode: HID.keyBackspace),
             count: max(0, deletedCount)
         ))
 
-        let plan = TextTypingPlanner.makePlan(
-            for: String(insertedCharacters),
-            startingLayout: selectedLayout,
-            layoutShortcut: selectedShortcut
-        )
-        taps.append(contentsOf: plan.taps)
-        unsupported.append(contentsOf: plan.unsupportedCharacters)
-
-        if plan.finalLayout != selectedLayout {
-            layoutRawValue = plan.finalLayout.rawValue
-        }
-
         if !taps.isEmpty {
             ble.sendKeyTaps(taps)
         }
 
-        if unsupported.isEmpty {
+        if insertedCharacters.isEmpty {
             inputWarning = nil
-        } else {
-            let sample = String(unsupported.prefix(6))
-            inputWarning = "Немає HID-клавіш для: \(sample)"
         }
+
+        sendText(String(insertedCharacters))
     }
 
     private func pasteClipboard() {
@@ -474,7 +478,7 @@ struct ContentView: View {
         guard !text.isEmpty else { return }
         selectedTab = 0
         wantsFocus = false
-        shortcutStatus = nil
+        sendStatus = nil
 
         if let pendingShortcutText, !pendingShortcutText.isEmpty {
             self.pendingShortcutText = pendingShortcutText + "\n" + text
@@ -488,15 +492,44 @@ struct ContentView: View {
     private func sendPendingShortcutTextIfPossible() {
         guard ble.isReady, let text = pendingShortcutText, !text.isEmpty else { return }
         pendingShortcutText = nil
-        appendAndSend(text)
-        shortcutStatus = "Надіслано через \(ble.mode.title)"
+        sendText(text)
+        showSendStatus("Надіслано через \(ble.mode.title)")
     }
 
-    private func appendAndSend(_ text: String) {
-        let oldText = inputText
-        let newText = oldText + text
-        inputText = newText
-        handleTextChange(oldText: oldText, newText: newText)
+    private func resendInputText() {
+        guard ble.isReady, !inputText.isEmpty else { return }
+        sendText(inputText)
+        showSendStatus("Надіслано через \(ble.mode.title)")
+    }
+
+    private func sendText(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        let plan = TextTypingPlanner.makePlan(
+            for: text,
+            startingLayout: selectedLayout,
+            layoutShortcut: selectedShortcut
+        )
+
+        if plan.finalLayout != selectedLayout {
+            layoutRawValue = plan.finalLayout.rawValue
+        }
+
+        if !plan.taps.isEmpty {
+            ble.sendKeyTaps(plan.taps)
+        }
+
+        if plan.unsupportedCharacters.isEmpty {
+            inputWarning = nil
+        } else {
+            let sample = String(plan.unsupportedCharacters.prefix(6))
+            inputWarning = "Немає HID-клавіш для: \(sample)"
+        }
+    }
+
+    private func showSendStatus(_ message: String) {
+        sendStatus = message
+        sendStatusToken += 1
     }
 }
 
