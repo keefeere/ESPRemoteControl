@@ -19,7 +19,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     var onPoweredOn: (() -> Void)?
     var onUnavailable: ((String) -> Void)?
     var onLinkConnected: ((UUID) -> Void)?
-    var onPeerDisconnected: ((UUID) -> Void)?
+    var onPeerDisconnected: ((UUID, HIDPeerDisconnectCause) -> Void)?
     var onNameDiscovered: ((UUID, String) -> Void)?
     var onDiagnostic: ((String) -> Void)?
 
@@ -28,6 +28,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     private var scanRequested = false
     private var scanTimer: DispatchWorkItem?
     private var connectionTimer: DispatchWorkItem?
+    private var intentionallyCancelled: Set<UUID> = []
     private var knownHosts: [SavedHIDHost] = []
     private var discoveredNames: [UUID: String] = [:]
 
@@ -50,6 +51,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         manager?.delegate = nil
         manager = nil
         requestedHost = nil
+        intentionallyCancelled.removeAll()
         peers.removeAll()
         discoveredNames.removeAll()
         devices.removeAll()
@@ -79,6 +81,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     func cancelConnection() {
         connectionTimer?.cancel()
         if let requestedHost, let peer = peers[requestedHost] {
+            markIntentionalCancellation(requestedHost)
             manager?.cancelPeripheralConnection(peer)
         }
         requestedHost = nil
@@ -128,6 +131,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         stopScan()
         connectionTimer?.cancel()
         if let oldID = requestedHost, oldID != id, let old = peers[oldID] {
+            markIntentionalCancellation(oldID)
             manager.cancelPeripheralConnection(old)
         }
         peers[id] = peer
@@ -141,10 +145,11 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         let timer = DispatchWorkItem { [weak self, weak peer] in
             guard let self, self.requestedHost == id, let peer, peer.state != .connected else { return }
-            self.requestedHost = nil
-            self.manager?.cancelPeripheralConnection(peer)
-            self.statusText = "Час з’єднання минув. Відкрий Bluetooth на комп’ютері та повтори."
-            self.onDiagnostic?("Outgoing BLE timed out: \(id.uuidString.prefix(8))")
+            // CoreBluetooth keeps connect requests pending and completes them
+            // when the peer becomes available. Keep that request alive across
+            // computer sleep instead of cancelling it on an arbitrary timeout.
+            self.statusText = "Комп’ютер ще не відповів. Запит на з’єднання лишається активним."
+            self.onDiagnostic?("Outgoing BLE still pending: \(id.uuidString.prefix(8)), state \(peer.state.rawValue)")
         }
         connectionTimer = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timer)
@@ -152,7 +157,10 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
 
     func reconnectRememberedHost(ifMatching preferredHost: UUID?) {
         guard requestedHost == nil, let preferredHost,
-              knownHosts.contains(where: { $0.id == preferredHost && $0.supportsOutgoingConnection }) else { return }
+              knownHosts.contains(where: { $0.id == preferredHost }) else { return }
+        // A host first learned through an incoming HID subscription may still
+        // be retrievable in our central role after pairing. Trying it is safe;
+        // connect(to:) leaves incoming-only hosts waiting for their own OS.
         addKnownHosts()
         connect(to: preferredHost)
     }
@@ -191,6 +199,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     private func connected(_ peer: CBPeripheral) {
         guard requestedHost == peer.identifier else { return }
         connectionTimer?.cancel()
+        intentionallyCancelled.remove(peer.identifier)
         statusText = "BLE-з’єднання є; очікуємо клавіатуру й мишу…"
         onLinkConnected?(peer.identifier)
     }
@@ -205,8 +214,12 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             if scanRequested { scan() }
         } else {
             stopScan()
-            if let requestedHost { onPeerDisconnected?(requestedHost) }
+            let disconnectedHost = requestedHost
             requestedHost = nil
+            intentionallyCancelled.removeAll()
+            if let disconnectedHost {
+                onPeerDisconnected?(disconnectedHost, .bluetoothUnavailable)
+            }
             statusText = central.state == .unauthorized ? "Немає дозволу на Bluetooth" : "Bluetooth недоступний"
             onUnavailable?(statusText)
         }
@@ -232,18 +245,19 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         requestedHost = nil
         statusText = error?.localizedDescription ?? "Не вдалося з’єднатися"
         onDiagnostic?("Outgoing BLE failed: \(peripheral.identifier.uuidString.prefix(8)), \(errorDetails(error))")
-        onPeerDisconnected?(peripheral.identifier)
+        onPeerDisconnected?(peripheral.identifier, .connectionFailed)
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard central === manager else { return }
+        let cause = disconnectCause(for: peripheral.identifier)
         if requestedHost == peripheral.identifier {
             connectionTimer?.cancel()
             requestedHost = nil
             statusText = error?.localizedDescription ?? "З’єднання завершено"
         }
         onDiagnostic?("Outgoing BLE disconnected: \(peripheral.identifier.uuidString.prefix(8)), \(errorDetails(error))")
-        onPeerDisconnected?(peripheral.identifier)
+        onPeerDisconnected?(peripheral.identifier, cause)
     }
 
     func centralManager(_ central: CBCentralManager, connectionEventDidOccur event: CBConnectionEvent,
@@ -255,7 +269,11 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             remember(peripheral, name: peripheral.name, signal: nil, connectable: true)
         case .peerDisconnected:
             onDiagnostic?("System BLE disconnected: \(peripheral.identifier.uuidString.prefix(8))")
-            onPeerDisconnected?(peripheral.identifier)
+            if requestedHost == peripheral.identifier {
+                connectionTimer?.cancel()
+                requestedHost = nil
+            }
+            onPeerDisconnected?(peripheral.identifier, disconnectCause(for: peripheral.identifier))
         @unknown default: break
         }
     }
@@ -263,5 +281,16 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     private func errorDetails(_ error: Error?) -> String {
         guard let error = error as NSError? else { return "no error" }
         return "\(error.domain)/\(error.code): \(error.localizedDescription)"
+    }
+
+    private func markIntentionalCancellation(_ id: UUID) {
+        intentionallyCancelled.insert(id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.intentionallyCancelled.remove(id)
+        }
+    }
+
+    private func disconnectCause(for id: UUID) -> HIDPeerDisconnectCause {
+        intentionallyCancelled.contains(id) ? .appCancelledOutgoingLink : .linkLost
     }
 }
