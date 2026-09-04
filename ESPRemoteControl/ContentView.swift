@@ -20,6 +20,8 @@ struct ContentView: View {
     @State private var pendingShortcutText: String?
     @State private var sendStatus: String?
     @State private var sendStatusToken = 0
+    @State private var showsLayoutHelp = false
+    @State private var showsPrivacyHelp = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -83,40 +85,38 @@ struct ContentView: View {
                 .padding(.vertical, 14)
             }
             .scrollDismissesKeyboard(.interactively)
+            .background(
+                KeyboardDismissTapView {
+                    wantsFocus = false
+                }
+            )
             .background(Color(.systemGroupedBackground))
             .navigationTitle("ESP Remote")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        wantsFocus = false
-                        showsSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                }
-            }
         }
     }
 
     private var connectionHeader: some View {
-        ConnectionStatusView(input: ble)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .bottom) { Divider() }
-            // Temporary debug stamp in the header's existing bottom padding.
-            // An overlay leaves all controls and their hit areas in place.
-            .overlay(alignment: .bottomTrailing) {
-                Text("v\(appVersion)")
-                    .font(.system(size: 8, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                    .padding(.trailing, 14)
-                    .padding(.bottom, 1)
-                    .allowsHitTesting(false)
-                    .accessibilityLabel("Версія застосунку \(appVersion)")
+        HStack(spacing: 8) {
+            ConnectionStatusView(input: ble)
+
+            Divider()
+                .frame(height: 20)
+
+            Button {
+                wantsFocus = false
+                showsSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(width: 28, height: 32)
             }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Налаштування")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var typingCard: some View {
@@ -135,6 +135,11 @@ struct ContentView: View {
                     text: $inputText,
                     wantsFirstResponder: $wantsFocus,
                     isSecure: isSecureInput,
+                    onBeginEditing: {
+                        if inputText.isEmpty, pendingShortcutText == nil {
+                            isSecureInput = false
+                        }
+                    },
                     onTextChange: handleTextChange,
                     onReturn: handleReturnKey,
                     onBackspaceWhenEmpty: handleBackspaceWhenEmpty
@@ -149,10 +154,19 @@ struct ContentView: View {
                     Image(systemName: "globe")
                         .frame(width: 30, height: 42)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ShortAndLongPressButtonStyle(
+                    longPressLabel: "Пояснення кнопки",
+                    onLongPress: { showsLayoutHelp = true }
+                ))
                 .padding(.top, 4)
                 .accessibilityLabel("Перемкнути розкладку на комп’ютері")
                 .help("Надіслати скорочення зміни мови на комп’ютер")
+                .popover(isPresented: $showsLayoutHelp) {
+                    Text("Перемкнути розкладку на комп’ютері · \(selectedShortcut.displayName)")
+                        .font(.callout)
+                        .padding(12)
+                        .presentationCompactAdaptation(.popover)
+                }
 
                 Button {
                     isSecureInput.toggle()
@@ -160,10 +174,19 @@ struct ContentView: View {
                     Image(systemName: isSecureInput ? "eye.slash" : "eye")
                         .frame(width: 34, height: 42)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ShortAndLongPressButtonStyle(
+                    longPressLabel: "Пояснення кнопки",
+                    onLongPress: { showsPrivacyHelp = true }
+                ))
                 .padding(.top, 4)
                 .accessibilityLabel(isSecureInput ? "Показати текст" : "Приховати текст")
                 .help(isSecureInput ? "Показати текст" : "Приховати текст")
+                .popover(isPresented: $showsPrivacyHelp) {
+                    Text(isSecureInput ? "Показати введений текст" : "Приховати введений текст")
+                        .font(.callout)
+                        .padding(12)
+                        .presentationCompactAdaptation(.popover)
+                }
             }
             .padding(.horizontal, 12)
             .background(Color(.secondarySystemGroupedBackground))
@@ -174,6 +197,7 @@ struct ContentView: View {
                     pasteClipboard()
                 } label: {
                     Label("Вставити", systemImage: "doc.on.clipboard")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
 
@@ -182,6 +206,7 @@ struct ContentView: View {
                     inputWarning = nil
                 } label: {
                     Label("Очистити", systemImage: "xmark")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
 
@@ -189,28 +214,10 @@ struct ContentView: View {
                     resendInputText()
                 } label: {
                     Label("Надіслати", systemImage: "paperplane.fill")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(inputText.isEmpty || !ble.isReady)
-
-                Spacer()
-
-                Menu {
-                    ForEach(HostLayoutShortcut.allCases) { shortcut in
-                        Button {
-                            shortcutRawValue = shortcut.rawValue
-                        } label: {
-                            if shortcut == selectedShortcut {
-                                Label(shortcut.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(shortcut.displayName)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(selectedShortcut.displayName, systemImage: "switch.2")
-                }
-                .buttonStyle(.borderedProminent)
             }
             .font(.caption.weight(.semibold))
 
@@ -225,7 +232,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(pendingShortcutText)
+                    Text(maskedPendingText(pendingShortcutText))
                         .font(.caption)
                         .lineLimit(2)
                         .foregroundStyle(.secondary)
@@ -478,6 +485,7 @@ struct ContentView: View {
         guard !text.isEmpty else { return }
         selectedTab = 0
         wantsFocus = false
+        isSecureInput = true
         sendStatus = nil
 
         if let pendingShortcutText, !pendingShortcutText.isEmpty {
@@ -530,6 +538,11 @@ struct ContentView: View {
     private func showSendStatus(_ message: String) {
         sendStatus = message
         sendStatusToken += 1
+    }
+
+    private func maskedPendingText(_ text: String) -> String {
+        guard isSecureInput else { return text }
+        return String(repeating: "•", count: min(max(text.count, 8), 24))
     }
 }
 

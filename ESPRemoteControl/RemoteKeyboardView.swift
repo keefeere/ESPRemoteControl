@@ -182,8 +182,14 @@ struct RemoteKeyboardView: View {
         availableWidth: CGFloat,
         includesOuterSymbols: Bool
     ) -> some View {
-        let values = numberRowCharacters(includesOuterSymbols: includesOuterSymbols)
-        let weights = Array(repeating: CGFloat(1), count: values.count) + [1.8]
+        let values = numberRowCharacters(includesTrailingSymbols: includesOuterSymbols)
+        let weights: [CGFloat]
+        if includesOuterSymbols {
+            weights = Array(repeating: CGFloat(1), count: values.count) + [1.8]
+        } else {
+            // Keep the added ANSI key compact and give Backspace more room.
+            weights = [0.72] + Array(repeating: CGFloat(0.94), count: 10) + [2.05]
+        }
         let widths = resolvedWidths(weights: weights, availableWidth: availableWidth)
 
         return HStack(spacing: keySpacing) {
@@ -576,10 +582,8 @@ struct RemoteKeyboardView: View {
         return keys
     }
 
-    private func numberRowCharacters(includesOuterSymbols: Bool) -> [Character] {
+    private func numberRowCharacters(includesTrailingSymbols: Bool) -> [Character] {
         let numbers = shiftedNumberCharacters
-        guard includesOuterSymbols else { return numbers }
-
         let leading: Character
         switch layout {
         case .englishUS:
@@ -588,6 +592,7 @@ struct RemoteKeyboardView: View {
             leading = "'"
         }
 
+        guard includesTrailingSymbols else { return [leading] + numbers }
         let trailing = shiftIsActive ? Array("_+") : Array("-=")
         return [leading] + numbers + trailing
     }

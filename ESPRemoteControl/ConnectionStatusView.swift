@@ -56,9 +56,10 @@ struct ConnectionStatusView: View {
                         showsBluetooth = true
                     }
                 } label: {
-                    statusLabel
+                    hostSelectionLabel
                 }
                 .menuIndicator(.hidden)
+                .layoutPriority(1)
                 .disabled(input.isSwitching)
                 .accessibilityLabel("Вибрати комп’ютер")
                 .accessibilityValue(input.statusText)
@@ -85,13 +86,24 @@ struct ConnectionStatusView: View {
         }
     }
 
+    private var hostSelectionLabel: some View {
+        HStack(spacing: 4) {
+            statusLabel
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: compact ? 32 : 44, alignment: .leading)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+    }
+
     private var statusLabel: some View {
         Text(input.statusText)
             .font(compact ? .caption2 : .caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
     }
 }
 

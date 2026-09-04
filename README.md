@@ -249,6 +249,20 @@ See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) fo
 the CoreBluetooth approach, evidence, and remaining device checks. Direct mode
 is experimental and needs physical-device validation before becoming the default.
 
+### Keyboard and input improvements (unscheduled)
+
+- **Keyboard function area**:
+  - System controls: Print Screen, Power, Sleep, Lock PC, brightness up/down, and the context menu key.
+  - Media controls: play/pause, fast forward, rewind, next/previous track, shuffle (random), and repeat track (cycle).
+  - Audio controls: volume up/down, mute output, and mute microphone.
+  - Optional numpad, if space permits.
+- **Russian characters in the Ukrainian layout** - Add alternate combinations for Russian letters without switching layouts, such as `Alt+і → ы` and similar mappings.
+- **Two layouts on each key** - Optionally display both EN and UA legends and highlight the active layout; this can be limited to landscape orientation if needed.
+- **QR and 2D barcode scanner** - Scan codes with an optional automatic mode that immediately types the decoded content on the connected computer.
+- **Mouse Jiggler** - Add automatic pointer movement; investigate whether it can keep working while the app is in the background.
+- **Voice typing on the input tab («Ввід»)** - Support dictation through the built-in iOS keyboard.
+- **Multi-touch trackpad on both input and keyboard screens** - Provide consistent two-finger scrolling, add pinch-to-zoom, and investigate three-finger gestures where supported.
+
 ## Artwork
 
 The app icon incorporates the MIT-licensed `keyboard` outline from

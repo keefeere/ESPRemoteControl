@@ -53,6 +53,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
     @Binding var wantsFirstResponder: Bool
 
     var isSecure: Bool
+    var onBeginEditing: () -> Void
     var onTextChange: (String, String) -> Void
     var onReturn: () -> Void
     var onBackspaceWhenEmpty: () -> Void
@@ -80,22 +81,6 @@ struct KeyCaptureTextField: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.updatePlaceholder()
 
-        let accessory = UIToolbar()
-        accessory.sizeToFit()
-        accessory.items = [
-            UIBarButtonItem(
-                barButtonSystemItem: .flexibleSpace,
-                target: nil,
-                action: nil
-            ),
-            UIBarButtonItem(
-                title: "Сховати",
-                style: .done,
-                target: context.coordinator,
-                action: #selector(Coordinator.dismissKeyboard)
-            )
-        ]
-        textView.inputAccessoryView = accessory
         textView.onDeleteBackwardWhenEmpty = {
             context.coordinator.parent.onBackspaceWhenEmpty()
         }
@@ -105,7 +90,23 @@ struct KeyCaptureTextField: UIViewRepresentable {
     func updateUIView(_ textView: BackspaceDetectingTextView, context: Context) {
         context.coordinator.parent = self
         if textView.isSecureTextEntry != isSecure {
+            let text = textView.text
+            let selectionOffset = textView.selectedTextRange.map {
+                textView.offset(from: textView.beginningOfDocument, to: $0.start)
+            }
             textView.isSecureTextEntry = isSecure
+            // UITextView does not reliably redraw existing glyphs when only
+            // isSecureTextEntry changes. Reassigning forces a visual refresh.
+            textView.text = nil
+            textView.text = text
+            if let selectionOffset,
+               let position = textView.position(
+                   from: textView.beginningOfDocument,
+                   offset: selectionOffset
+               ) {
+                textView.selectedTextRange = textView.textRange(from: position, to: position)
+            }
+            textView.updatePlaceholder()
         }
 
         if textView.text != text {
@@ -140,10 +141,6 @@ struct KeyCaptureTextField: UIViewRepresentable {
             self.lastCommittedText = parent.text
         }
 
-        @objc func dismissKeyboard() {
-            parent.wantsFirstResponder = false
-        }
-
         func textView(
             _ textView: UITextView,
             shouldChangeTextIn range: NSRange,
@@ -155,6 +152,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.onBeginEditing()
             guard !parent.wantsFirstResponder else { return }
             DispatchQueue.main.async {
                 self.parent.wantsFirstResponder = true
@@ -196,6 +194,77 @@ struct KeyCaptureTextField: UIViewRepresentable {
             isMovingSelection = true
             textView.selectedTextRange = textView.textRange(from: end, to: end)
             isMovingSelection = false
+        }
+    }
+}
+
+/// Installs a non-blocking tap recognizer on the surrounding SwiftUI host.
+/// Touches inside the editor keep editing; every other tap dismisses it.
+struct KeyboardDismissTapView: UIViewRepresentable {
+    let onTapOutside: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.onTapOutside = onTapOutside
+        DispatchQueue.main.async {
+            context.coordinator.installIfNeeded(from: view)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTapOutside: onTapOutside)
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.uninstall()
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onTapOutside: () -> Void
+        private weak var hostView: UIView?
+        private var recognizer: UITapGestureRecognizer?
+
+        init(onTapOutside: @escaping () -> Void) {
+            self.onTapOutside = onTapOutside
+        }
+
+        func installIfNeeded(from view: UIView) {
+            guard recognizer == nil, let host = view.superview else { return }
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(tapped))
+            recognizer.cancelsTouchesInView = false
+            recognizer.delegate = self
+            host.addGestureRecognizer(recognizer)
+            hostView = host
+            self.recognizer = recognizer
+        }
+
+        func uninstall() {
+            if let recognizer {
+                hostView?.removeGestureRecognizer(recognizer)
+            }
+            recognizer = nil
+            hostView = nil
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldReceive touch: UITouch
+        ) -> Bool {
+            var touchedView: UIView? = touch.view
+            while let view = touchedView {
+                if view is UITextView { return false }
+                touchedView = view.superview
+            }
+            return true
+        }
+
+        @objc private func tapped() {
+            onTapOutside()
         }
     }
 }
