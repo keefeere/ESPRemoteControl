@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.0.7/ESPRemoteControl-unsigned.ipa",
           "size": 672206,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.0.7"
+          "localizedDescription": "Tap the Bluetooth computer name/status to choose a saved computer directly from the main or compact keyboard strip. A checkmark identifies the connected computer; a clock marks the selected computer awaiting input. The popup also links to pairing a new computer. This release includes the separately merged Share Extension handoff to the main app, which uses its selected output and computer; physical iPhone handoff testing is still needed. Keeps the startup crash fix and small version/build stamp."
         },
         {
           "version": "2.0.6",
