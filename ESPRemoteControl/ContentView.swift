@@ -51,6 +51,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                receiveSharedTextIfNeeded()
                 receiveShortcutTextIfNeeded()
             } else if newPhase == .background {
                 ble.enteredBackground()
@@ -61,9 +62,9 @@ struct ContentView: View {
         }
         .onAppear {
             ble.start()
+            receiveSharedTextIfNeeded()
             receiveShortcutTextIfNeeded()
         }
-        .onOpenURL(perform: handleIncomingURL)
         .sheet(isPresented: $showsSettings) {
             settingsView
         }
@@ -464,6 +465,11 @@ struct ContentView: View {
         queueIncomingText(text)
     }
 
+    private func receiveSharedTextIfNeeded() {
+        guard let text = ShareTextInbox.take() else { return }
+        queueIncomingText(text)
+    }
+
     private func queueIncomingText(_ text: String) {
         guard !text.isEmpty else { return }
         selectedTab = 0
@@ -484,14 +490,6 @@ struct ContentView: View {
         pendingShortcutText = nil
         appendAndSend(text)
         shortcutStatus = "Надіслано через \(ble.mode.title)"
-    }
-
-    private func handleIncomingURL(_ url: URL) {
-        guard let text = ShareTextHandoff.text(from: url) else {
-            return
-        }
-
-        queueIncomingText(text)
     }
 
     private func appendAndSend(_ text: String) {

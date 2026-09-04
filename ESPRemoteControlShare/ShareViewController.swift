@@ -25,7 +25,7 @@ final class ShareViewController: UIViewController {
         titleLabel.adjustsFontForContentSizeCategory = true
 
         let subtitleLabel = UILabel()
-        subtitleLabel.text = "Текст буде передано в ESP Remote. Застосунок використає вибраний там Bluetooth-вихід."
+        subtitleLabel.text = "Текст буде збережено для ESP Remote. Відкрий застосунок — він використає вибраний Bluetooth-вихід."
         subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.numberOfLines = 0
@@ -44,7 +44,7 @@ final class ShareViewController: UIViewController {
         statusLabel.numberOfLines = 2
 
         var sendConfiguration = UIButton.Configuration.filled()
-        sendConfiguration.title = "Передати в ESP Remote"
+        sendConfiguration.title = "Зберегти для ESP Remote"
         sendConfiguration.image = UIImage(systemName: "paperplane.fill")
         sendConfiguration.imagePadding = 8
         sendButton.configuration = sendConfiguration
@@ -175,12 +175,8 @@ final class ShareViewController: UIViewController {
                 : "Скоротіть текст до 2000 символів."
             return
         }
-        guard let handoffURL = ShareTextHandoff.url(for: text) else {
-            finishWithError("Не вдалося підготувати текст")
-            return
-        }
-        guard let extensionContext else {
-            finishWithError("Share Extension недоступний")
+        guard ShareTextInbox.enqueue(text) else {
+            finishWithError("Не вдалося зберегти текст")
             return
         }
 
@@ -188,18 +184,9 @@ final class ShareViewController: UIViewController {
         isSending = true
         sendButton.isEnabled = false
         closeButton.isEnabled = false
-        statusLabel.text = "Відкриваємо ESP Remote…"
-
-        extensionContext.open(handoffURL) { [weak self] opened in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard opened else {
-                    self.finishWithError("Не вдалося відкрити ESP Remote")
-                    return
-                }
-                self.statusLabel.text = "Передано в ESP Remote"
-                self.extensionContext?.completeRequest(returningItems: nil)
-            }
+        statusLabel.text = "Текст збережено. Відкрий ESP Remote для надсилання."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.extensionContext?.completeRequest(returningItems: nil)
         }
     }
 
