@@ -40,8 +40,11 @@ final class PressActionsUITests: XCTestCase {
             center.press(forDuration: 0.05, thenDragTo: center.withOffset(CGVector(dx: 0, dy: -100)))
             assertCounts(name, "0:0")
         }
-        app.switches["controlsEnabled"].tap()
+        app.buttons["disableControls"].tap()
+        let disabled = expectation(for: NSPredicate(format: "label == 'disabled'"), evaluatedWith: app.staticTexts["enabledState"])
+        wait(for: [disabled], timeout: 3)
         for name in ["language", "orientation"] {
+            XCTAssertFalse(app.buttons[name + "Button"].isEnabled)
             let center = app.buttons[name + "Button"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             center.tap()
             center.press(forDuration: 0.8)

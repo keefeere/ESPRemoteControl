@@ -48,10 +48,15 @@ jobs:
       - name: Test HID reports and session routing
         run: ./scripts/test-direct-hid.sh
 
-      - name: Install build and UI test tools
-        run: brew install ldid xcodegen
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Install UI test project generator
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        run: brew install xcodegen
 
       - name: Test short and long button presses on iPhone Simulator
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         run: ./scripts/test-press-actions.sh
 
       - name: Upload failed button UI test results

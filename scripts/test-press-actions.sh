@@ -25,7 +25,7 @@ sys.exit("No available iPhone simulator")
 xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$simulator_id" -b
 mkdir -p "$repo_root/dist"
-xcodebuild test -quiet \
+xcodebuild test \
     -project "$test_root/PressActionsTests.xcodeproj" \
     -scheme PressActionsHost \
     -destination "platform=iOS Simulator,id=$simulator_id" \

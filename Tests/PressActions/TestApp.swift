@@ -50,7 +50,9 @@ private struct PressActionsTestView: View {
 
             Text("\(languageTaps):\(languageHolds)").accessibilityIdentifier("languageCounts")
             Text("\(orientationTaps):\(orientationHolds)").accessibilityIdentifier("orientationCounts")
-            Toggle("Enable controls", isOn: $controlsEnabled).accessibilityIdentifier("controlsEnabled")
+            Button("Disable controls") { controlsEnabled = false }
+                .accessibilityIdentifier("disableControls")
+            Text(controlsEnabled ? "enabled" : "disabled").accessibilityIdentifier("enabledState")
         }
         .padding(24)
     }
