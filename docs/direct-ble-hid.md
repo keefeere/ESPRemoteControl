@@ -1,8 +1,10 @@
 # Direct BLE HID: v2 research
 
-Reviewed: 2026-09-03. Status: the v2 prototype is implemented; physical-device
-pairing and input validation are pending. The sections below preserve the
-research evidence and acceptance criteria.
+Reviewed: 2026-09-04. Status: the v2 prototype is implemented. HID report/session
+tests and the Xcode 26.6 iOS build passed for commit `802bb64`, producing version
+2.0.0 (16) ([run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
+Physical-device pairing and input validation are pending. The sections below
+preserve the research evidence and acceptance criteria.
 
 ## Decision and evidence
 

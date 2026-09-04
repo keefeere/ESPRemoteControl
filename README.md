@@ -55,7 +55,10 @@ queued input when it moves to the background or loses its HID session.
 
 Run `./scripts/test-direct-hid.sh` on a Swift-equipped machine to check HID report
 encoding, queue backpressure, host selection, and descriptor sizes. The IPA
-workflow runs these checks for pull requests before building the app.
+workflow runs these checks for pull requests and pushes to the v2 branch before
+building the app. Version 2.0.0 (16) passed these tests and the Xcode 26.6 iOS
+build on 2026-09-04 ([Actions run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
+Physical pairing and input tests remain pending.
 
 ## Hardware Requirements
 
