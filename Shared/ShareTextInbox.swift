@@ -10,7 +10,7 @@ enum ShareTextInbox {
         guard !text.isEmpty, let pasteboard = UIPasteboard(name: pasteboardName, create: true) else {
             return false
         }
-        pasteboard.isPersistent = true
+        pasteboard.setPersistent(true)
         pasteboard.string = text
         return true
     }
