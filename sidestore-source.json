@@ -7,14 +7,14 @@
       "name": "ESP Remote Control",
       "bundleIdentifier": "com.keefeere.ESPRemoteControl",
       "developerName": "keefeere",
-      "subtitle": "iPhone keyboard and trackpad over ESP32",
-      "localizedDescription": "Control a USB host from an iPhone through an ESP32-S3 BLE-to-USB HID bridge. Includes English and Ukrainian input, a Shortcuts action for text and URLs, a trackpad, a full-screen keyboard, clipboard typing, and automatic reconnect.",
+      "subtitle": "Keyboard and trackpad over Bluetooth",
+      "localizedDescription": "Use your iPhone as a keyboard and trackpad through an ESP32-S3 BLE-to-USB HID bridge, or try experimental direct Bluetooth HID without an adapter. Includes English and Ukrainian input, Shortcuts for text and URLs, a full-screen keyboard, clipboard typing, and pairing controls. ESP remains the initial default; direct Bluetooth requires device testing.",
       "iconURL": "https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/ESPRemoteControl/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#445BE7",
       "permissions": [
         {
           "type": "bluetooth",
-          "usageDescription": "Connects to the ESP32-S3 keyboard and mouse bridge."
+          "usageDescription": "Connects to the ESP32-S3 bridge or directly to a computer as a Bluetooth keyboard and mouse."
         }
       ],
       "versions": [
@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.0.0/ESPRemoteControl-unsigned.ipa",
           "size": 531956,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.0.0"
+          "localizedDescription": "Experimental direct Bluetooth keyboard and mouse without an ESP adapter. Switch ESP / Bluetooth in the connection strip, initiate pairing from the computer or iPhone, and share connection diagnostics. ESP remains the initial default. Physical-device validation is pending."
         },
         {
           "version": "1.3.2",
