@@ -33,7 +33,7 @@ struct ConnectionStatusView: View {
                 Button { showsBluetooth = true } label: {
                     Image(systemName: "link.badge.plus")
                 }
-                .accessibilityLabel("Сполучення Bluetooth")
+                .accessibilityLabel("Комп’ютери та сполучення Bluetooth")
                 .disabled(input.isSwitching)
             }
             Button(action: input.reconnectNow) {
@@ -53,6 +53,9 @@ private struct DirectBluetoothSheet: View {
     @ObservedObject var transport: DirectHIDTransport
     @ObservedObject var browser: BluetoothHostBrowser
     @Environment(\.dismiss) private var dismiss
+    @State private var hostToRename: SavedHIDHost?
+    @State private var hostToForget: SavedHIDHost?
+    @State private var editedName = ""
 
     var body: some View {
         NavigationStack {
@@ -62,6 +65,49 @@ private struct DirectBluetoothSheet: View {
                         .foregroundStyle(transport.isReady ? .green : .primary)
                     if let error = transport.lastError {
                         Text(error).font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                if !transport.savedHosts.isEmpty {
+                    Section {
+                        ForEach(transport.savedHosts) { host in
+                            HStack(spacing: 12) {
+                                Button { transport.connect(to: host.id) } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(host.name)
+                                            Text(hostStatus(host.id))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if transport.connectedHostID == host.id {
+                                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                        } else if transport.selectedHostID == host.id {
+                                            Image(systemName: "clock").foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .disabled(!transport.canPair)
+                                Menu {
+                                    Button("Перейменувати", systemImage: "pencil") {
+                                        editedName = host.customName ?? host.discoveredName ?? ""
+                                        hostToRename = host
+                                    }
+                                    Button("Забути в застосунку", systemImage: "trash", role: .destructive) {
+                                        hostToForget = host
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle")
+                                        .padding(.vertical, 8)
+                                }
+                                .accessibilityLabel("Налаштування: \(host.name)")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    } header: {
+                        Text("Мої комп’ютери")
+                    } footer: {
+                        Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯. Для зміни комп’ютера іноді потрібно від’єднати iPhone від попереднього в налаштуваннях Bluetooth.")
                     }
                 }
                 Section("Сполучення з комп’ютера") {
@@ -82,7 +128,7 @@ private struct DirectBluetoothSheet: View {
                     if !browser.statusText.isEmpty {
                         Text(browser.statusText).font(.caption).foregroundStyle(.secondary)
                     }
-                    ForEach(browser.devices) { device in
+                    ForEach(browser.devices.filter { device in !transport.savedHosts.contains { $0.id == device.id } }) { device in
                         Button {
                             transport.connect(to: device.id)
                         } label: {
@@ -94,12 +140,10 @@ private struct DirectBluetoothSheet: View {
                                     }
                                 }
                                 Spacer()
-                                if browser.requestedHost == device.id {
-                                    if transport.isReady {
-                                        Image(systemName: "checkmark.circle.fill")
-                                    } else {
-                                        ProgressView()
-                                    }
+                                if transport.connectedHostID == device.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                } else if transport.selectedHostID == device.id {
+                                    ProgressView()
                                 }
                             }
                         }
@@ -110,7 +154,7 @@ private struct DirectBluetoothSheet: View {
                     ShareLink(item: transport.diagnosticText) {
                         Label("Поділитися журналом", systemImage: "square.and.arrow.up")
                     }
-                    Text("Журнал містить етапи підключення, без введеного тексту.")
+                    Text("Журнал містить етапи підключення, назву та скорочений ідентифікатор комп’ютера, без введеного тексту.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(Array(transport.diagnostics.suffix(12).enumerated()), id: \.offset) { _, line in
                         Text(line).font(.caption2.monospaced()).textSelection(.enabled)
@@ -125,6 +169,37 @@ private struct DirectBluetoothSheet: View {
                 }
             }
         }
+        .alert("Назва комп’ютера", isPresented: Binding(
+            get: { hostToRename != nil },
+            set: { if !$0 { hostToRename = nil } }
+        ), presenting: hostToRename) { host in
+            TextField("Наприклад, Linux або MacBook", text: $editedName)
+            Button("Зберегти") {
+                transport.renameHost(host.id, to: editedName)
+                hostToRename = nil
+            }
+            Button("Скасувати", role: .cancel) { hostToRename = nil }
+        } message: { _ in
+            Text("Ця назва використовується лише в ESP Remote. Порожнє поле повертає автоматичну назву.")
+        }
+        .alert("Забути комп’ютер?", isPresented: Binding(
+            get: { hostToForget != nil },
+            set: { if !$0 { hostToForget = nil } }
+        ), presenting: hostToForget) { host in
+            Button("Забути", role: .destructive) {
+                transport.forgetHost(host.id)
+                hostToForget = nil
+            }
+            Button("Скасувати", role: .cancel) { hostToForget = nil }
+        } message: { host in
+            Text("\(host.name) буде вилучено зі списку та автопідключення застосунку. Системне спарювання залишиться. Щоб видалити і його: Налаштування iPhone → Bluetooth → ⓘ → Забути цей пристрій або видали iPhone на комп’ютері.")
+        }
         .onDisappear { browser.stopScan() }
+    }
+
+    private func hostStatus(_ id: UUID) -> String {
+        if transport.connectedHostID == id { return "Клавіатура й миша підключені" }
+        if transport.selectedHostID == id { return "Вибрано · очікуємо підключення" }
+        return "Натисни, щоб підключити"
     }
 }

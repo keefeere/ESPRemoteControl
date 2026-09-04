@@ -20,14 +20,16 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     var onUnavailable: ((String) -> Void)?
     var onLinkConnected: ((UUID) -> Void)?
     var onPeerDisconnected: ((UUID) -> Void)?
+    var onNameDiscovered: ((UUID, String) -> Void)?
+    var onDiagnostic: ((String) -> Void)?
 
     private var manager: CBCentralManager?
     private var peers: [UUID: CBPeripheral] = [:]
     private var scanRequested = false
     private var scanTimer: DispatchWorkItem?
     private var connectionTimer: DispatchWorkItem?
-    private let rememberedIDKey = "directHID.outgoingHost"
-    private let rememberedNameKey = "directHID.outgoingHostName"
+    private var knownHosts: [SavedHIDHost] = []
+    private var discoveredNames: [UUID: String] = [:]
 
     func start() {
         guard manager == nil else {
@@ -49,6 +51,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         manager = nil
         requestedHost = nil
         peers.removeAll()
+        discoveredNames.removeAll()
         devices.removeAll()
         statusText = ""
     }
@@ -58,7 +61,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         guard let manager, manager.state == .poweredOn else { start(); return }
         stopScan()
         scanRequested = true
-        addRememberedHost()
+        addKnownHosts()
         // Discoverability is independent of whether a host offers HID itself.
         manager.scanForPeripherals(withServices: nil, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: false
@@ -90,13 +93,36 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     }
 
     func name(for id: UUID) -> String {
-        devices.first { $0.id == id }?.name ?? "Комп’ютер · \(id.uuidString.prefix(4))"
+        knownHosts.first { $0.id == id }?.name ?? resolvedName(for: id) ?? "Комп’ютер · \(id.uuidString.prefix(8))"
+    }
+
+    func resolvedName(for id: UUID) -> String? {
+        discoveredNames[id] ?? peers[id]?.name
+    }
+
+    func resolveName(for id: UUID) {
+        guard let manager, manager.state == .poweredOn,
+              let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else { return }
+        remember(peer, name: peer.name, signal: nil, connectable: true)
+    }
+
+    func setKnownHosts(_ hosts: [SavedHIDHost]) {
+        knownHosts = hosts
+        addKnownHosts()
+    }
+
+    func forget(_ id: UUID) {
+        if requestedHost == id { cancelConnection() }
+        knownHosts.removeAll { $0.id == id }
+        peers.removeValue(forKey: id)
+        discoveredNames.removeValue(forKey: id)
+        devices.removeAll { $0.id == id }
     }
 
     func connect(to id: UUID) {
         guard let manager, manager.state == .poweredOn,
               let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else {
-            statusText = "Пристрій недоступний. Повтори пошук."
+            statusText = "Очікуємо комп’ютер. Підключи iPhone у його налаштуваннях Bluetooth або повтори пошук."
             return
         }
         stopScan()
@@ -107,6 +133,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         peers[id] = peer
         requestedHost = id
         statusText = "З’єднання з \(name(for: id))…"
+        onDiagnostic?("Outgoing BLE requested: \(id.uuidString.prefix(8)), state \(peer.state.rawValue)")
         if peer.state == .connected {
             connected(peer)
         } else {
@@ -117,6 +144,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             self.requestedHost = nil
             self.manager?.cancelPeripheralConnection(peer)
             self.statusText = "Час з’єднання минув. Відкрий Bluetooth на комп’ютері та повтори."
+            self.onDiagnostic?("Outgoing BLE timed out: \(id.uuidString.prefix(8))")
         }
         connectionTimer = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timer)
@@ -124,31 +152,34 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
 
     func reconnectRememberedHost(ifMatching preferredHost: UUID?) {
         guard requestedHost == nil, let preferredHost,
-              UserDefaults.standard.string(forKey: rememberedIDKey) == preferredHost.uuidString else { return }
-        addRememberedHost()
+              knownHosts.contains(where: { $0.id == preferredHost && $0.supportsOutgoingConnection }) else { return }
+        addKnownHosts()
         connect(to: preferredHost)
     }
 
     func rememberReadyHost(_ id: UUID) {
-        guard requestedHost == id else { return }
-        UserDefaults.standard.set(id.uuidString, forKey: rememberedIDKey)
-        UserDefaults.standard.set(name(for: id), forKey: rememberedNameKey)
-        statusText = "Ввід підключено"
+        if requestedHost == id { statusText = "Ввід підключено" }
     }
 
-    private func addRememberedHost() {
-        guard let manager, let value = UserDefaults.standard.string(forKey: rememberedIDKey),
-              let id = UUID(uuidString: value),
-              let peer = manager.retrievePeripherals(withIdentifiers: [id]).first else { return }
-        remember(peer, name: UserDefaults.standard.string(forKey: rememberedNameKey), signal: nil, connectable: true)
+    private func addKnownHosts() {
+        guard let manager, manager.state == .poweredOn else { return }
+        for host in knownHosts {
+            guard let peer = manager.retrievePeripherals(withIdentifiers: [host.id]).first else { continue }
+            remember(peer, name: peer.name ?? host.discoveredName, signal: nil, connectable: true)
+        }
     }
 
     private func remember(_ peer: CBPeripheral, name: String?, signal: Int?, connectable: Bool) {
         peers[peer.identifier] = peer
         let previous = devices.first { $0.id == peer.identifier }
+        if let name = (name ?? peer.name)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty, discoveredNames[peer.identifier] != name {
+            discoveredNames[peer.identifier] = name
+            onNameDiscovered?(peer.identifier, name)
+        }
         let entry = BluetoothHostCandidate(
             id: peer.identifier,
-            name: name ?? peer.name ?? previous?.name ?? "Без назви · \(peer.identifier.uuidString.prefix(4))",
+            name: resolvedName(for: peer.identifier) ?? previous?.name ?? "Без назви · \(peer.identifier.uuidString.prefix(8))",
             signal: signal ?? previous?.signal,
             isConnectable: connectable
         )
@@ -169,7 +200,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         if central.state == .poweredOn {
             // Receive system links too, including hosts already known to iOS.
             central.registerForConnectionEvents(options: nil)
-            addRememberedHost()
+            addKnownHosts()
             onPoweredOn?()
             if scanRequested { scan() }
         } else {
@@ -200,15 +231,18 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         connectionTimer?.cancel()
         requestedHost = nil
         statusText = error?.localizedDescription ?? "Не вдалося з’єднатися"
+        onDiagnostic?("Outgoing BLE failed: \(peripheral.identifier.uuidString.prefix(8)), \(errorDetails(error))")
         onPeerDisconnected?(peripheral.identifier)
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard central === manager else { return }
         if requestedHost == peripheral.identifier {
+            connectionTimer?.cancel()
             requestedHost = nil
             statusText = error?.localizedDescription ?? "З’єднання завершено"
         }
+        onDiagnostic?("Outgoing BLE disconnected: \(peripheral.identifier.uuidString.prefix(8)), \(errorDetails(error))")
         onPeerDisconnected?(peripheral.identifier)
     }
 
@@ -217,10 +251,17 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         guard central === manager else { return }
         switch event {
         case .peerConnected:
+            onDiagnostic?("System BLE connected: \(peripheral.identifier.uuidString.prefix(8))")
             remember(peripheral, name: peripheral.name, signal: nil, connectable: true)
         case .peerDisconnected:
+            onDiagnostic?("System BLE disconnected: \(peripheral.identifier.uuidString.prefix(8))")
             onPeerDisconnected?(peripheral.identifier)
         @unknown default: break
         }
+    }
+
+    private func errorDetails(_ error: Error?) -> String {
+        guard let error = error as NSError? else { return "no error" }
+        return "\(error.domain)/\(error.code): \(error.localizedDescription)"
     }
 }
