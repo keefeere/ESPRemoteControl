@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.0.6/ESPRemoteControl-unsigned.ipa",
           "size": 797916,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.0.6"
+          "localizedDescription": "Fixes the startup crash caused by CoreBluetooth restoring a saved HID descriptor. HID services are now created fresh on launch while saved computer names, selection, and system pairing are preserved. Adds a small version/build stamp in the main connection header without moving controls or intercepting touches; settings and connection logs also include the build number. The shared Bluetooth transport fix also applies to Share Extension. After iOS terminates the process, open the app to start HID again."
         },
         {
           "version": "2.0.5",
