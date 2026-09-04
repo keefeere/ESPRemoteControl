@@ -103,6 +103,18 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(.ultraThinMaterial)
             .overlay(alignment: .bottom) { Divider() }
+            // Temporary debug stamp in the header's existing bottom padding.
+            // An overlay leaves all controls and their hit areas in place.
+            .overlay(alignment: .bottomTrailing) {
+                Text("v\(appVersion)")
+                    .font(.system(size: 8, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 1)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Версія застосунку \(appVersion)")
+            }
     }
 
     private var typingCard: some View {
@@ -357,7 +369,9 @@ struct ContentView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "\(version) (\(build))"
     }
 
     private var layoutBinding: Binding<KeyboardLayout> {

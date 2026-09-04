@@ -109,7 +109,7 @@ checking our own report map and protocol behavior against the HID specifications
 ## Prototype implementation
 
 - `DirectHIDTransport` publishes keyboard/mouse HID, handles host reads/writes,
-  encrypted report subscriptions, peripheral restoration, and connection logs.
+  encrypted report subscriptions, fresh peripheral setup on launch, and connection logs.
 - `BluetoothHostBrowser` adds outgoing BLE connections from the phone and system
   connection events. An outgoing link does not count as working HID until the
   host subscribes to both input reports; Mac behavior needs a real-device test.
@@ -184,3 +184,34 @@ Device acceptance checks for this update:
 Host-store migration/isolation/forget and asynchronous advertising ordering have
 automated checks in `Tests/DirectHIDTests.swift`; actual host switching, system
 pairing, and coexistence require physical-device validation.
+
+## Startup crash during GATT restoration (2.0.6)
+
+A user-supplied crash report for 2.0.5 (21), iOS 26.6.1, shows SIGABRT shortly
+after launch. Its last exception backtrace runs through
+`-[CBPeripheralManager handleRestoringState:]` into
+`-[CBMutableDescriptor initWithCharacteristic:dictionary:]` and
+`-[CBMutableDescriptor initWithType:value:]`, ending in an assertion. This happens
+inside CoreBluetooth before the application's `willRestoreState` callback; an
+ordinary Swift error handler or a guard in that callback cannot prevent it.
+The report does not include the assertion text or offending descriptor value,
+so the exact persisted descriptor responsible is not established.
+
+The HID peripheral no longer opts in with
+[`CBPeripheralManagerOptionRestoreIdentifierKey`](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanageroptionrestoreidentifierkey).
+It creates fresh services after Bluetooth powers on. The unused preserved-GATT
+decoder has been removed. Live subscription adoption for switching hosts remains,
+as do separately stored host names, selected host, and system Bluetooth bonds.
+The same transport fix applies to the Share extension. The tradeoff is that iOS
+will not restore/relaunch this peripheral after terminating the process; opening
+the app starts HID again. Existing background Bluetooth modes remain enabled.
+
+The main input screen displays a temporary `v<version> (<build>)` stamp at the
+bottom right of its connection header, inside existing padding. It uses an overlay
+with hit testing disabled, so it does not move controls or intercept touches.
+The Settings version and shared connection log now include the build number too.
+
+The crash requires preserved CoreBluetooth state on a physical iPhone. Report and
+host-store tests plus a successful simulator/device build cannot reproduce that
+OS restoration path. Device acceptance is to update without reinstalling, launch
+repeatedly with direct Bluetooth selected, and confirm input after reconnecting.
