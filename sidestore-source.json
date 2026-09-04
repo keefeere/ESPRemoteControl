@@ -8,7 +8,7 @@
       "bundleIdentifier": "com.keefeere.ESPRemoteControl",
       "developerName": "keefeere",
       "subtitle": "Keyboard and trackpad over Bluetooth",
-      "localizedDescription": "Use your iPhone as a keyboard and trackpad through an ESP32-S3 BLE-to-USB HID bridge, or try experimental direct Bluetooth HID without an adapter. Includes English and Ukrainian input, Shortcuts for text and URLs, a full-screen keyboard, clipboard typing, and pairing controls. ESP remains the initial default. Direct input has been user-tested on macOS; Linux and Windows testing is pending.",
+      "localizedDescription": "Use your iPhone as a keyboard and trackpad through an ESP32-S3 BLE-to-USB HID bridge, or try experimental direct Bluetooth HID without an adapter. Includes English and Ukrainian input, Shortcuts for text and URLs, a full-screen keyboard, clipboard typing, and pairing controls. ESP remains the initial default. Direct input has been user-tested on macOS and Linux; Windows testing is pending.",
       "iconURL": "https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/ESPRemoteControl/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#445BE7",
       "permissions": [
@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.0.9/ESPRemoteControl-unsigned.ipa",
           "size": 673059,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.0.9"
+          "localizedDescription": "Improves direct Bluetooth HID reconnection after computer sleep. Real link losses now clear stale subscriptions, the selected HID host remains advertised, outgoing connection requests stay pending, and the refresh button rebuilds the HID GATT services. Adds Linux guidance for avoiding unwanted iPhone audio routing by connecting only the HID service. Physical wake and reconnect behavior still needs testing on macOS and Linux."
         },
         {
           "version": "2.0.8",
