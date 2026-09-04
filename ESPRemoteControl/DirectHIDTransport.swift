@@ -69,7 +69,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.lastError = message
             self.refreshStatus()
         }
-        browser.onPeerDisconnected = { [weak self] id in self?.disconnected(id) }
+        browser.onPeerDisconnected = { [weak self] id, cause in self?.disconnected(id, cause: cause) }
         browser.onLinkConnected = { [weak self] id in
             guard let self, self.isRunning else { return }
             self.record("Outgoing BLE link connected: \(id.uuidString.prefix(8))")
@@ -216,16 +216,22 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             installServices()
             return
         }
-        let preferred = session.preferredHost
+        let preferred = session.preferredHost ?? hostStore.selectedHostID
         drainReleases { [weak self] in
-            guard let self else { return }
+            guard let self, self.isRunning else { return }
             self.lastError = nil
+            self.record("Manual HID service restart; selected \(self.peerTag(preferred))")
+            self.browser.cancelConnection()
             self.host = nil
             self.session = HIDHostSession(preferredHost: preferred, allowsPairing: self.isPairing)
             self.browser.setKnownHosts(self.hostStore.hosts)
-            self.adoptLiveSubscriptions()
-            if !self.session.isReady { self.browser.reconnectRememberedHost(ifMatching: preferred) }
-            self.refreshStatus()
+            if self.manager?.state == .poweredOn {
+                // Recreate the GATT database so a host cannot keep using stale
+                // notification subscriptions after sleep or a broken link.
+                self.installServices()
+            } else {
+                self.refreshStatus()
+            }
         }
     }
 
@@ -325,7 +331,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     private func advertise() {
         let wanted = isRunning && servicesInstalled && manager?.state == .poweredOn
-            && !session.isReady && afterDrain == nil && (isPairing || session.preferredHost != nil)
+            && afterDrain == nil && (isPairing || session.preferredHost != nil)
         applyAdvertising(advertising.update(wanted: wanted))
     }
 
@@ -372,7 +378,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                     browser.resolveName(for: id)
                 }
                 browser.rememberReadyHost(id)
-                statusText = "Підключено · \(hostName(for: id))"
+                statusText = "HID готовий · \(hostName(for: id))"
             }
         } else if let lastError {
             statusText = lastError
@@ -550,23 +556,29 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         enqueue([state.buttonUp(button)])
     }
 
-    private func disconnected(_ id: UUID) {
+    private func disconnected(_ id: UUID, cause: HIDPeerDisconnectCause) {
         guard session.host == id else { return }
         // Cancelling our central-role connection does not necessarily close
-        // the host's HID connection to our peripheral role.
+        // the host's HID connection to our peripheral role. Every external
+        // loss is authoritative even if subscribedCentrals is briefly stale.
         let stillSubscribed = inputs.contains { channel, characteristic in
             session.subscriptions.contains(channel)
                 && (characteristic.subscribedCentrals ?? []).contains { $0.identifier == id }
         }
-        if stillSubscribed {
-            record("BLE link ended; HID subscriptions remain: \(peerTag(id))")
+        guard HIDDisconnectPolicy.invalidatesSession(
+            cause: cause,
+            reportsStillSubscribed: stillSubscribed
+        ) else {
+            record("App cancelled outgoing BLE; HID subscriptions remain: \(peerTag(id))")
             return
         }
-        record("HID disconnected: \(peerTag(id))")
+        record("HID disconnected: \(peerTag(id)); cause \(cause.rawValue); subscribed \(stillSubscribed)")
+        let preferred = session.preferredHost
         session.disconnect(id)
         host = nil
         clearInput()
         refreshStatus()
+        browser.reconnectRememberedHost(ifMatching: preferred)
     }
 
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {

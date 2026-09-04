@@ -11,10 +11,11 @@ struct DirectHIDTests {
         mouseTransitions()
         notificationBackpressure()
         hostSelection()
+        disconnectPolicy()
         descriptorSizes()
         savedHosts()
         advertisingLifecycle()
-        print("PASS: HID reports, held input, FIFO backpressure, host isolation, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
+        print("PASS: HID reports, held input, FIFO backpressure, host isolation, disconnect recovery, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
     }
 
     static func keyboardTransitions() {
@@ -109,6 +110,29 @@ struct DirectHIDTests {
         check(session.isReady, "Explicitly selected second host works")
         session = HIDHostSession(preferredHost: nil, allowsPairing: false)
         check(!session.allows(first), "Closed pairing window rejects new hosts")
+    }
+
+    static func disconnectPolicy() {
+        check(!HIDDisconnectPolicy.invalidatesSession(
+            cause: .appCancelledOutgoingLink,
+            reportsStillSubscribed: true
+        ), "Cancelling the helper link preserves a live HID session")
+        check(HIDDisconnectPolicy.invalidatesSession(
+            cause: .appCancelledOutgoingLink,
+            reportsStillSubscribed: false
+        ), "Cancellation cannot preserve a session with no report subscribers")
+        check(!HIDDisconnectPolicy.invalidatesSession(
+            cause: .connectionFailed,
+            reportsStillSubscribed: true
+        ), "A failed helper link does not disprove active HID subscriptions")
+        check(HIDDisconnectPolicy.invalidatesSession(
+            cause: .linkLost,
+            reportsStillSubscribed: true
+        ), "A real link loss rejects stale CoreBluetooth subscriptions")
+        check(HIDDisconnectPolicy.invalidatesSession(
+            cause: .bluetoothUnavailable,
+            reportsStillSubscribed: true
+        ), "Turning Bluetooth off invalidates the session")
     }
 
     static func savedHosts() {

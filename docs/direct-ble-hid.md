@@ -232,3 +232,51 @@ has a clock. Selecting an entry uses the existing host-selection/release path.
 Opening the menu itself does not scan, open pairing, or change the selected host.
 The menu also links to pairing a new computer, including when the saved list is
 empty. This is a UI shortcut; it does not change Bluetooth reconnect behavior.
+
+## Reconnect after computer sleep (2.0.9)
+
+Physical-device tests of 2.0.8 found two distinct failures: a Mac could wake
+while the app still showed an HID-ready session that no longer delivered input,
+and a Linux host could remain disconnected until the user selected the iPhone
+again in the host Bluetooth UI. The old implementation ignored a peer-disconnect
+event whenever `subscribedCentrals` still contained the host. Those entries can
+outlive the working link, so they are no longer sufficient to overrule an
+external disconnect event.
+
+The browser now distinguishes an app-requested cancellation of its auxiliary
+central-role link from an external link loss. Only the former may preserve a
+still-subscribed HID peripheral session. A real peer disconnect immediately
+clears HID readiness and queued input, keeps the HOGP advertisement available,
+and reissues the remembered outgoing connection when CoreBluetooth can retrieve
+the selected host. Incoming-only hosts still need the host OS to initiate the
+HID connection, but they no longer depend on a short advertisement window.
+
+The outgoing `connectPeripheral` request is no longer cancelled after 20 seconds.
+Apple documents that these requests do not time out and can complete when the
+peer becomes available, which is the desired behavior across computer sleep:
+[Core Bluetooth background processing](https://developer.apple.com/library/archive/documentation/NetworkingInternetWeb/Conceptual/CoreBluetooth_concepts/CoreBluetoothBackgroundProcessingForIOSApps/PerformingTasksWhileYourAppIsInTheBackground.html).
+The 20-second timer now changes only the explanatory status. The toolbar refresh
+button performs a full removal and recreation of the HID GATT services, providing
+an app-side recovery path for stale notification state without toggling Bluetooth
+on the computer. The visible ready label says “HID ready” because
+`updateValue` acceptance is transmission-queue state, not an acknowledgement
+from the host:
+[`peripheralManagerIsReady(toUpdateSubscribers:)`](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanagerdelegate/peripheralmanagerisready%28toupdatesubscribers%3A%29).
+
+The iOS app publishes the BLE HID service and does not request an audio profile.
+BlueZ's generic `Connect` operation attempts all eligible profiles, which explains
+why selecting the whole iPhone in a Linux Bluetooth UI may also route iPhone
+audio to the computer. BlueZ also exposes `ConnectProfile` for one remote service
+UUID: [BlueZ Device API](https://bluez.readthedocs.io/en/latest/device-api/).
+For diagnosis, a Linux host can request only the HID-over-GATT service with:
+
+```
+bluetoothctl connect <iPhone-device> 00001812-0000-1000-8000-00805f9b34fb
+```
+
+Whether KDE/BlueZ automatically reconnects that profile is host policy outside
+the app's CoreBluetooth process. Test the new build first with the existing bond:
+let Mac sleep and wake without toggling Bluetooth; on Linux compare the generic
+UI connection with the HID-specific command, and check that audio remains on the
+iPhone. The connection journal now records the disconnect cause and whether stale
+report subscriptions were still present.

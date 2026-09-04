@@ -117,6 +117,31 @@ enum HIDInputChannel: Hashable {
     case keyboard, mouse, bootKeyboard, bootMouse
 }
 
+/// Why the auxiliary central-role link to a computer ended. Cancelling that
+/// link ourselves must not tear down a still-subscribed HID peripheral session;
+/// every external loss invalidates it even if CoreBluetooth has not yet removed
+/// stale entries from `subscribedCentrals`.
+enum HIDPeerDisconnectCause: String {
+    case appCancelledOutgoingLink
+    case connectionFailed
+    case linkLost
+    case bluetoothUnavailable
+}
+
+enum HIDDisconnectPolicy {
+    static func invalidatesSession(
+        cause: HIDPeerDisconnectCause,
+        reportsStillSubscribed: Bool
+    ) -> Bool {
+        switch cause {
+        case .appCancelledOutgoingLink, .connectionFailed:
+            return !reportsStillSubscribed
+        case .linkLost, .bluetoothUnavailable:
+            return true
+        }
+    }
+}
+
 /// Only one selected host receives input, regardless of how many BLE peers
 /// connect. GAP connection events alone never make an HID session ready.
 struct HIDHostSession {
