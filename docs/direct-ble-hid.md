@@ -3,8 +3,11 @@
 Reviewed: 2026-09-04. Status: the v2 prototype is implemented. HID report/session
 tests and the Xcode 26.6 iOS build passed for commit `802bb64`, producing version
 2.0.0 (16) ([run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
-Physical-device pairing and input validation are pending. The sections below
-preserve the research evidence and acceptance criteria.
+The user confirmed keyboard and mouse input on a physical iPhone/macOS pair.
+The app reused the pairing created with BlueTouch; input began after toggling
+Bluetooth off and on on the Mac. This records the observation, not a confirmed
+root cause. Linux and Windows testing of this app remains pending. The sections
+below preserve the research evidence and acceptance criteria.
 
 ## Decision and evidence
 

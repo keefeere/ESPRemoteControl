@@ -30,8 +30,10 @@ Unlike software solutions that require network setup or specific operating syste
 
 ## Experimental v2: direct Bluetooth
 
-The v2 prototype adds a direct BLE HID keyboard/mouse mode. It is implemented
-but still needs validation on physical iPhone/macOS/Linux/Windows combinations.
+The v2 prototype adds a direct BLE HID keyboard/mouse mode. The user confirmed
+keyboard and mouse input on iPhone/macOS: an existing BlueTouch pairing was
+reused, with input starting after Bluetooth was toggled off and on on the Mac.
+Linux and Windows testing of this app is still pending.
 ESP32 mode remains the initial default, and the app remembers the selected mode.
 
 1. In the connection status strip, open **ESP** and choose **Прямий Bluetooth**.
@@ -58,7 +60,7 @@ encoding, queue backpressure, host selection, and descriptor sizes. The IPA
 workflow runs these checks for pull requests and pushes to the v2 branch before
 building the app. Version 2.0.0 (16) passed these tests and the Xcode 26.6 iOS
 build on 2026-09-04 ([Actions run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
-Physical pairing and input tests remain pending.
+Broader pairing and reconnect tests remain pending; see the macOS result above.
 
 ## Hardware Requirements
 
@@ -153,7 +155,10 @@ To build the same unsigned IPA on a Mac locally:
 3. Choose the target computer's layout shortcut in Settings
 4. Type with the native iOS keyboard or use the dedicated keyboard tab:
    - tap `EN`/`UA` to switch both the phone and target computer
-   - hold `EN`/`UA` to change only the phone indicator
+   - hold `EN`/`UA` (or `UA/EN` on the full keyboard) for 0.5 seconds to change
+     only the on-screen layout, without sending the host shortcut
+   - on the full keyboard, tap the orientation lock to freeze the current
+     orientation or unlock it; hold it for 0.5 seconds to force landscape
    - use the globe beside the text field to resend only the host shortcut
 5. In **Settings → Shortcuts**, open the app’s shortcut page, then create a new shortcut with **Send to ESP**:
    - tap its `Text` field → **Select Variable** → **Shortcut Input**
