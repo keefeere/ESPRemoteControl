@@ -13,6 +13,7 @@ on:
   push:
     branches:
       - main
+      - codex/v2-direct-ble-hid
     tags:
       - "ios-v*"
     paths:
@@ -20,6 +21,8 @@ on:
       - "ESPRemoteControlShare/**"
       - "Shared/**"
       - "ESPRemoteControl.xcodeproj/**"
+      - "Tests/**"
+      - "scripts/test-direct-hid.sh"
       - "scripts/build-unsigned-ipa.sh"
       - "scripts/update-sidestore-source.py"
       - ".github/workflows/build-ios-ipa.yml"
