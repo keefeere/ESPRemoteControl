@@ -19,18 +19,48 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+enum KeyboardOrientationLock: String {
+    case unlocked, portrait, portraitUpsideDown, landscapeLeft, landscapeRight, landscape
+
+    var isLocked: Bool { self != .unlocked }
+    var isPortrait: Bool { self == .portrait || self == .portraitUpsideDown }
+
+    var orientations: UIInterfaceOrientationMask {
+        switch self {
+        case .unlocked: return .all
+        case .portrait: return .portrait
+        case .portraitUpsideDown: return .portraitUpsideDown
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        case .landscape: return .landscape
+        }
+    }
+}
+
 @MainActor
 enum AppOrientationLock {
-    static func setLandscapeLocked(_ isLocked: Bool) {
-        let orientations: UIInterfaceOrientationMask = isLocked ? .landscape : .all
+    private static var activeScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+    }
+
+    static var current: KeyboardOrientationLock {
+        // Use the displayed orientation, including when the phone is face up.
+        switch activeScene?.interfaceOrientation {
+        case .portrait: return .portrait
+        case .portraitUpsideDown: return .portraitUpsideDown
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .portrait
+        }
+    }
+
+    static func apply(_ lock: KeyboardOrientationLock) {
+        let orientations = lock.orientations
         AppDelegate.supportedOrientations = orientations
 
-        guard let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive })
-        else {
-            return
-        }
+        guard let windowScene = activeScene else { return }
 
         windowScene.keyWindow?
             .rootViewController?

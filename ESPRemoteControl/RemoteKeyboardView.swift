@@ -17,7 +17,14 @@ struct RemoteKeyboardView: View {
     @State private var usedMomentaryModifiers: UInt8 = 0
     @State private var modifierPressStartedAt: [UInt8: TimeInterval] = [:]
     @State private var pressedKeycodes: Set<UInt8> = []
-    @AppStorage("keyboardLandscapeLock") private var landscapeLocked = false
+    @AppStorage("keyboardOrientationLock") private var orientationLockRawValue =
+        UserDefaults.standard.bool(forKey: "keyboardLandscapeLock")
+            ? KeyboardOrientationLock.landscape.rawValue
+            : KeyboardOrientationLock.unlocked.rawValue
+
+    private var orientationLock: KeyboardOrientationLock {
+        KeyboardOrientationLock(rawValue: orientationLockRawValue) ?? .unlocked
+    }
 
     private var effectiveModifiers: UInt8 { stickyModifiers | momentaryModifiers }
     private var shiftIsActive: Bool { effectiveModifiers & HID.modLeftShift != 0 }
@@ -98,10 +105,10 @@ struct RemoteKeyboardView: View {
         }
         .background(Color(.systemGroupedBackground))
         .onAppear {
-            AppOrientationLock.setLandscapeLocked(landscapeLocked)
+            AppOrientationLock.apply(orientationLock)
         }
-        .onChange(of: landscapeLocked) { _, isLocked in
-            AppOrientationLock.setLandscapeLocked(isLocked)
+        .onChange(of: orientationLockRawValue) { _, _ in
+            AppOrientationLock.apply(orientationLock)
         }
         .onChange(of: ble.inputEpoch) { _, _ in
             // The controller already released the old route. Only clear UI state.
@@ -124,30 +131,38 @@ struct RemoteKeyboardView: View {
 
     private var orientationLockButton: some View {
         Button {
-            landscapeLocked.toggle()
+            orientationLockRawValue = (orientationLock.isLocked ? .unlocked : AppOrientationLock.current).rawValue
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "rectangle.landscape")
-                Image(systemName: landscapeLocked ? "lock.fill" : "lock.open")
+                Image(systemName: orientationLock.isPortrait ? "rectangle.portrait" : "rectangle.landscape")
+                Image(systemName: orientationLock.isLocked ? "lock.fill" : "lock.open")
             }
             .font(.caption.weight(.bold))
-            .foregroundStyle(landscapeLocked ? Color.white : Color.accentColor)
+            .foregroundStyle(orientationLock.isLocked ? Color.white : Color.accentColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
-                landscapeLocked
+                orientationLock.isLocked
                     ? Color.accentColor
                     : Color.accentColor.opacity(0.16)
             )
             .clipShape(Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShortAndLongPressButtonStyle(
+            longPressLabel: "Зафіксувати горизонтально",
+            onLongPress: { orientationLockRawValue = KeyboardOrientationLock.landscape.rawValue }
+        ))
         .accessibilityLabel(
-            landscapeLocked
-                ? "Вимкнути фіксацію горизонтальної орієнтації"
-                : "Зафіксувати горизонтальну орієнтацію"
+            orientationLock.isLocked
+                ? "Вимкнути фіксацію орієнтації"
+                : "Зафіксувати поточну орієнтацію"
         )
+        .accessibilityValue(
+            !orientationLock.isLocked ? "Вільна орієнтація"
+                : orientationLock.isPortrait ? "Вертикально" : "Горизонтально"
+        )
+        .accessibilityHint("Довге натискання вмикає горизонтальну орієнтацію")
     }
 
     private func functionRow(labels: [String], keycodes: [UInt8], height: CGFloat) -> some View {
@@ -408,15 +423,23 @@ struct RemoteKeyboardView: View {
     }
 
     private func layoutKey(width: CGFloat, height: CGFloat) -> some View {
-        PressableKeyButton(
-            title: "UA/EN",
-            isCompact: true,
-            fontSize: height < 34 ? 8 : 10,
-            minHeight: height,
-            onPress: {},
-            onRelease: { changeLayout(synchronizeHost: true) }
-        )
-        .frame(width: width, height: height)
+        Button {
+            changeLayout(synchronizeHost: true)
+        } label: {
+            Text("UA/EN")
+                .font(.system(size: height < 34 ? 8 : 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.primary)
+                .frame(width: width, height: height)
+                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(ShortAndLongPressButtonStyle(
+            longPressLabel: "Змінити лише екранну розкладку",
+            onLongPress: { changeLayout(synchronizeHost: false) }
+        ))
+        .accessibilityLabel("Змінити мову")
+        .accessibilityValue(layout.shortName)
+        .accessibilityHint("Довге натискання змінює лише екранну розкладку")
     }
 
     private func modifierKey(
