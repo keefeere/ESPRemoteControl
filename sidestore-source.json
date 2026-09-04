@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.0.5/ESPRemoteControl-unsigned.ipa",
           "size": 801829,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.0.5"
+          "localizedDescription": "Bluetooth now shows the active computer and remembers multiple hosts. Select a saved computer, give it a local name, or forget it from the menu. Existing host selection migrates automatically. Improves reconnect advertising and distinguishes outgoing BLE disconnects from active HID subscriptions. Connection logs include host IDs and detailed errors. Forgetting removes app selection and auto-reconnect; system Bluetooth pairing is managed separately. Share Extension retains its own host selection."
         },
         {
           "version": "2.0.4",
