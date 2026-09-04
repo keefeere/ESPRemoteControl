@@ -21,11 +21,10 @@ struct ConnectionStatusView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 3) {
-                    Text(input.mode == .esp ? "ESP" : "BT").fontWeight(.semibold)
-                    Image(systemName: "chevron.down").font(.caption2)
-                }
+                connectionModeLabel
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(2)
             .disabled(input.isSwitching)
             .accessibilityLabel("Режим підключення")
             .accessibilityValue(input.mode.title)
@@ -84,6 +83,17 @@ struct ConnectionStatusView: View {
         .sheet(isPresented: $showsBluetooth) {
             DirectBluetoothSheet(transport: direct, browser: direct.browser)
         }
+    }
+
+    private var connectionModeLabel: some View {
+        HStack(spacing: 3) {
+            Text(input.mode == .esp ? "ESP" : "BT")
+                .fontWeight(.semibold)
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+        }
+        .frame(width: compact ? 44 : 52, height: compact ? 32 : 44)
+        .contentShape(Rectangle())
     }
 
     private var hostSelectionLabel: some View {

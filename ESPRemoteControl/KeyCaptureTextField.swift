@@ -13,19 +13,38 @@ final class BackspaceDetectingTextView: UITextView {
         return label
     }()
 
+    private let secureLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 17)
+        label.textColor = .label
+        label.numberOfLines = 0
+        label.lineBreakMode = .byCharWrapping
+        label.isHidden = true
+        label.isAccessibilityElement = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private var masksText = false
+
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
+        addSubview(secureLabel)
         addSubview(placeholderLabel)
+        let horizontalInset = textContainerInset.left + self.textContainer.lineFragmentPadding
         NSLayoutConstraint.activate([
-            placeholderLabel.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: textContainerInset.left + self.textContainer.lineFragmentPadding
-            ),
+            placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalInset),
             placeholderLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailingAnchor,
                 constant: -(textContainerInset.right + self.textContainer.lineFragmentPadding)
             ),
-            placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top)
+            placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top),
+            secureLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalInset),
+            secureLabel.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -(textContainerInset.right + self.textContainer.lineFragmentPadding)
+            ),
+            secureLabel.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top)
         ])
     }
 
@@ -41,8 +60,21 @@ final class BackspaceDetectingTextView: UITextView {
         }
     }
 
+    func setSecureDisplay(_ isSecure: Bool) {
+        masksText = isSecure
+        updateTextPresentation()
+    }
+
     func updatePlaceholder() {
         placeholderLabel.isHidden = !text.isEmpty
+        updateTextPresentation()
+    }
+
+    private func updateTextPresentation() {
+        textColor = masksText ? .clear : .label
+        secureLabel.text = masksText ? String(repeating: "•", count: text.count) : nil
+        secureLabel.isHidden = !masksText || text.isEmpty
+        accessibilityValue = masksText && !text.isEmpty ? "Прихований текст" : nil
     }
 }
 
@@ -89,31 +121,12 @@ struct KeyCaptureTextField: UIViewRepresentable {
 
     func updateUIView(_ textView: BackspaceDetectingTextView, context: Context) {
         context.coordinator.parent = self
-        if textView.isSecureTextEntry != isSecure {
-            let text = textView.text
-            let selectionOffset = textView.selectedTextRange.map {
-                textView.offset(from: textView.beginningOfDocument, to: $0.start)
-            }
-            textView.isSecureTextEntry = isSecure
-            // UITextView does not reliably redraw existing glyphs when only
-            // isSecureTextEntry changes. Reassigning forces a visual refresh.
-            textView.text = nil
-            textView.text = text
-            if let selectionOffset,
-               let position = textView.position(
-                   from: textView.beginningOfDocument,
-                   offset: selectionOffset
-               ) {
-                textView.selectedTextRange = textView.textRange(from: position, to: position)
-            }
-            textView.updatePlaceholder()
-        }
-
         if textView.text != text {
             textView.text = text
             context.coordinator.lastCommittedText = text
             textView.updatePlaceholder()
         }
+        textView.setSecureDisplay(isSecure)
 
         if wantsFirstResponder, !textView.isFirstResponder {
             DispatchQueue.main.async {
