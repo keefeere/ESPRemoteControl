@@ -215,3 +215,20 @@ The crash requires preserved CoreBluetooth state on a physical iPhone. Report an
 host-store tests plus a successful simulator/device build cannot reproduce that
 OS restoration path. Device acceptance is to update without reinstalling, launch
 repeatedly with direct Bluetooth selected, and confirm input after reconnecting.
+
+
+The user subsequently confirmed that the startup crash was resolved after the
+2.0.6 update. Mac/Linux host switching and reconnect behavior remain under device
+testing; intermittent manual Bluetooth toggles/re-pairing have been reported,
+followed by successful reconnects. These observations do not yet establish a
+reliable multi-host switching sequence.
+
+## Quick computer selection (2.0.7)
+
+Tap the computer name/status in the Bluetooth connection strip to open a menu of
+saved computers, both on the main input screen and in the compact keyboard strip.
+The connected host has a checkmark; a selected host awaiting input subscriptions
+has a clock. Selecting an entry uses the existing host-selection/release path.
+Opening the menu itself does not scan, open pairing, or change the selected host.
+The menu also links to pairing a new computer, including when the saved list is
+empty. This is a UI shortcut; it does not change Bluetooth reconnect behavior.

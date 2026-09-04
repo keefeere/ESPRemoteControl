@@ -2,8 +2,15 @@ import SwiftUI
 
 struct ConnectionStatusView: View {
     @ObservedObject var input: RemoteInputController
+    @ObservedObject private var direct: DirectHIDTransport
     var compact = false
     @State private var showsBluetooth = false
+
+    init(input: RemoteInputController, compact: Bool = false) {
+        self.input = input
+        self.direct = input.direct
+        self.compact = compact
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -24,11 +31,41 @@ struct ConnectionStatusView: View {
             .accessibilityValue(input.mode.title)
 
             Circle().fill(input.isReady ? .green : .orange).frame(width: 7, height: 7)
-            Text(input.statusText)
-                .font(compact ? .caption2 : .caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if input.mode == .bluetooth {
+                Menu {
+                    if direct.savedHosts.isEmpty {
+                        Text("Немає збережених комп’ютерів")
+                    } else {
+                        Section("Мої комп’ютери") {
+                            ForEach(direct.savedHosts) { host in
+                                Button { direct.connect(to: host.id) } label: {
+                                    if direct.connectedHostID == host.id {
+                                        Label(host.name, systemImage: "checkmark")
+                                    } else if direct.selectedHostID == host.id {
+                                        Label("\(host.name) · очікуємо", systemImage: "clock")
+                                    } else {
+                                        Text(host.name)
+                                    }
+                                }
+                                .disabled(!direct.canPair)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Сполучити інший комп’ютер", systemImage: "link.badge.plus") {
+                        showsBluetooth = true
+                    }
+                } label: {
+                    statusLabel
+                }
+                .menuIndicator(.hidden)
+                .disabled(input.isSwitching)
+                .accessibilityLabel("Вибрати комп’ютер")
+                .accessibilityValue(input.statusText)
+                .accessibilityHint("Показати збережені комп’ютери")
+            } else {
+                statusLabel
+            }
             if input.mode == .bluetooth {
                 Button { showsBluetooth = true } label: {
                     Image(systemName: "link.badge.plus")
@@ -44,8 +81,17 @@ struct ConnectionStatusView: View {
         }
         .buttonStyle(.borderless)
         .sheet(isPresented: $showsBluetooth) {
-            DirectBluetoothSheet(transport: input.direct, browser: input.direct.browser)
+            DirectBluetoothSheet(transport: direct, browser: direct.browser)
         }
+    }
+
+    private var statusLabel: some View {
+        Text(input.statusText)
+            .font(compact ? .caption2 : .caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
     }
 }
 
