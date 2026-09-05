@@ -50,6 +50,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var afterInputQueueDrains: (() -> Void)?
     private var drainTimer: DispatchWorkItem?
     private var finishingDrain = false
+    private var recoveryPlan = HIDRecoveryPlan()
+    private var serviceRefreshWork: DispatchWorkItem?
+    private var serviceRefreshIsAccelerated = false
+    private var stackRecoveryWork: DispatchWorkItem?
 
     init(hostKey: String = "directHID.selectedHost") {
         hostStore = HIDHostStore(hostKey: hostKey)
@@ -91,6 +95,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         lastError = nil
         let preferred = hostStore.selectedHostID
         session = HIDHostSession(preferredHost: preferred, allowsPairing: hostStore.shouldPairOnStart)
+        if preferred != nil { recoveryPlan.beginStagedReconnect() }
         isPairing = hostStore.shouldPairOnStart
         selectedHostID = preferred
         browser.setKnownHosts(hostStore.hosts)
@@ -115,12 +120,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     func stop(completion: @escaping () -> Void) {
+        cancelRecovery()
         drainReleases { [weak self] in
             guard let self else { completion(); return }
             self.isRunning = false
             self.canPair = false
             self.isPairing = false
             self.pairingTimer?.cancel()
+            self.cancelRecovery()
             self.sendWork?.cancel()
             self.manager?.stopAdvertising()
             self.advertising = HIDAdvertisingState()
@@ -164,6 +171,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.record("Forgot host in app: \(self.peerTag(id)); system bond unchanged")
         }
         if session.preferredHost == id || hostStore.selectedHostID == id {
+            cancelRecovery()
             drainReleases { [weak self] in
                 guard let self else { return }
                 self.browser.cancelConnection()
@@ -183,56 +191,174 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func beginPairing() { prepareHost(nil) }
     func connect(to id: UUID) {
-        guard !(session.host == id && session.isReady) else { return }
         prepareHost(id)
     }
 
     private func prepareHost(_ id: UUID?) {
         guard canPair, afterDrain == nil else { return }
+        cancelRecovery()
         drainReleases { [weak self] in
             guard let self, self.isRunning else { return }
             self.lastError = nil
-            self.browser.cancelConnection()
-            self.host = nil
-            self.session = HIDHostSession(preferredHost: id, allowsPairing: true)
             self.isPairing = true
-            self.record(id == nil ? "Pairing window opened" : "Host selected: \(self.peerTag(id))")
-            self.armPairingTimeout()
             if let id {
                 self.hostStore.select(id, name: self.browser.resolvedName(for: id), supportsOutgoing: false)
                 self.savedHosts = self.hostStore.hosts
-                self.browser.setKnownHosts(self.savedHosts)
-                self.adoptLiveSubscriptions()
-                if !self.session.isReady { self.browser.connect(to: id) }
             }
-            self.refreshStatus()
+            self.rebuildHIDServices(
+                preferredHost: id,
+                allowsPairing: true,
+                staged: id != nil,
+                reason: id == nil ? "Pairing window opened" : "Host selected: \(self.peerTag(id))"
+            )
         }
     }
 
     func reconnectNow() {
         guard isRunning, afterDrain == nil else { return }
-        if !servicesInstalled, manager?.state == .poweredOn {
-            lastError = nil
-            installServices()
-            return
-        }
+        cancelRecovery()
         let preferred = session.preferredHost ?? hostStore.selectedHostID
         drainReleases { [weak self] in
             guard let self, self.isRunning else { return }
             self.lastError = nil
-            self.record("Manual HID service restart; selected \(self.peerTag(preferred))")
+            self.restartBluetoothStack(
+                preferredHost: preferred,
+                allowsPairing: self.isPairing,
+                staged: preferred != nil,
+                reason: "Manual full Bluetooth restart"
+            )
+        }
+    }
+
+    func recoverAfterForeground() {
+        guard isRunning, hostStore.selectedHostID != nil else { return }
+        scheduleStackRecovery(reason: "App returned to foreground", force: true, delay: 0.15)
+    }
+
+    private func rebuildHIDServices(
+        preferredHost: UUID?,
+        allowsPairing: Bool,
+        staged: Bool,
+        reason: String
+    ) {
+        serviceRefreshWork?.cancel()
+        serviceRefreshWork = nil
+        serviceRefreshIsAccelerated = false
+        stackRecoveryWork?.cancel()
+        stackRecoveryWork = nil
+        if staged { recoveryPlan.beginStagedReconnect() } else { recoveryPlan.cancel() }
+        browser.cancelConnection()
+        host = nil
+        session = HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
+        clearInput()
+        browser.setKnownHosts(hostStore.hosts)
+        record(reason)
+        if manager?.state == .poweredOn {
+            installServices()
+        } else {
+            refreshStatus()
+        }
+    }
+
+    private func restartBluetoothStack(
+        preferredHost: UUID?,
+        allowsPairing: Bool,
+        staged: Bool,
+        reason: String
+    ) {
+        guard isRunning else { return }
+        cancelRecovery()
+        if staged { recoveryPlan.beginStagedReconnect() }
+        pairingTimer?.cancel()
+        manager?.stopAdvertising()
+        manager?.removeAllServices()
+        manager?.delegate = nil
+        manager = nil
+        browser.stop()
+        advertising = HIDAdvertisingState()
+        advertisingError = nil
+        servicesInstalled = false
+        serviceQueue.removeAll()
+        addingService = nil
+        inputs.removeAll()
+        attributes.removeAll()
+        canPair = false
+        host = nil
+        session = HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
+        clearInput()
+        connectedHostID = nil
+        lastReadyHostID = nil
+        isReady = false
+        statusText = "Відновлення Bluetooth…"
+        browser.setKnownHosts(hostStore.hosts)
+        record("\(reason); rebuilding Bluetooth managers; selected \(peerTag(preferredHost))")
+        browser.start()
+    }
+
+    private func scheduleStackRecovery(reason: String, force: Bool, delay: TimeInterval = 0.5) {
+        guard isRunning, (session.preferredHost ?? hostStore.selectedHostID) != nil else { return }
+        serviceRefreshWork?.cancel()
+        serviceRefreshWork = nil
+        serviceRefreshIsAccelerated = false
+        stackRecoveryWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.stackRecoveryWork = nil
+            guard force || !self.session.isReady else {
+                self.record("Automatic stack restart cancelled; fresh HID subscriptions arrived")
+                return
+            }
+            let preferred = self.session.preferredHost ?? self.hostStore.selectedHostID
+            self.restartBluetoothStack(
+                preferredHost: preferred,
+                allowsPairing: self.isPairing,
+                staged: preferred != nil,
+                reason: reason
+            )
+        }
+        stackRecoveryWork = work
+        record("Automatic stack restart scheduled: \(reason)")
+        refreshStatus()
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func scheduleServiceRefresh(accelerated: Bool) {
+        guard recoveryPlan.requiresServiceRefresh, session.preferredHost != nil else { return }
+        if serviceRefreshWork != nil {
+            guard accelerated, !serviceRefreshIsAccelerated else { return }
+            serviceRefreshWork?.cancel()
+        }
+        serviceRefreshIsAccelerated = accelerated
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.serviceRefreshWork = nil
+            self.serviceRefreshIsAccelerated = false
+            guard self.recoveryPlan.takeServiceRefresh() else { return }
+            let preferred = self.session.preferredHost ?? self.hostStore.selectedHostID
+            self.record("Automatic second-stage HID service refresh; selected \(self.peerTag(preferred))")
             self.browser.cancelConnection()
             self.host = nil
             self.session = HIDHostSession(preferredHost: preferred, allowsPairing: self.isPairing)
-            self.browser.setKnownHosts(self.hostStore.hosts)
+            self.clearInput()
+            self.statusText = "Оновлення HID-сервісу…"
+            self.isReady = false
             if self.manager?.state == .poweredOn {
-                // Recreate the GATT database so a host cannot keep using stale
-                // notification subscriptions after sleep or a broken link.
                 self.installServices()
             } else {
                 self.refreshStatus()
             }
         }
+        serviceRefreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (accelerated ? 0.35 : 2.5), execute: work)
+    }
+
+    private func cancelRecovery() {
+        serviceRefreshWork?.cancel()
+        serviceRefreshWork = nil
+        serviceRefreshIsAccelerated = false
+        stackRecoveryWork?.cancel()
+        stackRecoveryWork = nil
+        recoveryPlan.cancel()
     }
 
     private func armPairingTimeout() {
@@ -247,9 +373,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 self.drainReleases { [weak self] in
                     guard let self else { return }
                     self.host = nil
-                    self.session = HIDHostSession(preferredHost: self.hostStore.selectedHostID, allowsPairing: false)
-                    self.adoptLiveSubscriptions()
-                    self.refreshStatus()
+                    let preferred = self.hostStore.selectedHostID
+                    self.rebuildHIDServices(
+                        preferredHost: preferred,
+                        allowsPairing: false,
+                        staged: preferred != nil,
+                        reason: "Pairing timed out; restoring selected host"
+                    )
                 }
             }
             self.refreshStatus()
@@ -323,6 +453,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             refreshStatus()
             if isPairing { armPairingTimeout() }
             browser.reconnectRememberedHost(ifMatching: session.preferredHost)
+            scheduleServiceRefresh(accelerated: session.isReady)
             return
         }
         addingService = serviceQueue.removeFirst()
@@ -362,7 +493,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func refreshStatus(updateAdvertisement: Bool = true) {
-        let ready = isRunning && afterDrain == nil && session.isReady
+        let subscribed = isRunning && afterDrain == nil && session.isReady
+        let ready = subscribed && !recoveryPlan.requiresServiceRefresh
         selectedHostID = session.preferredHost
         connectedHostID = ready ? session.host : nil
         if ready {
@@ -382,6 +514,19 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             }
         } else if let lastError {
             statusText = lastError
+        } else if subscribed && recoveryPlan.requiresServiceRefresh {
+            if let id = session.host {
+                statusText = "Перевірка HID · \(hostName(for: id))"
+            } else {
+                statusText = "Перевірка HID…"
+            }
+            scheduleServiceRefresh(accelerated: true)
+        } else if stackRecoveryWork != nil || recoveryPlan.requiresServiceRefresh {
+            if let id = session.preferredHost {
+                statusText = "Відновлення HID · \(hostName(for: id))"
+            } else {
+                statusText = "Відновлення HID…"
+            }
         } else if afterDrain != nil {
             statusText = "Відпускання клавіш…"
         } else if !servicesInstalled {
@@ -573,12 +718,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             return
         }
         record("HID disconnected: \(peerTag(id)); cause \(cause.rawValue); subscribed \(stillSubscribed)")
-        let preferred = session.preferredHost
         session.disconnect(id)
         host = nil
         clearInput()
         refreshStatus()
-        browser.reconnectRememberedHost(ifMatching: preferred)
+        scheduleStackRecovery(reason: "Peer disconnected: \(cause.rawValue)", force: true)
     }
 
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
@@ -589,7 +733,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             lastError = nil
             if servicesInstalled {
                 canPair = true
-                adoptLiveSubscriptions()
+                refreshStatus()
             } else {
                 installServices()
             }
@@ -599,6 +743,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             advertising = HIDAdvertisingState()
             addingService = nil
             serviceQueue.removeAll()
+            serviceRefreshWork?.cancel()
+            serviceRefreshWork = nil
+            serviceRefreshIsAccelerated = false
+            if session.preferredHost != nil { recoveryPlan.beginStagedReconnect() }
             if let id = session.host { session.disconnect(id) }
             host = nil
             clearInput()
@@ -612,6 +760,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if let error {
             lastError = "Не вдалося створити HID: \(error.localizedDescription)"
             record("Service \(service.uuid): \(error.localizedDescription)")
+            cancelRecovery()
             addingService = nil
             serviceQueue.removeAll()
             refreshStatus()
@@ -660,6 +809,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if session.host == nil { host = nil }
         refreshStatus()
         releaseAllInput()
+        if !session.isReady {
+            scheduleStackRecovery(reason: "HID report subscription ended", force: false)
+        }
     }
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
@@ -746,15 +898,4 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         refreshStatus()
     }
 
-    /// Adopt subscriptions on this live manager when switching computers.
-    /// This does not deserialize any preserved CoreBluetooth services.
-    private func adoptLiveSubscriptions() {
-        for (channel, characteristic) in inputs {
-            for central in characteristic.subscribedCentrals ?? [] {
-                if session.subscribe(channel, from: central.identifier) { host = central }
-            }
-        }
-        releaseAllInput()
-        refreshStatus()
-    }
 }

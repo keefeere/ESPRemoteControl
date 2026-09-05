@@ -20,6 +20,7 @@ final class RemoteInputController: ObservableObject {
     private let esp = BLEKeyboardBridge()
     private var subscriptions: Set<AnyCancellable> = []
     private let modeKey = "inputTransportMode"
+    private var backgroundedAt: Date?
 
     init() {
         // Keep the established ESP default during the direct-Bluetooth trial.
@@ -77,8 +78,19 @@ final class RemoteInputController: ObservableObject {
     }
 
     func enteredBackground() {
+        backgroundedAt = Date()
         direct.browser.stopScan()
         releaseAllInput()
+    }
+
+    func becameActive() {
+        guard let backgroundedAt else { return }
+        self.backgroundedAt = nil
+        guard mode == .bluetooth else { return }
+        if Date().timeIntervalSince(backgroundedAt) >= 3 {
+            inputEpoch += 1
+            direct.recoverAfterForeground()
+        }
     }
 
     func setModifiers(_ mask: UInt8) {

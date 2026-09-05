@@ -142,6 +142,27 @@ enum HIDDisconnectPolicy {
     }
 }
 
+/// A reconnect gets one deliberate GATT refresh. The first service publication
+/// wakes or attracts the selected host; the second invalidates any cached HID
+/// notification state. Consuming the refresh prevents recovery loops.
+struct HIDRecoveryPlan {
+    private(set) var requiresServiceRefresh = false
+
+    mutating func beginStagedReconnect() {
+        requiresServiceRefresh = true
+    }
+
+    mutating func takeServiceRefresh() -> Bool {
+        guard requiresServiceRefresh else { return false }
+        requiresServiceRefresh = false
+        return true
+    }
+
+    mutating func cancel() {
+        requiresServiceRefresh = false
+    }
+}
+
 /// Only one selected host receives input, regardless of how many BLE peers
 /// connect. GAP connection events alone never make an HID session ready.
 struct HIDHostSession {
