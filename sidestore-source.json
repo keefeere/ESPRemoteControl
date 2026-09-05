@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.1.2/ESPRemoteControl-unsigned.ipa",
           "size": 700270,
           "minOSVersion": "17.0",
-          "localizedDescription": "ESP Remote Control 2.1.2"
+          "localizedDescription": "Automates direct Bluetooth recovery after sleep and host switching. Saved computers no longer reuse stale subscribers. Reconnect now performs one bounded two-stage HID publication and shows ready only after fresh final keyboard and mouse subscriptions. Real disconnects, ended subscriptions, foreground restoration, and the refresh button recreate the Bluetooth stack automatically. Also documents Linux device-level HID bonding and unwanted audio profiles."
         },
         {
           "version": "2.1.1",
