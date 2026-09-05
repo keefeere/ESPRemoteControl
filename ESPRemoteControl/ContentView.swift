@@ -54,6 +54,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                ble.becameActive()
                 receiveSharedTextIfNeeded()
                 receiveShortcutTextIfNeeded()
             } else if newPhase == .background {

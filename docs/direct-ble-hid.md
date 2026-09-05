@@ -166,8 +166,10 @@ clear HID state while the selected host remains subscribed to input reports.
 Apple explicitly notes that
 [`cancelPeripheralConnection`](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/cancelperipheralconnection(_:))
 does not necessarily disconnect the physical link when another app still uses it.
-The [current subscribers](https://developer.apple.com/documentation/corebluetooth/cbmutablecharacteristic/subscribedcentrals)
-and input subscription callbacks remain the authority for HID readiness.
+Fresh input subscription callbacks establish HID readiness. Stored entries in
+[`subscribedCentrals`](https://developer.apple.com/documentation/corebluetooth/cbmutablecharacteristic/subscribedcentrals)
+are no longer adopted while changing hosts because they can represent the stale
+session that recovery is intended to replace.
 
 Device acceptance checks for this update:
 
@@ -280,3 +282,50 @@ let Mac sleep and wake without toggling Bluetooth; on Linux compare the generic
 UI connection with the HID-specific command, and check that audio remains on the
 iPhone. The connection journal now records the disconnect cause and whether stale
 report subscriptions were still present.
+
+## Automatic staged recovery (2.1.2)
+
+Physical tests of 2.0.9–2.1.1 refined the failure sequence. Selecting the Mac
+could immediately show HID ready while no input arrived; one manual refresh then
+made it work. Linux recovery after wake could require switching to ESP, switching
+back to direct Bluetooth, and then refreshing. That sequence demonstrates that
+both the CoreBluetooth manager lifetime and the host's cached GATT notification
+state can matter.
+
+Host selection no longer adopts entries from `subscribedCentrals` on the old
+characteristic objects. It clears the session and republishes the services, so
+only new `didSubscribeTo` callbacks can establish readiness. A reconnect to a
+saved host is now staged:
+
+1. Create or republish the HID services and let the host connect.
+2. Once the host subscribes, or after 2.5 seconds without subscriptions, perform
+   exactly one additional service refresh to invalidate cached notification
+   state.
+3. Expose the green ready state only after subscriptions arrive on that final
+   service publication.
+
+A small `HIDRecoveryPlan` state machine consumes the second-stage refresh once,
+preventing a retry loop. A real peer disconnect performs a full recreation of
+both CoreBluetooth managers before the staged service publication. The same full
+recovery is scheduled when HID report subscriptions end. If the host resubscribes
+before an unsubscribe-triggered restart, that restart is cancelled. Returning to
+the app after at least three seconds in the background also runs full recovery,
+as does the manual refresh button. This automates the user-tested ESP → Bluetooth
+→ refresh sequence while retaining the refresh button as a manual fallback.
+
+The Linux “full device” entry is a consequence of Bluetooth bonding rather than
+an audio request by this app. HOGP characteristics require encryption, so pairing
+the keyboard creates a bond with the physical iPhone. A dual-mode Bluetooth
+implementation may use cross-transport key derivation to derive a BR/EDR key from
+an LE key, allowing one pairing action to authorize both transports:
+[Bluetooth Security Manager specification](https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core_v6.3/out/en/host/security-manager-specification.html).
+BlueZ's generic `Connect` then tries eligible profiles for that known device,
+including system audio profiles exposed by iOS. The app still publishes only the
+BLE HID, battery, and device-information services; it does not initiate A2DP or
+HFP. Connecting the iPhone separately is not required for direct HID.
+
+Physical acceptance checks are Mac sleep/wake without toggling Bluetooth, host
+switching in both directions without pressing refresh, Linux sleep/wake with KDE
+Bluetooth UI closed, and returning from iOS background. The journal should show
+“Automatic second-stage HID service refresh” once per recovery and must not
+repeat it continuously.
