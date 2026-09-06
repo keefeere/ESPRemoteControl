@@ -156,8 +156,9 @@ is_linked() {
 # false positive is not a practical concern, and the local adapter has a
 # different one.
 has_hid_device() {
-  local mac uevent
+  local mac name uevent hid_name
   mac="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+  name="$(device_name "$1")"
   if [ ! -d /sys/bus/hid/devices ]; then
     # Nothing to inspect on this kernel; the link state is the only signal.
     is_linked "$1"
@@ -165,7 +166,15 @@ has_hid_device() {
   fi
   for uevent in /sys/bus/hid/devices/*/uevent; do
     [ -r "$uevent" ] || continue
-    if grep -qi "$mac" "$uevent"; then return 0; fi
+    grep -qi "$mac" "$uevent" && return 0
+    # iOS advertises with a rotating private address, so the address BlueZ
+    # stored at bonding and the one the kernel recorded for the HID device
+    # need not be the same string. The name does not rotate, and the app
+    # advertises a fixed one, so match on that too.
+    hid_name="$(sed -n 's/^HID_NAME=//p' "$uevent" | head -n1)"
+    [ -n "$hid_name" ] || continue
+    [ -n "$name" ] && [ "$hid_name" = "$name" ] && return 0
+    case "$hid_name" in *"ESP Remote"*) return 0 ;; esac
   done
   return 1
 }
