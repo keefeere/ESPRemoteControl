@@ -329,3 +329,85 @@ switching in both directions without pressing refresh, Linux sleep/wake with KDE
 Bluetooth UI closed, and returning from iOS background. The journal should show
 “Automatic second-stage HID service refresh” once per recovery and must not
 repeat it continuously.
+
+## Escalating reconnect recovery (2.1.3)
+
+Physical tests of 2.1.2 on Linux reported that reconnect became reliable only
+after force-quitting and reopening the app, and that the link could be started
+only from the computer, where the desktop's generic connect also routed iPhone
+audio there. Reviewing the transport against those two reports found the
+following.
+
+Every recovery path in 2.1.2 was edge triggered: a peer disconnect, a report
+unsubscribe, a return from the background, or the manual refresh button. A
+computer that simply stops reconnecting produces none of those edges, so the
+transport waited indefinitely. Three specific ways to reach that state existed:
+
+- `peripheralManagerDidStartAdvertising` recorded a failure and then called
+  `refreshStatus(updateAdvertisement: false)`, deliberately skipping the retry.
+  The advertising state machine also returns no action after a failed start.
+  Nothing else reissued it, so a single failed start left the phone invisible
+  until the process restarted. The 2.0.2 Linux log quoted above ends in exactly
+  that sequence: both reports unsubscribing, then an advertising error.
+- `disconnected(_:cause:)` returned early unless `session.host` matched the peer.
+  A selected computer that dropped its link before subscribing to any report
+  therefore produced no state change at all.
+- The second-stage service refresh removes and re-adds the GATT database. When
+  it ran against a host that had just subscribed, and that host did not
+  resubscribe, no further callback arrived to recover from.
+
+2.1.3 adds `HIDReconnectWatchdog`, an escalating ladder that runs whenever the
+transport wants to be reachable and has no working session: reissue the
+advertisement after 10 s, republish the HID services after another 20 s, then
+rebuild both CoreBluetooth managers after another 40 s, staged exactly like a
+relaunch. Each rung runs once; a report-map read or a report subscription
+rewinds the ladder; an exhausted ladder keeps advertising and reports
+"Немає відповіді" rather than restarting Bluetooth in a loop. An open pairing
+window with no selected host only repairs visibility, because rebuilding the
+stack there would close the window with nothing to reconnect to. The ladder is a
+pure value type with checks in `Tests/DirectHIDTests.swift`; the wiring itself
+still needs device validation.
+
+The staged refresh is now conditional. A host that read the report map on the
+current publication has re-discovered the database, which is what the refresh
+exists to force, so consuming it there would tear down a session that had just
+started working. This matters most on BlueZ, which keeps a cached GATT database
+for bonded devices and need not resubscribe after an unnecessary republication.
+
+`transmit` no longer reports backpressure for a report larger than the host's
+`maximumUpdateValueLength`. Nothing had been handed to CoreBluetooth in that
+case, so the readiness callback that would resume the queue could not arrive and
+every later keystroke queued behind it. Such a report is now dropped and logged
+once. Subscriptions also log the negotiated notification size.
+
+### Linux connection direction and audio
+
+Neither reported Linux behaviour is a defect in this app, and both now have
+documented handling in [direct Bluetooth HID on Linux](linux-direct-hid.md):
+
+- A BlueZ desktop is a GATT client and does not advertise over Bluetooth LE, so
+  the phone cannot discover it and **Знайти комп'ютер** cannot list it. The
+  computer initiates every connection; the phone's part is to stay advertising,
+  which the ladder above now maintains. The pairing sheet says this explicitly
+  instead of presenting phone-initiated discovery as a general path.
+- `Connect()` connects every eligible profile of a bonded device, and the LE
+  pairing authorises BR/EDR through cross-transport key derivation, so the
+  iPhone's audio profiles become eligible. `ConnectProfile()` with the HID UUID
+  connects one profile instead. `scripts/linux-hid-connect.sh` wraps that call,
+  falls back to `busctl`/`dbus-send` on BlueZ older than 5.65, waits for the
+  kernel to attach a HID device rather than trusting the bare link, and can watch
+  the profile and disconnect audio that something else connected.
+
+Device acceptance checks for this update:
+
+- Let the Linux host sleep and wake without touching the app. The journal should
+  show the ladder starting at "Recovery 1/3" and stopping as soon as the host
+  subscribes, and input should return without a relaunch.
+- Confirm "Recovery 3/3" appears at most once per outage and that the ladder does
+  not repeat after it. A repeating ladder means readiness is being reported and
+  lost, not that the ladder is looping.
+- Connect with `scripts/linux-hid-connect.sh --trust` and verify that iPhone
+  audio stays on the phone, then compare with the desktop applet's Connect.
+- Reconnect on a host that keeps its GATT cache and confirm the journal shows
+  either a report-map read followed by "second-stage refresh skipped", or one
+  "Automatic second-stage HID service refresh" — never both, and never repeated.

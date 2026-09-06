@@ -163,6 +163,50 @@ struct HIDRecoveryPlan {
     }
 }
 
+/// Escalating repair for a direct HID link that never becomes ready. Every other
+/// recovery path is edge triggered: a disconnect, an unsubscribe, or a return
+/// from the background. A computer that simply stops reconnecting produces no
+/// such edge, which left relaunching the app as the only repair. Steps run once
+/// each, cheapest first, and evidence of progress resets the ladder.
+struct HIDReconnectWatchdog {
+    enum Step: Equatable {
+        /// Reissue the advertisement. A failed or stalled start otherwise
+        /// leaves the phone invisible, and an invisible phone is unreachable.
+        case restartAdvertising
+        /// Republish the GATT database so a host holding a cached copy of it
+        /// re-discovers the HID service.
+        case republishServices
+        /// Recreate both CoreBluetooth managers: the in-app equivalent of the
+        /// relaunch users perform by hand today.
+        case restartStack
+    }
+
+    /// Seconds to wait before each escalation. The first delay leaves room for
+    /// the host's own reconnect; the later ones avoid fighting its retry loop.
+    static let schedule: [TimeInterval] = [10, 20, 40]
+
+    private(set) var attempt = 0
+    var isExhausted: Bool { attempt >= Self.schedule.count }
+
+    mutating func reset() { attempt = 0 }
+
+    /// The next escalation, or nil once the ladder is exhausted. An open
+    /// pairing window with no selected host has nothing to reconnect to, so it
+    /// only repairs visibility; rebuilding the stack would close the window.
+    mutating func next(pairingOnly: Bool) -> (step: Step, delay: TimeInterval)? {
+        guard !isExhausted else { return nil }
+        let delay = Self.schedule[attempt]
+        let step: Step
+        switch attempt {
+        case 0: step = .restartAdvertising
+        case 1: step = .republishServices
+        default: step = .restartStack
+        }
+        attempt += 1
+        return (pairingOnly ? .restartAdvertising : step, delay)
+    }
+}
+
 /// Only one selected host receives input, regardless of how many BLE peers
 /// connect. GAP connection events alone never make an HID session ready.
 struct HIDHostSession {

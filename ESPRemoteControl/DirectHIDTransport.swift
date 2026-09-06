@@ -54,6 +54,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var serviceRefreshWork: DispatchWorkItem?
     private var serviceRefreshIsAccelerated = false
     private var stackRecoveryWork: DispatchWorkItem?
+    private var watchdog = HIDReconnectWatchdog()
+    private var watchdogWork: DispatchWorkItem?
+    private var hostReadReportMap = false
+    private var loggedOversizedReport = false
 
     init(hostKey: String = "directHID.selectedHost") {
         hostStore = HIDHostStore(hostKey: hostKey)
@@ -95,6 +99,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         lastError = nil
         let preferred = hostStore.selectedHostID
         session = HIDHostSession(preferredHost: preferred, allowsPairing: hostStore.shouldPairOnStart)
+        watchdog.reset()
         if preferred != nil { recoveryPlan.beginStagedReconnect() }
         isPairing = hostStore.shouldPairOnStart
         selectedHostID = preferred
@@ -128,6 +133,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.isPairing = false
             self.pairingTimer?.cancel()
             self.cancelRecovery()
+            self.watchdog.reset()
             self.sendWork?.cancel()
             self.manager?.stopAdvertising()
             self.advertising = HIDAdvertisingState()
@@ -197,6 +203,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func prepareHost(_ id: UUID?) {
         guard canPair, afterDrain == nil else { return }
         cancelRecovery()
+        watchdog.reset()
         drainReleases { [weak self] in
             guard let self, self.isRunning else { return }
             self.lastError = nil
@@ -217,6 +224,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     func reconnectNow() {
         guard isRunning, afterDrain == nil else { return }
         cancelRecovery()
+        watchdog.reset()
         let preferred = session.preferredHost ?? hostStore.selectedHostID
         drainReleases { [weak self] in
             guard let self, self.isRunning else { return }
@@ -232,6 +240,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func recoverAfterForeground() {
         guard isRunning, hostStore.selectedHostID != nil else { return }
+        watchdog.reset()
         scheduleStackRecovery(reason: "App returned to foreground", force: true, delay: 0.15)
     }
 
@@ -293,6 +302,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         browser.setKnownHosts(hostStore.hosts)
         record("\(reason); rebuilding Bluetooth managers; selected \(peerTag(preferredHost))")
         browser.start()
+        // Cover the restart itself: a manager that never reaches poweredOn
+        // produces no callback, and no other timer is watching this window.
+        updateWatchdog()
     }
 
     private func scheduleStackRecovery(reason: String, force: Bool, delay: TimeInterval = 0.5) {
@@ -358,7 +370,105 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         serviceRefreshIsAccelerated = false
         stackRecoveryWork?.cancel()
         stackRecoveryWork = nil
+        watchdogWork?.cancel()
+        watchdogWork = nil
+        // The ladder itself is not rewound here: every escalation calls this,
+        // and resetting the attempt count would make recovery loop forever.
         recoveryPlan.cancel()
+    }
+
+    /// Schedules the next escalation whenever the transport wants to be
+    /// reachable but has no working HID session, and stands down once one
+    /// exists. Both directions run from `refreshStatus`.
+    private func updateWatchdog() {
+        let wantsHost = isRunning && afterDrain == nil
+            && (isPairing || session.preferredHost != nil)
+        guard wantsHost, !session.isReady else {
+            cancelWatchdog(rewind: true)
+            return
+        }
+        // Bluetooth being off or unauthorised is not something recovery can
+        // repair, and powering on republishes services anyway. A manager that
+        // does not exist yet is different: that is the window a stalled
+        // restart never leaves on its own.
+        if let state = manager?.state, state != .poweredOn {
+            cancelWatchdog(rewind: true)
+            return
+        }
+        // A staged refresh or a scheduled stack restart already owns the
+        // timeline; escalating on top of one would only interrupt it.
+        guard watchdogWork == nil, stackRecoveryWork == nil, serviceRefreshWork == nil else { return }
+        guard let next = watchdog.next(pairingOnly: session.preferredHost == nil) else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.watchdogWork = nil
+            self.runWatchdogStep(next.step)
+        }
+        watchdogWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + next.delay, execute: work)
+    }
+
+    private func cancelWatchdog(rewind: Bool) {
+        watchdogWork?.cancel()
+        watchdogWork = nil
+        if rewind { watchdog.reset() }
+    }
+
+    private func runWatchdogStep(_ step: HIDReconnectWatchdog.Step) {
+        guard isRunning else { return }
+        guard !session.isReady, afterDrain == nil else { refreshStatus(); return }
+        let preferred = session.preferredHost ?? hostStore.selectedHostID
+        let position = "\(watchdog.attempt)/\(HIDReconnectWatchdog.schedule.count)"
+        switch step {
+        case .restartAdvertising:
+            record("Recovery \(position): reissuing the HID advertisement")
+            restartAdvertising()
+        case .republishServices:
+            record("Recovery \(position): republishing HID services")
+            rebuildHIDServices(
+                preferredHost: preferred,
+                allowsPairing: isPairing,
+                staged: false,
+                reason: "Automatic HID service republication; selected \(peerTag(preferred))"
+            )
+        case .restartStack:
+            record("Recovery \(position): rebuilding the Bluetooth managers")
+            // Staged like a relaunch, because relaunching is the sequence
+            // users currently perform by hand when a host stops reconnecting.
+            restartBluetoothStack(
+                preferredHost: preferred,
+                allowsPairing: isPairing,
+                staged: preferred != nil,
+                reason: "Automatic Bluetooth restart after no HID subscriptions"
+            )
+        }
+        refreshStatus()
+    }
+
+    /// Reissues the advertisement without touching the GATT database. A start
+    /// that failed or stopped leaves the phone invisible, and a host cannot
+    /// reconnect to a phone it cannot see.
+    private func restartAdvertising() {
+        guard let manager, manager.state == .poweredOn, servicesInstalled else { return }
+        manager.stopAdvertising()
+        advertising = HIDAdvertisingState()
+        if lastError == advertisingError { lastError = nil }
+        advertisingError = nil
+        advertise()
+    }
+
+    /// The staged reconnect exists only to invalidate a host's cached copy of
+    /// our HID database. A host that re-read the report map on the current
+    /// publication has already re-discovered it, so consuming the refresh there
+    /// would tear down a working session instead: hosts that keep a bonded GATT
+    /// cache, BlueZ among them, need not resubscribe after the republication.
+    private func resolveStagedRefresh() {
+        guard recoveryPlan.requiresServiceRefresh, hostReadReportMap, session.isReady else { return }
+        recoveryPlan.cancel()
+        serviceRefreshWork?.cancel()
+        serviceRefreshWork = nil
+        serviceRefreshIsAccelerated = false
+        record("Host re-read the report map on this publication; second-stage refresh skipped")
     }
 
     private func armPairingTimeout() {
@@ -410,6 +520,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard let manager, manager.state == .poweredOn else { return }
         canPair = false
         servicesInstalled = false
+        hostReadReportMap = false
         manager.stopAdvertising()
         advertising = HIDAdvertisingState()
         manager.removeAllServices()
@@ -493,6 +604,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func refreshStatus(updateAdvertisement: Bool = true) {
+        resolveStagedRefresh()
         let subscribed = isRunning && afterDrain == nil && session.isReady
         let ready = subscribed && !recoveryPlan.requiresServiceRefresh
         selectedHostID = session.preferredHost
@@ -536,7 +648,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         } else if let id = session.host ?? browser.requestedHost {
             statusText = "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
         } else if let id = session.preferredHost {
-            statusText = "Очікуємо · \(hostName(for: id))"
+            statusText = watchdog.isExhausted
+                ? "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
+                : "Очікуємо · \(hostName(for: id))"
         } else if isPairing {
             statusText = "Готовий до сполучення · \(advertisedName)"
         } else {
@@ -545,11 +659,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if !ready { lastReadyHostID = nil }
         isReady = ready
         if updateAdvertisement { advertise() }
+        updateWatchdog()
     }
 
     private func clearInput() {
         sendWork?.cancel()
         sendWork = nil
+        loggedOversizedReport = false
         queue.removeAll()
         afterInputQueueDrains = nil
         state = HIDInputState()
@@ -626,7 +742,16 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         let channel = report.kind == .keyboard ? session.keyboardChannel : session.mouseChannel
         guard session.subscriptions.contains(channel), let characteristic = inputs[channel] else { return true }
         let data = channel == .bootMouse ? Data(report.data.prefix(3)) : report.data
-        guard data.count <= host.maximumUpdateValueLength else { return false }
+        guard data.count <= host.maximumUpdateValueLength else {
+            // Reporting backpressure here would wait for a readiness callback
+            // that cannot arrive, because nothing was handed to CoreBluetooth.
+            // Every later keystroke would then queue behind this one report.
+            if !loggedOversizedReport {
+                loggedOversizedReport = true
+                record("Dropped a \(data.count) B report; host accepts \(host.maximumUpdateValueLength) B")
+            }
+            return true
+        }
         guard manager.updateValue(data, for: characteristic, onSubscribedCentrals: [host]) else { return false }
         if report.kind == .keyboard {
             lastKeyboard = report.data
@@ -702,7 +827,19 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func disconnected(_ id: UUID, cause: HIDPeerDisconnectCause) {
-        guard session.host == id else { return }
+        guard session.host == id else {
+            // A selected computer can drop its link before subscribing to any
+            // report. That produces no unsubscribe callback, so without this
+            // the transport waits forever for a host that is already gone.
+            // Recovery is left to the watchdog ladder, which refreshStatus
+            // arms: restarting the stack on every failed attempt of a host
+            // that keeps retrying would only interrupt its next attempt.
+            if session.preferredHost == id, cause != .appCancelledOutgoingLink, isRunning {
+                record("Selected host link lost before HID subscriptions: \(peerTag(id)); cause \(cause.rawValue)")
+                refreshStatus()
+            }
+            return
+        }
         // Cancelling our central-role connection does not necessarily close
         // the host's HID connection to our peripheral role. Every external
         // loss is authoritative even if subscribedCentrals is briefly stale.
@@ -793,7 +930,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             return
         }
         host = central
-        record("Subscribed: \(channel), host \(peerTag(central.identifier))")
+        cancelWatchdog(rewind: true)
+        record("Subscribed: \(channel), host \(peerTag(central.identifier)), \(central.maximumUpdateValueLength) B notifications")
         // A baseline report lets the host finish initializing the input device.
         _ = queue.append([state.keyboard, state.mouse()])
         scheduleSend()
@@ -841,6 +979,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             return
         case .reportMap:
             value = RemoteHIDDescriptor.reportMap
+            hostReadReportMap = true
+            cancelWatchdog(rewind: true)
             record("Report map read: \(peerTag(request.central.identifier)), offset \(request.offset)")
         case .information: value = Data([0x11, 0x01, 0, 0x02])
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
