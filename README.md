@@ -33,7 +33,9 @@ Unlike software solutions that require network setup or specific operating syste
 The v2 prototype adds a direct BLE HID keyboard/mouse mode. The user confirmed
 keyboard and mouse input on iPhone/macOS: an existing BlueTouch pairing was
 reused, with input starting after Bluetooth was toggled off and on on the Mac.
-Linux and Windows testing of this app is still pending.
+On Linux, input works and reconnecting after the computer sleeps and wakes was
+confirmed on 2.1.3 without relaunching the app; switching the selected computer
+between hosts is still under investigation, and Windows remains untested.
 ESP32 mode remains the initial default, and the app remembers the selected mode.
 
 1. In the connection status strip, open **ESP** and choose **Прямий Bluetooth**.
