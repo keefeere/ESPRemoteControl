@@ -57,6 +57,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var watchdog = HIDReconnectWatchdog()
     private var watchdogWork: DispatchWorkItem?
     private var hostReadReportMap = false
+    private var rejectedPeers: Set<UUID> = []
     private var loggedOversizedReport = false
 
     init(hostKey: String = "directHID.selectedHost") {
@@ -521,6 +522,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         canPair = false
         servicesInstalled = false
         hostReadReportMap = false
+        rejectedPeers.removeAll()
         manager.stopAdvertising()
         advertising = HIDAdvertisingState()
         manager.removeAllServices()
@@ -593,6 +595,39 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         }
     }
 
+    /// The outgoing connect request stays pending indefinitely by design, so
+    /// `browser.requestedHost` alone must not keep the status reading as
+    /// progress once recovery has given up.
+    private func waitingStatus(for id: UUID, subscribing: Bool) -> String {
+        guard !watchdog.isExhausted else {
+            return "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
+        }
+        return subscribing
+            ? "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
+            : "Очікуємо · \(hostName(for: id))"
+    }
+
+    /// Refusing a peer that is not the selected computer is the intended
+    /// pinning, but the identifier alone cannot say what was refused: a peer
+    /// has separate CoreBluetooth identifiers in the central and peripheral
+    /// roles, so the selected computer arriving as a GATT client looks exactly
+    /// like a different machine. Record once per peer what distinguishes them —
+    /// the name CoreBluetooth can resolve for it, and whether our own link to
+    /// the selected host is up at that moment. Later refusals from the same
+    /// peer only repeat for subscriptions; reads would otherwise bury the
+    /// journal without adding anything.
+    private func noteRejectedPeer(_ id: UUID, action: String, repeating: Bool) {
+        let first = rejectedPeers.insert(id).inserted
+        if first {
+            browser.resolveName(for: id)
+            let peerName = browser.resolvedName(for: id) ?? "no name"
+            let selected = session.preferredHost
+            let link = selected.map { browser.isConnected($0) ? "connected" : "not connected" } ?? "none"
+            record("Refusing \(peerTag(id)) (\(peerName)); selected \(peerTag(selected)) (\(selected.map { hostName(for: $0) } ?? "none")), our link to it \(link)")
+        }
+        if first || repeating { record("Rejected \(action): \(peerTag(id))") }
+    }
+
     private func peerTag(_ id: UUID?) -> String {
         id.map { String($0.uuidString.prefix(8)) } ?? "none"
     }
@@ -646,11 +681,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         } else if session.suspended {
             statusText = "Комп’ютер призупинив ввід"
         } else if let id = session.host ?? browser.requestedHost {
-            statusText = "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
+            statusText = waitingStatus(for: id, subscribing: true)
         } else if let id = session.preferredHost {
-            statusText = watchdog.isExhausted
-                ? "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
-                : "Очікуємо · \(hostName(for: id))"
+            statusText = waitingStatus(for: id, subscribing: false)
         } else if isPairing {
             statusText = "Готовий до сполучення · \(advertisedName)"
         } else {
@@ -926,7 +959,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard peripheral === manager, isRunning,
               case .input(let channel)? = attributes[ObjectIdentifier(characteristic)] else { return }
         guard session.subscribe(channel, from: central.identifier) else {
-            record("Ignored subscription: \(peerTag(central.identifier)), \(channel); selected \(peerTag(session.preferredHost))")
+            noteRejectedPeer(central.identifier, action: "\(channel) subscription", repeating: true)
             return
         }
         host = central
@@ -959,7 +992,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
         guard isRunning, session.allows(request.central.identifier) else {
-            record("Read rejected: \(peerTag(request.central.identifier)); selected \(peerTag(session.preferredHost))")
+            noteRejectedPeer(request.central.identifier, action: "read", repeating: false)
             peripheral.respond(to: request, withResult: .insufficientAuthorization)
             return
         }
@@ -980,7 +1013,12 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .reportMap:
             value = RemoteHIDDescriptor.reportMap
             hostReadReportMap = true
+            // Reads never reach refreshStatus, so this rung has to be rearmed
+            // here. Rewinding alone leaves a host that reads the descriptor and
+            // then goes quiet — a Mac discovering without attaching HID — with
+            // no pending recovery at all.
             cancelWatchdog(rewind: true)
+            updateWatchdog()
             record("Report map read: \(peerTag(request.central.identifier)), offset \(request.offset)")
         case .information: value = Data([0x11, 0x01, 0, 0x02])
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
