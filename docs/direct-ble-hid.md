@@ -539,3 +539,65 @@ the phone advertises with a rotating private address, so the app cannot fill it
 in. The hint now points at `scripts/linux-hid-connect.sh`, which resolves the
 paired device itself, and names `bluetoothctl devices Paired` for doing it by
 hand.
+
+## Removing the second-stage refresh (2.1.6)
+
+A 2.1.5 journal shows the staged refresh doing exactly the damage it was meant
+to prevent. Three seconds after each publication, before either host had read
+the report map, it removed and re-added the whole GATT database:
+
+```
+16:40:36 Advertising HID
+16:40:36 Outgoing BLE link connected: 9B25BF0B
+16:40:39 Automatic second-stage HID service refresh; selected 9B25BF0B
+16:40:39 Outgoing BLE disconnected ... Service registered x3 ... link connected
+16:40:46 Recovery 1/3: reissuing the HID advertisement
+```
+
+Every host selection repeated it, so a user switching between two computers
+rebuilt the database every few seconds and neither host could ever finish
+discovery. The reported consequences were both hosts failing to connect, one Mac
+eventually working after a very long delay, and that Mac asking to pair again
+although it was already bonded — repeatedly tearing down and republishing
+encrypted characteristics is enough to provoke that.
+
+The mechanism came from 2.1.2, when a host that reconnected with a cached GATT
+database appeared not to resubscribe. 2.1.3 narrowed it to skip the refresh once
+the host had re-read the report map, which helped when the host got that far
+inside the window and did nothing when it did not. The window was always the
+flaw: 2.5 seconds is shorter than host discovery after a reconnect.
+
+`HIDRecoveryPlan` and `scheduleServiceRefresh` are removed. Republishing the
+services is now only a rung of `HIDReconnectWatchdog`, which is where a
+cache-breaking republication belongs: it runs when nothing has arrived for a
+while, rather than on a timer that starts before the host has had a chance.
+This removes a mechanism that was never confirmed to fix anything on a device
+and is now confirmed to break several. If a host with a cached database really
+does fail to resubscribe, a ladder rung covers it, and the journal shows it as
+"Recovery 2/3" rather than as an unexplained teardown.
+
+### Switching computers stops republishing anything
+
+The same teardown ran on every host selection, which is why switching cost tens
+of seconds against about one second for a physical Bluetooth keyboard. That
+comparison is the right bar, and the republication was never needed to meet it:
+the GATT database is identical for every host, and choosing where input goes is
+app-side state. `selectHost` now swaps the session and leaves the database
+alone, and a computer still listed on both input characteristics is adopted
+directly, so switching to a connected host is immediate.
+
+2.1.2 had abandoned adoption because a `subscribedCentrals` entry can outlive
+the link it describes. That reasoning weighed a stale entry against nothing; the
+real alternative was a rediscovery on every switch. A stale entry now costs one
+recovery delay, which is the cheaper of the two by a wide margin.
+
+With the normal path clear of the ladder, its first rung can run sooner: 5 s to
+reissue the advertisement, which disturbs no established link, then 25 s to
+republish and 70 s to rebuild the managers. A genuinely new host still gets 25
+undisturbed seconds, against 2.5 before.
+
+Adoption lives in the CoreBluetooth delegate layer and needs a real `CBCentral`,
+so `Tests/DirectHIDTests.swift` cannot reach it; only the ladder's schedule is
+covered there. The device check is to switch between two connected computers and
+see input follow immediately, with "Adopted live HID subscriptions" in the
+journal and no "Service registered" lines.

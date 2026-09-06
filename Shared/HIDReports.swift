@@ -142,27 +142,6 @@ enum HIDDisconnectPolicy {
     }
 }
 
-/// A reconnect gets one deliberate GATT refresh. The first service publication
-/// wakes or attracts the selected host; the second invalidates any cached HID
-/// notification state. Consuming the refresh prevents recovery loops.
-struct HIDRecoveryPlan {
-    private(set) var requiresServiceRefresh = false
-
-    mutating func beginStagedReconnect() {
-        requiresServiceRefresh = true
-    }
-
-    mutating func takeServiceRefresh() -> Bool {
-        guard requiresServiceRefresh else { return false }
-        requiresServiceRefresh = false
-        return true
-    }
-
-    mutating func cancel() {
-        requiresServiceRefresh = false
-    }
-}
-
 /// Escalating repair for a direct HID link that never becomes ready. Every other
 /// recovery path is edge triggered: a disconnect, an unsubscribe, or a return
 /// from the background. A computer that simply stops reconnecting produces no
@@ -181,9 +160,12 @@ struct HIDReconnectWatchdog {
         case restartStack
     }
 
-    /// Seconds to wait before each escalation. The first delay leaves room for
-    /// the host's own reconnect; the later ones avoid fighting its retry loop.
-    static let schedule: [TimeInterval] = [10, 20, 40]
+    /// Seconds to wait before each escalation. Switching hosts no longer
+    /// republishes anything, so the normal path never reaches this ladder and
+    /// the first rung can be soon: reissuing an advertisement disturbs no
+    /// established link. The later rungs stay far apart, because republishing
+    /// or rebuilding while a host is still discovering destroys its progress.
+    static let schedule: [TimeInterval] = [5, 20, 45]
 
     private(set) var attempt = 0
     var isExhausted: Bool { attempt >= Self.schedule.count }
