@@ -181,8 +181,10 @@ private struct DirectBluetoothSheet: View {
                 Section("Сполучення з комп’ютера") {
                     Text("У налаштуваннях Bluetooth комп’ютера вибери «\(transport.advertisedName)» або ім’я цього iPhone. Підтвердь системний запит, якщо він з’явиться.")
                         .font(.subheadline)
-                    Text("Linux: звичайна команда «З’єднатися» може також увімкнути аудіопрофіль iPhone. Вимкни профіль iPhone у налаштуваннях звуку або підключай лише HID-сервіс.")
+                    Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу:")
                         .font(.caption).foregroundStyle(.secondary)
+                    Text("bluetoothctl connect <MAC> 00001812-0000-1000-8000-00805f9b34fb")
+                        .font(.caption2.monospaced()).textSelection(.enabled)
                     Button(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення") {
                         transport.beginPairing()
                     }
@@ -191,6 +193,8 @@ private struct DirectBluetoothSheet: View {
                 Section("Сполучення з iPhone") {
                     Text("Якщо Mac уже знає iPhone й не показує його як клавіатуру, відкрий Bluetooth на Mac, запусти пошук тут і вибери Mac. Комп’ютер має бути доступний через Bluetooth LE.")
                         .font(.subheadline)
+                    Text("Linux тут зазвичай не з’являється: комп’ютер під BlueZ сам не рекламує себе через Bluetooth LE, тому знайти його з iPhone неможливо. З’єднання завжди починає комп’ютер, а iPhone лише лишається видимим.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button(browser.isScanning ? "Зупинити пошук" : "Знайти комп’ютер") {
                         if browser.isScanning { browser.stopScan() } else { browser.scan() }
                     }

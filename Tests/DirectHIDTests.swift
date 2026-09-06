@@ -13,10 +13,11 @@ struct DirectHIDTests {
         hostSelection()
         disconnectPolicy()
         recoveryPlan()
+        reconnectWatchdog()
         descriptorSizes()
         savedHosts()
         advertisingLifecycle()
-        print("PASS: HID reports, held input, FIFO backpressure, host isolation, disconnect recovery, staged reconnect, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
+        print("PASS: HID reports, held input, FIFO backpressure, host isolation, disconnect recovery, staged reconnect, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
     }
 
     static func keyboardTransitions() {
@@ -146,6 +147,37 @@ struct DirectHIDTests {
         plan.beginStagedReconnect()
         plan.cancel()
         check(!plan.requiresServiceRefresh, "A ready or stopped session cancels pending recovery")
+    }
+
+    static func reconnectWatchdog() {
+        var watchdog = HIDReconnectWatchdog()
+        check(!watchdog.isExhausted, "A fresh transport can still recover on its own")
+        var steps: [HIDReconnectWatchdog.Step] = []
+        var delays: [TimeInterval] = []
+        while let next = watchdog.next(pairingOnly: false) {
+            steps.append(next.step)
+            delays.append(next.delay)
+        }
+        check(steps == [.restartAdvertising, .republishServices, .restartStack],
+              "Recovery escalates from visibility to a republished database to a rebuilt stack")
+        check(delays == HIDReconnectWatchdog.schedule, "Escalations follow the documented backoff")
+        check(delays[0] < delays[1] && delays[1] < delays[2], "Recovery backs off instead of fighting the host")
+        check(watchdog.isExhausted, "Recovery stops instead of restarting Bluetooth forever")
+
+        watchdog.reset()
+        check(!watchdog.isExhausted, "Evidence of progress restores the full ladder")
+        guard let restarted = watchdog.next(pairingOnly: false) else {
+            check(false, "A rewound ladder offers its first step again")
+            return
+        }
+        check(restarted.step == .restartAdvertising, "A rewound ladder starts from the cheapest repair")
+
+        var pairing = HIDReconnectWatchdog()
+        var pairingSteps: [HIDReconnectWatchdog.Step] = []
+        while let next = pairing.next(pairingOnly: true) { pairingSteps.append(next.step) }
+        let visibilityOnly = [HIDReconnectWatchdog.Step](repeating: .restartAdvertising, count: HIDReconnectWatchdog.schedule.count)
+        check(pairingSteps == visibilityOnly,
+              "An open pairing window only repairs visibility; there is no host to reconnect to")
     }
 
     static func savedHosts() {

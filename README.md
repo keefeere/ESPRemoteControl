@@ -46,7 +46,12 @@ ESP32 mode remains the initial default, and the app remembers the selected mode.
    HID connection; wait until the app reports keyboard and mouse connected.
 4. Use the existing keyboard and trackpad. Return to **ESP-адаптер** to use the
    USB bridge. Switching releases held input and cancels queued text.
-5. If input does not become ready, use **Поділитися журналом** in the pairing
+5. On Linux, start the connection from the computer and connect only the HID
+   service; see [the Linux guide](docs/linux-direct-hid.md) and
+   `./scripts/linux-hid-connect.sh`. A BlueZ desktop does not advertise over
+   BLE, so step 3 cannot find it, and its generic "Connect" also brings up the
+   iPhone's audio profiles.
+6. If input does not become ready, use **Поділитися журналом** in the pairing
    panel. The log includes connection stages, not typed text. During prototype
    updates a host may retain old GATT services; remove only this app/iPhone
    pairing on the test host and pair again if necessary.
@@ -246,7 +251,9 @@ This project solves a real problem with a unique hardware approach. Contribution
 - **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
 
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
-the CoreBluetooth approach, evidence, and remaining device checks. Direct mode
+the CoreBluetooth approach, evidence, and remaining device checks, and
+[direct Bluetooth HID on Linux](docs/linux-direct-hid.md) for pairing, HID-only
+connection, and reconnect on a BlueZ desktop. Direct mode
 is experimental and needs physical-device validation before becoming the default.
 
 ### Keyboard and input improvements (unscheduled)
