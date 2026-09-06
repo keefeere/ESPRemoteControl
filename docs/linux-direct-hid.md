@@ -119,9 +119,12 @@ bare link.
 # one-off: connect only the keyboard/mouse profile and trust the phone
 ./scripts/linux-hid-connect.sh --trust
 
-# keep it connected, and push iPhone audio back to the phone if something
-# else (a desktop applet, a previous generic Connect) pulled it over
-./scripts/linux-hid-connect.sh --watch --drop-audio
+# keep the HID profile connected
+./scripts/linux-hid-connect.sh --watch
+
+# only to recover audio a desktop applet already captured; see the audio
+# section below, since by then the phone has lost audio focus
+./scripts/linux-hid-connect.sh --drop-audio
 
 # what is up right now
 ./scripts/linux-hid-connect.sh --status
@@ -170,7 +173,7 @@ Description=Keep the ESP Remote HID profile connected
 After=bluetooth.target
 
 [Service]
-ExecStart=%h/ESPRemoteControl/scripts/linux-hid-connect.sh --watch --drop-audio
+ExecStart=%h/ESPRemoteControl/scripts/linux-hid-connect.sh --watch
 Restart=always
 RestartSec=10
 
@@ -182,11 +185,17 @@ systemctl --user enable --now esp-remote-hid.service
 
 Adjust `ExecStart` to wherever the repository is checked out.
 
-## Keeping audio on the phone permanently
+## Keeping audio on the phone
 
-`--drop-audio` disconnects the audio profiles after the fact. To stop the
-desktop from routing to them at all, tell the audio stack to ignore this device.
-With PipeWire/WirePlumber:
+Prevent the capture; do not undo it. `--drop-audio` disconnects the audio
+profiles after they have already connected, and by then the phone has lost audio
+focus — playback stops or pauses, and pushing it back does not undo that. Use it
+only to recover from a capture that already happened.
+
+Two things prevent it. Never press the desktop applet's **Connect** for the
+phone: that is the generic `Connect()` which brings up every profile. And tell
+the audio stack to ignore the device entirely, so it cannot be routed to even if
+something connects the profile. With PipeWire/WirePlumber:
 
 ```lua
 -- ~/.config/wireplumber/wireplumber.conf.d/51-esp-remote.conf
@@ -210,18 +219,20 @@ and mouse session exists:
 | After | Step | What it fixes |
 | --- | --- | --- |
 | 10 s | reissue the advertisement | a failed or stopped `startAdvertising`, which left the phone invisible with nothing retrying it |
-| 30 s | republish the HID services | a host holding a stale cached copy of the GATT database |
-| 70 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
+| 40 s | republish the HID services | a host holding a stale cached copy of the GATT database |
+| 100 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
 
 Any evidence of progress — a report-map read, a report subscription — rewinds
 the ladder. Once it is exhausted the app keeps advertising and says
 **Немає відповіді**, which means the next move belongs to the computer.
 
-The app also no longer refreshes its services when the host has just re-read the
-report map on the current publication: that read proves the host re-discovered
-the database, and the refresh would have torn down a session that had only just
-started working. That teardown is particularly damaging on BlueZ, which keeps a
-cached GATT database for bonded devices.
+Nothing else republishes the services. Up to 2.1.5 a publication was followed a
+couple of seconds later by an automatic second-stage refresh, on the theory that
+a host with a cached GATT database needs one. In practice it landed while hosts
+were still discovering and destroyed their work, so no host could finish; it also
+made a Mac ask to pair again. The ladder now owns every republication, and its
+first disruptive rung is 40 seconds in, which leaves a host room to discover
+undisturbed.
 
 ## Collecting a log when it still fails
 

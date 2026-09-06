@@ -12,12 +12,11 @@ struct DirectHIDTests {
         notificationBackpressure()
         hostSelection()
         disconnectPolicy()
-        recoveryPlan()
         reconnectWatchdog()
         descriptorSizes()
         savedHosts()
         advertisingLifecycle()
-        print("PASS: HID reports, held input, FIFO backpressure, host isolation, disconnect recovery, staged reconnect, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
+        print("PASS: HID reports, held input, FIFO backpressure, host isolation, disconnect recovery, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
     }
 
     static func keyboardTransitions() {
@@ -141,18 +140,6 @@ struct DirectHIDTests {
             cause: .bluetoothUnavailable,
             reportsStillSubscribed: true
         ), "Turning Bluetooth off invalidates the session")
-    }
-
-    static func recoveryPlan() {
-        var plan = HIDRecoveryPlan()
-        check(!plan.requiresServiceRefresh, "An idle transport does not refresh services")
-        plan.beginStagedReconnect()
-        check(plan.requiresServiceRefresh, "Reconnect requires a cache-breaking service refresh")
-        check(plan.takeServiceRefresh(), "Reconnect consumes its one refresh")
-        check(!plan.takeServiceRefresh(), "A reconnect cannot enter a refresh loop")
-        plan.beginStagedReconnect()
-        plan.cancel()
-        check(!plan.requiresServiceRefresh, "A ready or stopped session cancels pending recovery")
     }
 
     static func reconnectWatchdog() {

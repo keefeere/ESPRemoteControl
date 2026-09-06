@@ -539,3 +539,43 @@ the phone advertises with a rotating private address, so the app cannot fill it
 in. The hint now points at `scripts/linux-hid-connect.sh`, which resolves the
 paired device itself, and names `bluetoothctl devices Paired` for doing it by
 hand.
+
+## Removing the second-stage refresh (2.1.6)
+
+A 2.1.5 journal shows the staged refresh doing exactly the damage it was meant
+to prevent. Three seconds after each publication, before either host had read
+the report map, it removed and re-added the whole GATT database:
+
+```
+16:40:36 Advertising HID
+16:40:36 Outgoing BLE link connected: 9B25BF0B
+16:40:39 Automatic second-stage HID service refresh; selected 9B25BF0B
+16:40:39 Outgoing BLE disconnected ... Service registered x3 ... link connected
+16:40:46 Recovery 1/3: reissuing the HID advertisement
+```
+
+Every host selection repeated it, so a user switching between two computers
+rebuilt the database every few seconds and neither host could ever finish
+discovery. The reported consequences were both hosts failing to connect, one Mac
+eventually working after a very long delay, and that Mac asking to pair again
+although it was already bonded — repeatedly tearing down and republishing
+encrypted characteristics is enough to provoke that.
+
+The mechanism came from 2.1.2, when a host that reconnected with a cached GATT
+database appeared not to resubscribe. 2.1.3 narrowed it to skip the refresh once
+the host had re-read the report map, which helped when the host got that far
+inside the window and did nothing when it did not. The window was always the
+flaw: 2.5 seconds is shorter than host discovery after a reconnect.
+
+`HIDRecoveryPlan` and `scheduleServiceRefresh` are removed. Republishing the
+services is now only a rung of `HIDReconnectWatchdog`, which is where a
+cache-breaking republication belongs: it runs when nothing has arrived for a
+while, rather than on a timer that starts before the host has had a chance.
+The ladder is also more patient, since it is now the only mechanism —
+10 s to reissue the advertisement, 40 s to republish, 100 s to rebuild the
+managers. A host has 40 undisturbed seconds to discover, against 2.5 before.
+
+This removes a mechanism that was never confirmed to fix anything on a device
+and is now confirmed to break several. If a host with a cached database really
+does fail to resubscribe, the 40-second rung covers it, and the journal will
+show it as "Recovery 2/3" rather than as an unexplained teardown.
