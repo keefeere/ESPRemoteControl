@@ -147,6 +147,24 @@ Every tagged build updates this source after its IPA is attached to the GitHub
 Release. SideStore will then detect the new version; enable LocalDevVPN and
 confirm the update to sign and install it.
 
+#### Cutting a release
+
+Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`, then land the change on
+`main` with `release-tag-<version>` in the merge commit message — putting it in
+the pull request title is enough, since GitHub copies that into the merge
+commit. `Auto release tag` then checks the marker against `MARKETING_VERSION`,
+creates `ios-v<version>`, and starts `Build unsigned iOS IPA` against that tag,
+which attaches the IPA and its checksum to a new GitHub Release and updates
+`sidestore-source.json`.
+
+The tag has to be dispatched explicitly rather than left to fire on its own: a
+tag pushed with `GITHUB_TOKEN` does not start a workflow run. A release
+therefore builds twice — once for the push to `main`, once for the tag — and the
+tag build also runs the simulator button tests. Tagging by hand
+(`git tag -a ios-v<version> && git push origin ios-v<version>`) still works and
+skips the first build; do not create the release through the GitHub UI, because
+the workflow creates it and would fail on one that already exists.
+
 To build the same unsigned IPA on a Mac locally:
 
 ```bash

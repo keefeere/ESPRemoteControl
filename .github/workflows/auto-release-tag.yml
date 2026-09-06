@@ -1,50 +1,93 @@
-name: Auto Release Tag
+name: Auto release tag
+
+# A push to main whose head commit message carries "release-tag-<version>"
+# publishes that version. Put the marker in the pull request title, which
+# GitHub copies into the merge commit message, or in the commit message itself.
+#
+# Two constraints shape this workflow:
+#
+#   * The tag must be named "ios-v<version>", because that is the pattern
+#     build-ios-ipa.yml listens on. Any other name builds nothing.
+#   * A tag pushed with GITHUB_TOKEN does not start a workflow run, so the
+#     build cannot be left to the tag push. workflow_dispatch is one of the two
+#     events that token may trigger, so the build is dispatched explicitly
+#     against the new tag; the dispatched run sees refs/tags/ios-v<version> and
+#     takes its existing release path from there.
+#
+# Creating the GitHub release is deliberately left to build-ios-ipa.yml, which
+# is the only run holding the IPA and its checksum to attach.
 
 on:
   push:
     branches:
       - main
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
-  create-tag:
+  tag:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Extract tag from commit message
-        id: tag
+      - name: Read the release marker
+        id: marker
         run: |
-          # Get the latest commit message
-          COMMIT_MSG=$(git log -1 --pretty=%B)
-          echo "Commit message: $COMMIT_MSG"
-          
-          # Check if commit message matches pattern *-release-tag-X.X.X
-          if [[ $COMMIT_MSG =~ ([a-zA-Z0-9]+-release-tag-[0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            TAG="${BASH_REMATCH[1]}"
-            echo "Found tag: $TAG"
-            echo "tag=$TAG" >> $GITHUB_OUTPUT
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "No release tag pattern found in commit message"
-            echo "found=false" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          message="$(git log -1 --pretty=%B)"
+          if [[ ! $message =~ release-tag-([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            echo "No release marker in the head commit message."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="${BASH_REMATCH[1]}"
+
+          # The IPA carries MARKETING_VERSION while the SideStore entry is named
+          # from the tag. Letting those disagree offers users an update whose
+          # version is not the one inside the build.
+          project="$(sed -n 's/^[[:space:]]*MARKETING_VERSION = \(.*\);$/\1/p' \
+            ESPRemoteControl.xcodeproj/project.pbxproj | sort -u)"
+          if [ "$(printf '%s\n' "$project" | wc -l)" -ne 1 ]; then
+            echo "::error::MARKETING_VERSION differs across build configurations: $project"
+            exit 1
+          fi
+          if [ "$project" != "$version" ]; then
+            echo "::error::release-tag-$version does not match MARKETING_VERSION $project"
+            exit 1
           fi
 
-      - name: Create Git Tag
-        if: steps.tag.outputs.found == 'true'
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git tag ${{ steps.tag.outputs.tag }}
-          git push origin ${{ steps.tag.outputs.tag }}
-          echo "✅ Tag created: ${{ steps.tag.outputs.tag }}"
+          echo "Releasing $version as ios-v$version"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=ios-v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Create Release
-        if: steps.tag.outputs.found == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          generate_release_notes: true
+      - name: Create the tag
+        id: tag
+        if: steps.marker.outputs.release == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.marker.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::notice::$TAG already exists; not tagging or dispatching again."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "ESP Remote Control ${TAG#ios-v}"
+          git push origin "$TAG"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch the release build
+        if: steps.tag.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.marker.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-ios-ipa.yml --ref "$TAG"
+          echo "::notice::Dispatched build-ios-ipa.yml against $TAG"
