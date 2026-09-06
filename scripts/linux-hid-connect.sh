@@ -32,6 +32,7 @@ interval=5
 drop_audio=0
 trust=0
 status_only=0
+debug_only=0
 
 usage() {
   cat <<'USAGE'
@@ -47,6 +48,8 @@ Usage: linux-hid-connect.sh [options]
       --trust            Mark the device trusted so BlueZ accepts its
                          reconnects without a desktop prompt.
       --status           Print the current state and exit.
+      --debug            Print paired devices, the target, and every HID
+                         device the kernel exposes, then exit.
   -h, --help             Show this help.
 
 With no -d/-n, the only paired device advertising the HID service is used.
@@ -128,8 +131,13 @@ is_linked() {
   device_info "$1" | grep -qi '^[[:space:]]*Connected:[[:space:]]*yes'
 }
 
-# A connected ACL link is not yet a keyboard. BlueZ's HoG plugin creates a HID
-# device whose HID_UNIQ is the peer address once the profile is actually up.
+# A connected ACL link is not yet a keyboard. Once the HoG profile attaches, a
+# HID device appears carrying the peer address. Which key holds it varies with
+# the kernel and BlueZ version — usually HID_UNIQ, sometimes only inside
+# HID_PHYS or the device path — so match the address anywhere in the uevent
+# rather than on one exact key. An address string is specific enough that a
+# false positive is not a practical concern, and the local adapter has a
+# different one.
 has_hid_device() {
   local mac uevent
   mac="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
@@ -140,9 +148,41 @@ has_hid_device() {
   fi
   for uevent in /sys/bus/hid/devices/*/uevent; do
     [ -r "$uevent" ] || continue
-    if grep -qi "^HID_UNIQ=$mac\$" "$uevent"; then return 0; fi
+    if grep -qi "$mac" "$uevent"; then return 0; fi
   done
   return 1
+}
+
+# Everything needed to tell "the profile did not attach" apart from "the script
+# cannot see that it did". Report this when the phone says HID is ready and the
+# computer disagrees.
+dump_debug() {
+  local mac="$1" uevent
+  printf '== paired devices ==\n'
+  paired_devices | while read -r peer; do
+    [ -n "$peer" ] || continue
+    printf '  %s  %s\n' "$peer" "$(device_name "$peer")"
+  done
+  printf '== target %s ==\n' "$mac"
+  device_info "$mac" | sed 's/^/  /'
+  printf '== HID devices ==\n'
+  if [ ! -d /sys/bus/hid/devices ]; then
+    printf '  no /sys/bus/hid/devices on this kernel\n'
+  else
+    local found=0
+    for uevent in /sys/bus/hid/devices/*/uevent; do
+      [ -r "$uevent" ] || continue
+      found=1
+      printf '  %s\n' "$uevent"
+      grep -E '^(HID_NAME|HID_PHYS|HID_UNIQ|HID_ID)=' "$uevent" | sed 's/^/    /'
+    done
+    # An empty list and an unreadable one look the same otherwise, and they
+    # mean different things: nothing attached versus nothing to inspect.
+    [ "$found" -eq 1 ] || printf '  none attached\n'
+  fi
+  printf '== bluetoothctl ==\n'
+  printf '  version: %s\n' "$(bluetoothctl --version 2>/dev/null || echo unknown)"
+  printf '  single-profile connect: %s\n' "$(bluetoothctl_takes_uuid && echo bluetoothctl || echo dbus)"
 }
 
 paired_devices() {
@@ -201,20 +241,39 @@ drop_audio_profiles() {
   done
 }
 
+# ConnectProfile returns before the HoG plugin has attached the input device.
+await_hid_device() {
+  local mac="$1" waited=0
+  while [ "$waited" -lt "${2:-10}" ]; do
+    has_hid_device "$mac" && return 0
+    sleep 1
+    waited=$((waited + 1))
+  done
+  has_hid_device "$mac"
+}
+
 connect_hid() {
   local mac="$1"
   if has_hid_device "$mac"; then
     if [ "$drop_audio" -eq 1 ]; then drop_audio_profiles "$mac"; fi
     return 0
   fi
+
   profile_call connect "$mac" "$HID_UUID" || true
-  # ConnectProfile returns before the HoG plugin has attached the input device.
-  local waited=0
-  while [ "$waited" -lt 10 ]; do
-    has_hid_device "$mac" && break
-    sleep 1
-    waited=$((waited + 1))
-  done
+  if await_hid_device "$mac"; then
+    if [ "$drop_audio" -eq 1 ]; then drop_audio_profiles "$mac"; fi
+    return 0
+  fi
+
+  # BlueZ answers ConnectProfile with "already connected" while holding a link
+  # whose HoG attachment is gone — the state left behind when the phone moves
+  # its HID session to another computer and back. Only dropping the whole link
+  # makes it redo pairing-free reconnection and reattach the profile.
+  printf 'HID did not attach; dropping the link and retrying\n' >&2
+  bluetoothctl disconnect "$mac" >/dev/null 2>&1 || true
+  sleep 2
+  profile_call connect "$mac" "$HID_UUID" || true
+  await_hid_device "$mac" 15
   if [ "$drop_audio" -eq 1 ]; then drop_audio_profiles "$mac"; fi
   has_hid_device "$mac"
 }
@@ -232,6 +291,7 @@ while [ $# -gt 0 ]; do
     --drop-audio) drop_audio=1; shift ;;
     --trust) trust=1; shift ;;
     --status) status_only=1; shift ;;
+    --debug) debug_only=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -242,6 +302,12 @@ require bluetoothctl
 device="$(printf '%s' "$device" | tr 'a-z' 'A-Z')"
 has_hid_service "$device" \
   || die "$device is not paired or does not offer the HID service"
+
+if [ "$debug_only" -eq 1 ]; then
+  report "$device"
+  dump_debug "$device"
+  exit 0
+fi
 
 if [ "$status_only" -eq 1 ]; then
   report "$device"
@@ -259,6 +325,7 @@ if [ "$watch" -eq 0 ]; then
     exit 0
   fi
   report "$device"
+  printf 'run with --debug and share the output if the phone reports HID ready\n' >&2
   die "the HID profile did not come up. Open ESP Remote Control on the iPhone with direct Bluetooth selected, then retry."
 fi
 

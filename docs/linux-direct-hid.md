@@ -132,6 +132,26 @@ service; pass `--device AA:BB:CC:DD:EE:FF` or `--name iPhone` when several
 match. `--watch` polls every five seconds by default and reconnects the profile
 whenever it drops, which covers a computer waking from sleep.
 
+`ConnectProfile` alone is not always enough. BlueZ answers it with "already
+connected" while holding a link whose HoG attachment is gone, which is the state
+left behind when the phone moves its HID session to another computer and back.
+When the profile does not attach within ten seconds, the script drops the whole
+link and reconnects, because only that makes BlueZ redo the reconnection and
+reattach the profile.
+
+If the phone reports HID ready while the computer disagrees, `--debug` prints
+the paired devices, the target's `bluetoothctl info`, and every HID device the
+kernel exposes with its `HID_NAME`, `HID_PHYS` and `HID_UNIQ`:
+
+```bash
+./scripts/linux-hid-connect.sh --debug
+```
+
+The script decides the profile is attached by finding the peer address anywhere
+in a HID device's `uevent`. Which key carries it varies between kernel and BlueZ
+versions, so if `--debug` lists the phone under a shape that does not contain
+the address at all, that output is what to report.
+
 To run it in the background for a desktop session:
 
 ```bash

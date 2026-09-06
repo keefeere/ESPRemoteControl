@@ -212,6 +212,10 @@ struct HIDReconnectWatchdog {
 struct HIDHostSession {
     var preferredHost: UUID?
     var allowsPairing: Bool
+    /// Computers already in the app's list. A pairing window exists to add a
+    /// new one; a bonded host reconnects in about a second, so letting saved
+    /// hosts claim the window makes it unusable for its only purpose.
+    var knownHosts: Set<UUID> = []
     private(set) var host: UUID?
     private(set) var subscriptions: Set<HIDInputChannel> = []
     var bootProtocol = false
@@ -227,7 +231,9 @@ struct HIDHostSession {
     func allows(_ id: UUID) -> Bool {
         if let host { return host == id }
         if let preferredHost { return preferredHost == id }
-        return allowsPairing
+        // A saved computer is chosen from the list, which pins it directly;
+        // it must not win the pairing window away from the new one.
+        return allowsPairing && !knownHosts.contains(id)
     }
 
     mutating func subscribe(_ channel: HIDInputChannel, from id: UUID) -> Bool {
@@ -256,6 +262,12 @@ struct HIDHostSession {
 /// USB HID 1.11 / HID Usage Tables: 6-key keyboard with LED output (ID 1),
 /// relative three-button mouse with vertical wheel and Consumer AC Pan (ID 2).
 enum RemoteHIDDescriptor {
+    /// HID Information: bcdHID 1.11, no country code, then the flags byte.
+    /// Bit 0 is RemoteWake and bit 1 is NormallyConnectable. Without
+    /// RemoteWake the host is told this device cannot wake it from sleep,
+    /// which is what a real Bluetooth keyboard or mouse declares that it can.
+    static let information = Data([0x11, 0x01, 0, 0x03])
+
     static let reportMap = Data([
         0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01,
         0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
