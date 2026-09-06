@@ -20,6 +20,45 @@ What this means in practice:
   stalled advertisement by itself (see [Automatic recovery](#automatic-recovery)).
 - **Знайти комп'ютер** stays useful for macOS, which does advertise over LE.
 
+### "But the computer is discoverable"
+
+Turning on visibility in a Linux Bluetooth panel does not contradict the above,
+because the two sides are talking about different radios:
+
+- **Discoverable on BlueZ** primarily enables the **BR/EDR (Classic) inquiry
+  scan** — the old "answer when someone asks who is here" mode. BlueZ starts
+  advertising over LE only once an advertising instance is registered through
+  `LEAdvertisingManager1`, which `bluetoothctl advertise on` does.
+  `discoverable on` by itself does not.
+- **The app scans through CoreBluetooth**, whose public API sees Bluetooth LE
+  advertisements only. It cannot see a Classic device under any setting.
+
+So a discoverable BlueZ machine that is not advertising over LE is invisible to
+the app by construction. Three ways to confirm which case you are in:
+
+1. Compare two lists on the phone. If the computer appears in **Settings →
+   Bluetooth** on the iPhone but not in **Знайти комп'ютер** in the app, it is
+   visible over Classic only — iOS system settings show both radios, the app
+   sees only LE.
+2. On the computer, `bluetoothctl show`: check `Discoverable` and the
+   **Advertising Features** block, which reports the active advertising
+   instances.
+3. `sudo btmgmt info`: look for `advertising` in the `current settings:` line.
+   If it is absent, the adapter is silent over LE.
+
+This applies to any BlueZ host, handheld gaming images such as Bazzite
+included; it was first reported there on an ASUS ROG Xbox Ally X.
+
+If you want to experiment with the phone-initiated direction anyway,
+`bluetoothctl advertise on` registers an advertising instance (add
+`menu advertise` → `name on`, or the computer shows up in the app as
+"Без назви · <id>", since the default advertisement carries no local name).
+**This is untested.** Even if the computer then appears in the app's list and
+the phone opens the link, HOGP still requires the *host* to act as the GATT
+client and subscribe to the input reports; whether BlueZ does that over a link
+the phone initiated has not been verified here. Connecting from the computer
+with the HID profile only remains the supported path.
+
 ## Pairing
 
 1. In the app, open the Bluetooth panel and select **Прямий Bluetooth**.
