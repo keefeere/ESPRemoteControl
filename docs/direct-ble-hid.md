@@ -518,11 +518,18 @@ sleeping host, and this one was declaring the opposite. The flags are now
 `0x03`, and the value moved to `RemoteHIDDescriptor.information` so the bits are
 covered by `Tests/DirectHIDTests.swift`.
 
-Whether macOS then honours it is not established here. Remote wake also depends
-on the host's own policy — macOS keeps a per-device wake allowlist — and on iOS
-continuing to advertise while the Mac sleeps. Declaring the bit is a
-prerequisite, not a guarantee; the device check is to select the Mac, let it
-sleep, and press a key.
+Confirmed on device: with 2.1.5 the Mac wakes from sleep for the app, which it
+did not do while the flag was clear. That establishes the flag as the cause of
+the original symptom, and that macOS honours it without any per-device setup on
+this pair. It does not establish the same for other hosts — remote wake still
+depends on the host's own policy, and macOS keeps a per-device wake allowlist —
+so Windows and Linux need their own check.
+
+Waking is not instant: the host has to wake, reconnect and resubscribe, so
+input returns after some seconds rather than immediately. That delay is the
+computer waking up, not necessarily the recovery ladder; the journal
+distinguishes them, since a rung that ran logs "Recovery n/3" before
+"HID ready".
 
 ### What the app cannot supply
 
