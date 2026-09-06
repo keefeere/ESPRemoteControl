@@ -131,9 +131,13 @@ is_linked() {
 # A connected ACL link is not yet a keyboard. BlueZ's HoG plugin creates a HID
 # device whose HID_UNIQ is the peer address once the profile is actually up.
 has_hid_device() {
-  local mac
+  local mac uevent
   mac="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-  local uevent
+  if [ ! -d /sys/bus/hid/devices ]; then
+    # Nothing to inspect on this kernel; the link state is the only signal.
+    is_linked "$1"
+    return
+  fi
   for uevent in /sys/bus/hid/devices/*/uevent; do
     [ -r "$uevent" ] || continue
     if grep -qi "^HID_UNIQ=$mac\$" "$uevent"; then return 0; fi
@@ -142,9 +146,16 @@ has_hid_device() {
 }
 
 paired_devices() {
-  # "devices Paired" exists in current BlueZ; paired-devices is the older name.
-  bluetoothctl devices Paired 2>/dev/null | awk '$1 == "Device" { print $2 }' \
-    || bluetoothctl paired-devices 2>/dev/null | awk '$1 == "Device" { print $2 }'
+  # "devices Paired" exists in current BlueZ; older builds print usage for it
+  # and expect "paired-devices" instead, so fall back on empty output rather
+  # than on the exit status, which those builds still report as success.
+  local found=""
+  found="$(bluetoothctl devices Paired 2>/dev/null | awk '$1 == "Device" { print $2 }')" || true
+  if [ -z "$found" ]; then
+    found="$(bluetoothctl paired-devices 2>/dev/null | awk '$1 == "Device" { print $2 }')" || true
+  fi
+  [ -n "$found" ] && printf '%s\n' "$found"
+  return 0
 }
 
 resolve_device() {
