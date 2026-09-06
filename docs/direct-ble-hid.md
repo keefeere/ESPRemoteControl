@@ -571,11 +571,33 @@ flaw: 2.5 seconds is shorter than host discovery after a reconnect.
 services is now only a rung of `HIDReconnectWatchdog`, which is where a
 cache-breaking republication belongs: it runs when nothing has arrived for a
 while, rather than on a timer that starts before the host has had a chance.
-The ladder is also more patient, since it is now the only mechanism —
-10 s to reissue the advertisement, 40 s to republish, 100 s to rebuild the
-managers. A host has 40 undisturbed seconds to discover, against 2.5 before.
-
 This removes a mechanism that was never confirmed to fix anything on a device
 and is now confirmed to break several. If a host with a cached database really
-does fail to resubscribe, the 40-second rung covers it, and the journal will
-show it as "Recovery 2/3" rather than as an unexplained teardown.
+does fail to resubscribe, a ladder rung covers it, and the journal shows it as
+"Recovery 2/3" rather than as an unexplained teardown.
+
+### Switching computers stops republishing anything
+
+The same teardown ran on every host selection, which is why switching cost tens
+of seconds against about one second for a physical Bluetooth keyboard. That
+comparison is the right bar, and the republication was never needed to meet it:
+the GATT database is identical for every host, and choosing where input goes is
+app-side state. `selectHost` now swaps the session and leaves the database
+alone, and a computer still listed on both input characteristics is adopted
+directly, so switching to a connected host is immediate.
+
+2.1.2 had abandoned adoption because a `subscribedCentrals` entry can outlive
+the link it describes. That reasoning weighed a stale entry against nothing; the
+real alternative was a rediscovery on every switch. A stale entry now costs one
+recovery delay, which is the cheaper of the two by a wide margin.
+
+With the normal path clear of the ladder, its first rung can run sooner: 5 s to
+reissue the advertisement, which disturbs no established link, then 25 s to
+republish and 70 s to rebuild the managers. A genuinely new host still gets 25
+undisturbed seconds, against 2.5 before.
+
+Adoption lives in the CoreBluetooth delegate layer and needs a real `CBCentral`,
+so `Tests/DirectHIDTests.swift` cannot reach it; only the ladder's schedule is
+covered there. The device check is to switch between two connected computers and
+see input follow immediately, with "Adopted live HID subscriptions" in the
+journal and no "Service registered" lines.

@@ -218,21 +218,30 @@ and mouse session exists:
 
 | After | Step | What it fixes |
 | --- | --- | --- |
-| 10 s | reissue the advertisement | a failed or stopped `startAdvertising`, which left the phone invisible with nothing retrying it |
-| 40 s | republish the HID services | a host holding a stale cached copy of the GATT database |
-| 100 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
+| 5 s | reissue the advertisement | a failed or stopped `startAdvertising`, which left the phone invisible with nothing retrying it |
+| 25 s | republish the HID services | a host holding a stale cached copy of the GATT database |
+| 70 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
 
 Any evidence of progress — a report-map read, a report subscription — rewinds
 the ladder. Once it is exhausted the app keeps advertising and says
 **Немає відповіді**, which means the next move belongs to the computer.
 
-Nothing else republishes the services. Up to 2.1.5 a publication was followed a
-couple of seconds later by an automatic second-stage refresh, on the theory that
-a host with a cached GATT database needs one. In practice it landed while hosts
-were still discovering and destroyed their work, so no host could finish; it also
-made a Mac ask to pair again. The ladder now owns every republication, and its
-first disruptive rung is 40 seconds in, which leaves a host room to discover
-undisturbed.
+Nothing else republishes the services, and **switching computers no longer
+republishes anything at all**. Up to 2.1.5 every host selection removed and
+re-added the GATT database, so the newly selected computer had to rediscover
+everything before input worked — tens of seconds, where a physical Bluetooth
+keyboard switches in about one. The services are identical for every host, so
+there is nothing to republish: the app changes which central it notifies, and a
+computer still subscribed is adopted directly, which is immediate.
+
+A publication was also followed a couple of seconds later by an automatic
+second-stage refresh, on the theory that a host with a cached GATT database needs
+one. In practice it landed while hosts were still discovering and destroyed their
+work, so neither host could finish; it also made a Mac ask to pair again. The
+ladder now owns every republication. Its first rung only reissues the
+advertisement, which disturbs no established link, so it can run 5 seconds in;
+the disruptive rungs stay far apart, leaving a genuinely new host 25 seconds to
+discover undisturbed.
 
 ## Collecting a log when it still fails
 

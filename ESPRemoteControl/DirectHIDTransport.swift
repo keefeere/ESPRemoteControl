@@ -208,8 +208,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 self.hostStore.select(id, name: self.browser.resolvedName(for: id), supportsOutgoing: false)
                 self.savedHosts = self.hostStore.hosts
             }
-            self.rebuildHIDServices(
-                preferredHost: id,
+            self.selectHost(
+                id,
                 allowsPairing: true,
                 reason: id == nil ? "Pairing window opened" : "Host selected: \(self.peerTag(id))"
             )
@@ -236,6 +236,48 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard isRunning, hostStore.selectedHostID != nil else { return }
         watchdog.reset()
         scheduleStackRecovery(reason: "App returned to foreground", force: true, delay: 0.15)
+    }
+
+    /// Redirecting input to another computer needs no new GATT database: the
+    /// services are identical, and republishing them makes the newly selected
+    /// host rediscover everything, which is what made switching cost tens of
+    /// seconds. A physical multi-host keyboard holds its links and simply
+    /// changes where it sends, and so does this now.
+    private func selectHost(_ id: UUID?, allowsPairing: Bool, reason: String) {
+        stackRecoveryWork?.cancel()
+        stackRecoveryWork = nil
+        host = nil
+        session = makeSession(preferredHost: id, allowsPairing: allowsPairing)
+        clearInput()
+        browser.setKnownHosts(hostStore.hosts)
+        record(reason)
+        if let id, adoptLiveSubscriptions(of: id) {
+            record("Adopted live HID subscriptions: \(peerTag(id))")
+        } else {
+            browser.cancelConnection()
+            browser.reconnectRememberedHost(ifMatching: id)
+        }
+        refreshStatus()
+    }
+
+    /// A central still listed on both input characteristics is being notified
+    /// right now, so its session resumes without a republication. A stale entry
+    /// costs one recovery delay, where republishing cost a rediscovery on every
+    /// single switch — which is why 2.1.2 abandoning adoption was the wrong
+    /// trade.
+    private func adoptLiveSubscriptions(of id: UUID) -> Bool {
+        guard servicesInstalled else { return false }
+        let keyboard = inputs[session.keyboardChannel]?.subscribedCentrals ?? []
+        let mouse = inputs[session.mouseChannel]?.subscribedCentrals ?? []
+        guard let central = keyboard.first(where: { $0.identifier == id }),
+              mouse.contains(where: { $0.identifier == id }) else { return false }
+        guard session.subscribe(session.keyboardChannel, from: id),
+              session.subscribe(session.mouseChannel, from: id) else { return false }
+        host = central
+        // A baseline report lets the host resynchronise its view of held input.
+        _ = queue.append([state.keyboard, state.mouse()])
+        scheduleSend()
+        return true
     }
 
     private func rebuildHIDServices(
