@@ -252,18 +252,35 @@ resolve_device() {
     return 0
   fi
 
-  case "${#candidates[@]}" in
-    1) printf '%s' "${candidates[0]}" ;;
-    0) die "no paired device offers the HID service. Pair the iPhone first, with pairing open in the app." ;;
-    *)
-      printf 'several paired devices could be the phone; choose one with --device or --name:\n' >&2
-      for mac in "${candidates[@]}"; do
-        printf '  %s  %s%s\n' "$mac" "$(device_name "$mac")" \
-          "$(is_phone_like "$mac" && echo '  [phone-like]' || echo '')" >&2
-      done
-      exit 1
-      ;;
-  esac
+  if [ "${#candidates[@]}" -eq 0 ]; then
+    die "no paired device offers the HID service. Pair the iPhone first, with pairing open in the app."
+  fi
+
+  # Naming a keyboard or a mouse as a candidate for the phone is worse than
+  # saying nothing: it sends people to --device with the wrong address. When
+  # nothing looks like a phone, the bond is most likely gone.
+  if [ "${#phones[@]}" -eq 0 ]; then
+    printf 'no paired device looks like the phone. These offer HID but look like keyboards or mice:\n' >&2
+    for mac in "${candidates[@]}"; do
+      printf '  %s  %s\n' "$mac" "$(device_name "$mac")" >&2
+    done
+    printf '\nIf the iPhone was paired here before, its bond or its cached HID service is gone.\n' >&2
+    printf 'Check with:  bluetoothctl devices Paired\n' >&2
+    printf 'Then pair again with pairing open in the app, or force this address with --device.\n' >&2
+    exit 1
+  fi
+
+  if [ "${#candidates[@]}" -eq 1 ]; then
+    printf '%s' "${candidates[0]}"
+    return 0
+  fi
+
+  printf 'several paired devices look like the phone; choose one with --device or --name:\n' >&2
+  for mac in "${candidates[@]}"; do
+    printf '  %s  %s%s\n' "$mac" "$(device_name "$mac")" \
+      "$(is_phone_like "$mac" && echo '  [phone-like]' || echo '')" >&2
+  done
+  exit 1
 }
 
 report() {
