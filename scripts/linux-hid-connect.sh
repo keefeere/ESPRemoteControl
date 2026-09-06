@@ -51,8 +51,8 @@ Usage: linux-hid-connect.sh [options]
   -a, --adapter <hciN>   Bluetooth adapter to use (default: hci0).
   -w, --watch [seconds]  Keep the HID profile connected, polling every
                          <seconds> (default: 5). Runs until interrupted.
-      --drop-audio       Disconnect iPhone audio profiles if something else
-                         connected them.
+      --drop-audio       Disconnect iPhone audio profiles that something else
+                         already connected. Recovery only; see the note below.
       --trust            Mark the device trusted so BlueZ accepts its
                          reconnects without a desktop prompt.
       --status           Print the current state and exit.
@@ -60,11 +60,17 @@ Usage: linux-hid-connect.sh [options]
                          device the kernel exposes, then exit.
   -h, --help             Show this help.
 
-With no -d/-n, the only paired device advertising the HID service is used.
+With no -d/-n, the paired device that offers HID and also looks like a phone
+is used; several candidates are listed instead of guessed.
+
+--drop-audio only disconnects audio profiles that already connected, and by
+then the phone has lost audio focus. Prefer preventing the capture: never use
+the desktop applet's Connect, and disable the device in your audio stack.
 
 Examples:
-  linux-hid-connect.sh --trust                 # one-off HID-only connect
-  linux-hid-connect.sh --watch --drop-audio    # keep HID up, keep audio away
+  linux-hid-connect.sh --trust     # one-off HID-only connect
+  linux-hid-connect.sh --watch     # keep the HID profile connected
+  linux-hid-connect.sh --debug     # what is paired and what the kernel sees
 USAGE
 }
 
