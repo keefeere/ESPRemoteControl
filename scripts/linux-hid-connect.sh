@@ -23,6 +23,14 @@ AUDIO_UUIDS=(
   "0000111f-0000-1000-8000-00805f9b34fb" # Hands-free audio gateway
   "00001112-0000-1000-8000-00805f9b34fb" # Headset audio gateway
 )
+# A keyboard or a mouse offers HID and little else. A phone also carries these,
+# which is what separates the device running the app from the other HID devices
+# already paired with this computer.
+PHONE_UUIDS=(
+  "${AUDIO_UUIDS[@]}"
+  "0000112f-0000-1000-8000-00805f9b34fb" # Phone Book Access server
+  "00001132-0000-1000-8000-00805f9b34fb" # Message Access server
+)
 
 adapter="hci0"
 device=""
@@ -127,6 +135,15 @@ has_hid_service() {
   device_info "$1" | grep -qi "$HID_UUID"
 }
 
+is_phone_like() {
+  local info uuid
+  info="$(device_info "$1")"
+  for uuid in "${PHONE_UUIDS[@]}"; do
+    printf '%s' "$info" | grep -qi "$uuid" && return 0
+  done
+  return 1
+}
+
 is_linked() {
   device_info "$1" | grep -qi '^[[:space:]]*Connected:[[:space:]]*yes'
 }
@@ -157,14 +174,20 @@ has_hid_device() {
 # cannot see that it did". Report this when the phone says HID is ready and the
 # computer disagrees.
 dump_debug() {
-  local mac="$1" uevent
+  local mac="${1:-}" uevent
   printf '== paired devices ==\n'
   paired_devices | while read -r peer; do
     [ -n "$peer" ] || continue
-    printf '  %s  %s\n' "$peer" "$(device_name "$peer")"
+    printf '  %s  %s%s%s\n' "$peer" "$(device_name "$peer")" \
+      "$(has_hid_service "$peer" && echo '  [hid]' || echo '')" \
+      "$(is_phone_like "$peer" && echo '  [phone-like]' || echo '')"
   done
-  printf '== target %s ==\n' "$mac"
-  device_info "$mac" | sed 's/^/  /'
+  if [ -n "$mac" ]; then
+    printf '== target %s ==\n' "$mac"
+    device_info "$mac" | sed 's/^/  /'
+  else
+    printf '== target ==\n  not resolved; pass --device or --name\n'
+  fi
   printf '== HID devices ==\n'
   if [ ! -d /sys/bus/hid/devices ]; then
     printf '  no /sys/bus/hid/devices on this kernel\n'
@@ -199,7 +222,7 @@ paired_devices() {
 }
 
 resolve_device() {
-  local candidates=() mac
+  local candidates=() phones=() mac
   while read -r mac; do
     [ -n "$mac" ] || continue
     has_hid_service "$mac" || continue
@@ -210,15 +233,24 @@ resolve_device() {
       esac
     fi
     candidates+=("$mac")
+    if is_phone_like "$mac"; then phones+=("$mac"); fi
   done < <(paired_devices)
+
+  # A computer with keyboards and mice already paired has several HID devices,
+  # so narrow to the one that also looks like a phone before giving up.
+  if [ "${#phones[@]}" -eq 1 ]; then
+    printf '%s' "${phones[0]}"
+    return 0
+  fi
 
   case "${#candidates[@]}" in
     1) printf '%s' "${candidates[0]}" ;;
     0) die "no paired device offers the HID service. Pair the iPhone first, with pairing open in the app." ;;
     *)
-      printf 'several paired devices offer HID; choose one with --device:\n' >&2
+      printf 'several paired devices could be the phone; choose one with --device or --name:\n' >&2
       for mac in "${candidates[@]}"; do
-        printf '  %s  %s\n' "$mac" "$(device_name "$mac")" >&2
+        printf '  %s  %s%s\n' "$mac" "$(device_name "$mac")" \
+          "$(is_phone_like "$mac" && echo '  [phone-like]' || echo '')" >&2
       done
       exit 1
       ;;
@@ -298,16 +330,24 @@ while [ $# -gt 0 ]; do
 done
 
 require bluetoothctl
-[ -n "$device" ] || device="$(resolve_device)"
+if [ -z "$device" ]; then
+  # Debugging must still report what it can when the target is ambiguous.
+  if [ "$debug_only" -eq 1 ]; then
+    device="$(resolve_device || true)"
+  else
+    device="$(resolve_device)"
+  fi
+fi
 device="$(printf '%s' "$device" | tr 'a-z' 'A-Z')"
-has_hid_service "$device" \
-  || die "$device is not paired or does not offer the HID service"
 
 if [ "$debug_only" -eq 1 ]; then
-  report "$device"
+  [ -n "$device" ] && report "$device"
   dump_debug "$device"
   exit 0
 fi
+
+has_hid_service "$device" \
+  || die "$device is not paired or does not offer the HID service"
 
 if [ "$status_only" -eq 1 ]; then
   report "$device"
