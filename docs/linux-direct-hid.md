@@ -195,6 +195,13 @@ Useful things to look for:
 - Reconnect timing after the computer resumes from suspend belongs to BlueZ's
   auto-connect policy, not to the app. `trust` plus the `--watch` helper is the
   reliable combination.
+- The app declares the `bluetooth-peripheral` background mode, so the phone stays
+  advertising and connectable with the app in the background or the screen
+  locked. iOS drops the advertised local name there, which is why the computer
+  should reconnect by address — one more reason to pair and `trust` once rather
+  than searching for "ESP Remote" each time. The recovery ladder above uses
+  ordinary timers, so it runs while the app is in the foreground; returning to
+  the app also triggers a full recovery pass.
 - The app pins input to one selected computer at a time. Switching hosts
   releases held keys first and discards queued text.
 
