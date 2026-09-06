@@ -1,0 +1,50 @@
+name: Auto Release Tag
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract tag from commit message
+        id: tag
+        run: |
+          # Get the latest commit message
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+          
+          # Check if commit message matches pattern *-release-tag-X.X.X
+          if [[ $COMMIT_MSG =~ ([a-zA-Z0-9]+-release-tag-[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            TAG="${BASH_REMATCH[1]}"
+            echo "Found tag: $TAG"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "No release tag pattern found in commit message"
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Git Tag
+        if: steps.tag.outputs.found == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag ${{ steps.tag.outputs.tag }}
+          git push origin ${{ steps.tag.outputs.tag }}
+          echo "✅ Tag created: ${{ steps.tag.outputs.tag }}"
+
+      - name: Create Release
+        if: steps.tag.outputs.found == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
