@@ -100,7 +100,7 @@ struct DirectHIDTests {
         _ = session.subscribe(.bootMouse, from: first)
         check(session.isReady, "Boot keyboard and mouse ready")
         session.suspended = true
-        check(!session.isReady, "Host suspend prevents input")
+        check(session.isReady, "Suspend must not stop input: sending a report is how remote wake works")
         session.disconnect(first)
         check(session.host == nil && session.subscriptions.isEmpty && !session.bootProtocol, "Disconnect clears connection state")
         check(!session.allows(second) && session.allows(first), "Reconnect stays pinned to selected host")
@@ -151,10 +151,13 @@ struct DirectHIDTests {
             steps.append(next.step)
             delays.append(next.delay)
         }
-        check(steps == [.restartAdvertising, .republishServices, .restartStack],
-              "Recovery escalates from visibility to a republished database to a rebuilt stack")
+        check(steps == [.restartAdvertising, .restartStack],
+              "Recovery escalates from visibility straight to a rebuilt stack")
+        check(steps.filter { $0 == .restartStack }.count == 1 && steps.last == .restartStack,
+              "Rebuilding the stack invalidates every host's cache, so it happens once, last")
         check(delays == HIDReconnectWatchdog.schedule, "Escalations follow the documented backoff")
-        check(delays[0] < delays[1] && delays[1] < delays[2], "Recovery backs off instead of fighting the host")
+        check(delays[0] < delays[1], "Recovery backs off instead of fighting the host")
+        check(delays[0] <= 5, "The cheap repair happens inside the five seconds a switch is allowed")
         check(watchdog.isExhausted, "Recovery stops instead of restarting Bluetooth forever")
 
         watchdog.reset()

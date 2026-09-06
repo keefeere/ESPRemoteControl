@@ -601,3 +601,217 @@ so `Tests/DirectHIDTests.swift` cannot reach it; only the ladder's schedule is
 covered there. The device check is to switch between two connected computers and
 see input follow immediately, with "Adopted live HID subscriptions" in the
 journal and no "Service registered" lines.
+
+## Suspend must not stop input (2.1.7)
+
+Recovering a Mac from sleep left 2.1.6 stuck on "Комп'ютер призупинив ввід" until
+the refresh button was pressed. The journal shows why:
+
+```
+19:45:16 HID ready: 9B25BF0B
+19:45:16 Host suspended input
+19:45:21 Recovery 1/3: reissuing the HID advertisement
+19:45:30 Manual full Bluetooth restart
+```
+
+The Mac writes `0x00`, Suspend, to the HID Control Point as it sleeps.
+`HIDHostSession.isReady` required `!suspended`, so the transport refused to send
+anything — and Exit Suspend never arrives, because nothing wakes the host. The
+deadlock is exact: waking the host requires sending a report, and sending was
+forbidden precisely because the host was asleep. Only rebuilding the stack, which
+discards the flag, escaped it.
+
+HOGP asks a suspended device to reduce its own power, not to stop reporting. A
+device that declares RemoteWake — which this one now does, since 2.1.5 — wakes its
+host by sending an input report, and the host answers with Exit Suspend once
+awake. Readiness no longer consults `suspended`.
+
+Two supporting changes keep that from waking hosts by accident. Entering suspend
+clears held input locally rather than transmitting releases, and
+`releaseAllInput` does nothing but clear while suspended, so backgrounding the
+app cannot light up a sleeping computer. Only deliberate input earns a wake.
+
+The status line says "комп'ютер спить" beside "HID готовий" rather than blaming
+the host for stopping input, and the recovery ladder no longer arms during
+suspend, since it was only running because readiness was false.
+
+The old behaviour had a test asserting it — "Host suspend prevents input" — so
+the suite confirmed the wrong model rather than catching it. That check now
+asserts the opposite, which is the property that matters: sending a report is
+how remote wake works.
+
+### The pairing prompt was our own refusal (2.1.7)
+
+A 2.1.6 device report shows macOS asking to pair over and over, with a fresh
+passkey each time, while the journal reads:
+
+```
+19:53:26 Refusing 9B25BF0B (schechu-us-la1); selected 04613D53 (KeeFRogBz)
+19:53:26 Rejected read: 9B25BF0B
+```
+
+Reads and writes from a computer other than the selected one were answered with
+`CBATTError.insufficientAuthorization`. On an already encrypted link that error
+says the bond is not good enough for this attribute, so macOS did the reasonable
+thing and tried to establish a better one — every reconnect, forever.
+
+Refusing them bought nothing. A read carries no input, and the pinning that
+matters is that only the selected host is notified, which `transmit` enforces by
+sending to one central. Reads are now answered for any bonded computer, writes
+are accepted and discarded unless they come from the selected host, and the
+journal records the unrouted access instead of an ATT error.
+
+### Selecting a host dropped the link it was about to use
+
+The same report shows the handheld never connecting, with this in the journal:
+
+```
+19:54:26 Host selected: 04613D53
+19:54:26 Outgoing BLE requested: 04613D53, state 3
+19:54:26 Outgoing BLE disconnected: 04613D53, no error
+```
+
+State 3 is connected: the auxiliary central-role link was already up when the
+host was selected. `selectHost` cancelled it and re-requested it in the same
+breath, and the asynchronous cancellation landed after the new request, taking
+the link with it. It now keeps a link that already points at the selected host
+and only cancels one pointing somewhere else.
+
+### The status line described the transport, not the situation
+
+"Очікуємо клавіатуру й мишу · <host>" was the internal state read aloud: the
+host has not yet subscribed to the keyboard and mouse report characteristics.
+To the person holding the phone it says the app is waiting for a keyboard and a
+mouse — which the app itself is. It also said "waiting" while the recovery
+ladder was actively advertising and retrying, so it read as passive when it was
+not.
+
+The status now names the computer as the actor and says what is happening:
+"Під'єднуємось до <host>…" while recovery still has rungs, and
+"<host> не відповідає. Підключи iPhone на комп'ютері." once it has given up,
+which is the only point where the next move really is the user's. The
+distinction between having a link and not having one went with it: it was a
+distinction in the transport, not in anything a user can act on.
+
+The other strings got the same treatment — "Підготовка Bluetooth" became
+"Готуємо Bluetooth", "Відновлення HID" became "Відновлюємо зв'язок з <host>",
+and the pairing state now says where to look: "Готові до сполучення · знайди
+«ESP Remote» на комп'ютері". Together with "Комп'ютер призупинив ввід" above,
+this was the third status in a row that reported a protocol fact as if it were
+the user's problem.
+
+### Holding every computer's link instead of one
+
+Switching still went through a fresh connection, because the browser held
+exactly one central-role link and `connect(to:)` cancelled the previous host's
+before requesting the next. Each switch therefore destroyed the other computer's
+link, and switching back had to build it again — the cost the adoption path was
+meant to remove, reintroduced one layer down.
+
+A peripheral serves several subscribed centrals at once. The browser now holds a
+link to every saved computer (`maintainLinks`), and switching only changes which
+central `transmit` notifies. Forgetting a computer drops its link; nothing else
+does.
+
+### Why a physical mouse is instant, and this was not
+
+The question that produced this section was the right one: a real mouse is ready
+the moment you switch it on, so why can software not be? The answer is that a
+mouse does three things, and the app was doing only two.
+
+1. It advertises the instant it has nothing to talk to. The app does too — the
+   advertisement stands for as long as a computer is selected.
+2. The computer keeps it in an allowlist with a connect request already pending,
+   so the link forms without anyone searching. The app relies on exactly the
+   same mechanism.
+3. **Its attribute table never changes.** The computer keeps the copy it cached
+   at pairing time; reconnecting is a re-encrypt and a re-subscribe, not a
+   rediscovery. This is the one the app kept breaking, by hand, several times a
+   session.
+
+Four separate paths republished the GATT database, each one invalidating the
+cache on *every* paired computer at once:
+
+- the recovery ladder's middle rung, at 25 s;
+- the pairing window closing, which restored the selected host by rebuilding;
+- a peer disconnecting, which scheduled a full stack restart 0.5 s later;
+- an unsubscribe, which scheduled the same thing;
+- and returning to the foreground, which forced one unconditionally — so
+  glancing at another app for three seconds cost every computer its cache.
+
+That last one is the whole of the reported symptom. The computer was not slow;
+the app was throwing away the state that made it fast, and the rediscovery that
+followed was blamed on the computer.
+
+Now `installServices()` runs once per peripheral manager and nothing else calls
+it. Switching computers, closing a pairing window, losing a peer, an unsubscribe
+and a return from the background all leave the table alone. A disconnected
+computer keeps its bond and its cache and can come back in about a second, on
+its own, with the phone still advertising the whole time.
+
+The ladder is down to two rungs because there is nothing useful in between:
+reissue the advertisement at 5 s — a computer cannot reconnect to a phone it
+cannot see, and this disturbs no established link — and, only if 30 s more pass
+with nothing, rebuild both managers. That last rung does invalidate every cache,
+which is exactly why it is last and why nothing else does it. The other timers
+are a user-facing pairing window (120 s), a scan (15 s) and sub-second input
+pacing.
+
+So the achievable bound is not a compromise: switching between two connected
+computers is a change of notification target, well under a second, and a
+computer that dropped comes back at its own reconnect speed with its cache
+intact — the same second a mouse takes. What is *not* achievable is forcing a
+computer that has stopped trying to try again; that is what the ladder is for,
+and it should almost never run.
+
+### Doing the device's half of the job, and only that
+
+The division of labour a physical mouse relies on is: the device advertises
+whenever it has nothing to talk to, and the computer keeps a connect request
+pending and scans in the background. Nobody searches at switch-on; the first
+advertisement completes a request made long before.
+
+The app was doing that half conditionally. `advertise()` was gated on a
+*selected* computer, so a second paired computer that wanted to reconnect found
+nothing to connect to, and on `afterDrain == nil`, so the phone vanished for the
+length of every key-release drain. It now advertises for as long as direct mode
+is on and the radio is up — no other condition.
+
+The other half of being findable is recovering from a failed start.
+`peripheralManagerDidStartAdvertising` with an error left the phone silent and
+waited for some later event to try again, but there is no such event by
+construction: no computer can produce one about a phone it cannot see. That is
+now the one repair that schedules itself, on a 2/5/10/20/30-second backoff,
+reset by the first success.
+
+What remains is the computer's half, which the phone cannot reach. In order of
+how often it is the real cause: the device is not marked trusted, so BlueZ waits
+for a human who is not there; the bond has no Identity Resolving Key, so the
+computer cannot recognise iOS's rotating advertising address and its pending
+request never matches; the bond is classic-only, with no LE long-term key; or
+the computer simply has no pending request, because BlueZ stops trying after an
+explicit disconnect and does not resume until the next `Connect()`.
+`scripts/linux-hid-connect.sh --why` checks all of these and prints the commands
+for the two it cannot determine from the host alone.
+
+### Fixes found by auditing the whole transport
+
+Removing republication exposed four defects that the old rebuild-everything
+paths had been papering over:
+
+- **The pairing window never closed.** `armPairingTimeout` was armed from the
+  service installation that used to follow every selection. Once selection
+  stopped installing services, nothing armed it, and `allowsPairing` stayed
+  true indefinitely. It is now armed where the window opens.
+- **Forgetting a computer left its link up.** Links are held by
+  `maintainLinks(to:)`, which never sets `requestedHost`, so `forget`'s
+  `requestedHost == id` check never fired. It now cancels the peer directly.
+- **Exit Suspend discarded the keystroke that caused it.** Both suspend
+  directions ran `clearInput()`, which empties the pending report queue — so the
+  key press that woke the computer lost its release. Only entering suspend
+  clears now.
+- **A boot-protocol host could not be adopted.** Adoption looked at
+  `session.keyboardChannel`, which a freshly built session always reports as the
+  report-protocol channel, so a host subscribed to the boot characteristics was
+  never recognised. Adoption now tries both pairs and takes the protocol from
+  whichever the host is actually holding.

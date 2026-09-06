@@ -210,38 +210,88 @@ monitor.bluez.rules = [
 Restart WirePlumber (`systemctl --user restart wireplumber`) afterwards. This
 leaves HID untouched — it only removes the phone as an audio device.
 
+## Who dials whom
+
+A Bluetooth mouse is ready the moment you switch it on, and the reason is a
+division of labour, not speed. The mouse advertises the whole time it has
+nothing to talk to. The computer keeps a connect request pending for it and
+scans in the background. Neither side "searches" when you switch it on: the
+first advertisement the computer hears completes a request it made minutes or
+days ago. The device's whole job is to be findable; the computer's whole job is
+to keep asking.
+
+The app now does exactly the device's half and nothing more:
+
+- it advertises the entire time direct mode is on — not only when a computer is
+  selected, and not only when it is idle, so any paired computer can pick it up
+  at any moment;
+- a failed `startAdvertising` retries itself with a backoff, because nothing
+  else can recover from it: no computer can produce an event about a phone it
+  cannot see;
+- the attribute table never changes while the app runs, so the copy your
+  computer cached at pairing time stays valid and reconnecting is a re-encrypt
+  and a re-subscribe rather than a rediscovery.
+
+The computer's half is the half this project cannot reach from the phone, and
+it is the half that usually breaks. `--why` checks all of it:
+
+```bash
+sudo ./scripts/linux-hid-connect.sh --why
+```
+
+It reports, in the order these tend to fail:
+
+| Check | Why it stops the reconnect |
+| --- | --- |
+| adapter powered | nothing scans, so nothing is ever heard |
+| paired / not blocked | BlueZ will not connect a device it has no bond for |
+| **trusted** | otherwise BlueZ asks a human before accepting the link, and on a locked or headless session nobody answers |
+| offers the HID service | the phone is not in direct mode, or the bond predates it |
+| **IdentityResolvingKey in the bond** | iOS advertises with a rotating private address; without the IRK this computer cannot tell that any of those addresses is your phone, so its pending request never matches a phone that is right there advertising |
+| LE long-term key in the bond | a classic-only bond cannot carry a BLE reconnect |
+| link up but HID not attached | the ACL came back without the HoG profile — run the script with no options |
+
+The two things the computer cannot answer are printed with the commands that
+settle them: whether the phone is advertising at all (`bluetoothctl --timeout 12
+scan le | grep -i 'ESP Remote'`), and whether BlueZ still has a pending connect.
+
+That last one is worth internalising, because it is not a bug and it catches
+everyone: **BlueZ stops trying after an explicit disconnect and does not resume
+until the next `Connect()`**. `bluetoothctl disconnect`, the applet's Disconnect
+button, and this script's own drop-and-retry all leave it idle by design. A
+trusted, bonded device is re-armed at boot and when the adapter is powered back
+on — but never after a manual disconnect. Run the script, or
+`bluetoothctl connect <MAC>`, to put the request back.
+
 ## Automatic recovery
 
 Version 2.1.3 of the app replaces the manual "force-quit and reopen" repair with
 an escalating ladder that runs whenever a computer is selected but no keyboard
-and mouse session exists:
+and mouse session exists. Since 2.1.7 it has two rungs, because nothing useful
+sits between them:
 
 | After | Step | What it fixes |
 | --- | --- | --- |
-| 5 s | reissue the advertisement | a failed or stopped `startAdvertising`, which left the phone invisible with nothing retrying it |
-| 25 s | republish the HID services | a host holding a stale cached copy of the GATT database |
-| 70 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
+| 5 s | reissue the advertisement | a failed or stopped `startAdvertising`, which left the phone invisible |
+| 35 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
 
-Any evidence of progress — a report-map read, a report subscription — rewinds
-the ladder. Once it is exhausted the app keeps advertising and says
-**Немає відповіді**, which means the next move belongs to the computer.
+Any evidence of progress — a report-map read, a report subscription, the radio
+coming back — rewinds the ladder. Once it is exhausted the app keeps advertising
+and says the computer is not answering, which means the next move belongs to the
+computer: run `--why` on it.
 
-Nothing else republishes the services, and **switching computers no longer
-republishes anything at all**. Up to 2.1.5 every host selection removed and
-re-added the GATT database, so the newly selected computer had to rediscover
-everything before input worked — tens of seconds, where a physical Bluetooth
-keyboard switches in about one. The services are identical for every host, so
-there is nothing to republish: the app changes which central it notifies, and a
-computer still subscribed is adopted directly, which is immediate.
+The middle rung used to republish the GATT database, and four other paths did
+the same: closing a pairing window, a peer disconnecting, an unsubscribe, and
+returning to the foreground. Each of those invalidated the cached copy on
+**every** paired computer at once, so the reconnect that followed was a full
+rediscovery instead of the second it should take. The foreground one was the
+worst: glancing at another app for three seconds cost every computer its cache,
+and the delay that followed looked like the computer being slow.
 
-A publication was also followed a couple of seconds later by an automatic
-second-stage refresh, on the theory that a host with a cached GATT database needs
-one. In practice it landed while hosts were still discovering and destroyed their
-work, so neither host could finish; it also made a Mac ask to pair again. The
-ladder now owns every republication. Its first rung only reissues the
-advertisement, which disturbs no established link, so it can run 5 seconds in;
-the disruptive rungs stay far apart, leaving a genuinely new host 25 seconds to
-discover undisturbed.
+Now the table is built once per CoreBluetooth manager and nothing else touches
+it. Switching computers changes which central gets notified and nothing else; a
+computer still subscribed is adopted directly, which is immediate. Only the last
+rung rebuilds, which is exactly why it is last.
 
 ## Collecting a log when it still fails
 

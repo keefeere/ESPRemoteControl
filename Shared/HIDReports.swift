@@ -152,20 +152,19 @@ struct HIDReconnectWatchdog {
         /// Reissue the advertisement. A failed or stalled start otherwise
         /// leaves the phone invisible, and an invisible phone is unreachable.
         case restartAdvertising
-        /// Republish the GATT database so a host holding a cached copy of it
-        /// re-discovers the HID service.
-        case republishServices
         /// Recreate both CoreBluetooth managers: the in-app equivalent of the
-        /// relaunch users perform by hand today.
+        /// relaunch users perform by hand today. The GATT database is rebuilt
+        /// as a side effect, so every host has to rediscover it — which is why
+        /// nothing else in the app republishes, and why this is the last rung.
         case restartStack
     }
 
-    /// Seconds to wait before each escalation. Switching hosts no longer
-    /// republishes anything, so the normal path never reaches this ladder and
-    /// the first rung can be soon: reissuing an advertisement disturbs no
-    /// established link. The later rungs stay far apart, because republishing
-    /// or rebuilding while a host is still discovering destroys its progress.
-    static let schedule: [TimeInterval] = [5, 20, 45]
+    /// Seconds to wait before each escalation. A physical mouse reconnects
+    /// instantly because its attribute table never changes: the host keeps its
+    /// cached copy and only has to re-establish the link. The app now behaves
+    /// the same, which leaves exactly two useful repairs — make the phone
+    /// visible again, and, far later, rebuild everything.
+    static let schedule: [TimeInterval] = [5, 30]
 
     private(set) var attempt = 0
     var isExhausted: Bool { attempt >= Self.schedule.count }
@@ -181,7 +180,6 @@ struct HIDReconnectWatchdog {
         let step: Step
         switch attempt {
         case 0: step = .restartAdvertising
-        case 1: step = .republishServices
         default: step = .restartStack
         }
         attempt += 1
@@ -201,12 +199,16 @@ struct HIDHostSession {
     private(set) var host: UUID?
     private(set) var subscriptions: Set<HIDInputChannel> = []
     var bootProtocol = false
+    /// The host told us it is entering suspend. It does not stop input: a
+    /// device that declares RemoteWake wakes its host precisely by sending a
+    /// report, and the host answers with Exit Suspend once it is awake.
+    /// Refusing to send here is a deadlock — the host cannot ask to be woken.
     var suspended = false
 
     var keyboardChannel: HIDInputChannel { bootProtocol ? .bootKeyboard : .keyboard }
     var mouseChannel: HIDInputChannel { bootProtocol ? .bootMouse : .mouse }
     var isReady: Bool {
-        host != nil && !suspended && subscriptions.contains(keyboardChannel)
+        host != nil && subscriptions.contains(keyboardChannel)
             && subscriptions.contains(mouseChannel)
     }
 

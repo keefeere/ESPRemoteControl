@@ -30,6 +30,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     private var connectionTimer: DispatchWorkItem?
     private var intentionallyCancelled: Set<UUID> = []
     private var knownHosts: [SavedHIDHost] = []
+    private var maintained: Set<UUID> = []
     private var discoveredNames: [UUID: String] = [:]
 
     func start() {
@@ -44,6 +45,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
 
     func stop() {
         stopScan()
+        maintained.removeAll()
         connectionTimer?.cancel()
         if let requestedHost, let peer = peers[requestedHost] {
             manager?.cancelPeripheralConnection(peer)
@@ -121,8 +123,17 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         addKnownHosts()
     }
 
+    /// Drops the held link as well as the record of it. Links are established
+    /// by `maintainLinks(to:)`, which never sets `requestedHost`, so leaving
+    /// the cancellation to that check kept a forgotten computer connected for
+    /// the life of the app.
     func forget(_ id: UUID) {
+        maintained.remove(id)
         if requestedHost == id { cancelConnection() }
+        if let peer = peers[id], peer.state != .disconnected {
+            markIntentionalCancellation(id)
+            manager?.cancelPeripheralConnection(peer)
+        }
         knownHosts.removeAll { $0.id == id }
         peers.removeValue(forKey: id)
         discoveredNames.removeValue(forKey: id)
@@ -137,10 +148,10 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         stopScan()
         connectionTimer?.cancel()
-        if let oldID = requestedHost, oldID != id, let old = peers[oldID] {
-            markIntentionalCancellation(oldID)
-            manager.cancelPeripheralConnection(old)
-        }
+        // The link to any other computer is deliberately left alone: a
+        // peripheral serves several subscribed centrals at once, and keeping
+        // them all connected is what makes switching instant.
+        maintained.insert(id)
         peers[id] = peer
         requestedHost = id
         statusText = "З’єднання з \(name(for: id))…"
@@ -162,15 +173,32 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timer)
     }
 
-    func reconnectRememberedHost(ifMatching preferredHost: UUID?) {
-        guard requestedHost == nil, let preferredHost,
-              knownHosts.contains(where: { $0.id == preferredHost }) else { return }
-        // A host first learned through an incoming HID subscription may still
-        // be retrievable in our central role after pairing. Trying it is safe;
-        // connect(to:) leaves incoming-only hosts waiting for their own OS.
+    /// Hold a central-role link to every saved computer rather than to one at
+    /// a time. Switching then costs a change of notification target instead of
+    /// a fresh connection and rediscovery on the newly chosen host, which is
+    /// what made it take tens of seconds. Links to computers no longer in the
+    /// list are dropped, so forgetting one still releases it.
+    func maintainLinks(to ids: [UUID]) {
+        guard let manager, manager.state == .poweredOn else { return }
+        let wanted = Set(ids)
+        for id in maintained.subtracting(wanted) {
+            guard let peer = peers[id] else { continue }
+            markIntentionalCancellation(id)
+            manager.cancelPeripheralConnection(peer)
+        }
+        maintained = wanted
         addKnownHosts()
-        connect(to: preferredHost)
+        for id in wanted {
+            guard let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else { continue }
+            peers[id] = peer
+            guard peer.state != .connected else { continue }
+            // Connect requests do not time out; a computer that is off simply
+            // completes this later, which is exactly the behaviour wanted.
+            manager.connect(peer, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+        }
     }
+
+    func isLinkHeld(_ id: UUID) -> Bool { maintained.contains(id) }
 
     func rememberReadyHost(_ id: UUID) {
         if requestedHost == id { statusText = "Ввід підключено" }
@@ -204,8 +232,8 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     }
 
     private func connected(_ peer: CBPeripheral) {
-        guard requestedHost == peer.identifier else { return }
-        connectionTimer?.cancel()
+        guard maintained.contains(peer.identifier) || requestedHost == peer.identifier else { return }
+        if requestedHost == peer.identifier { connectionTimer?.cancel() }
         intentionallyCancelled.remove(peer.identifier)
         statusText = "BLE-з’єднання є; очікуємо клавіатуру й мишу…"
         onLinkConnected?(peer.identifier)
