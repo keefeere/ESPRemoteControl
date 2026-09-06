@@ -479,3 +479,56 @@ Until that evidence arrives, the workaround is «Дозволити нове с�
 which routes through `prepareHost(nil)` and clears the selected host, so
 `allows` falls through to the pairing window and accepts the peer. It is saved
 as a separate computer and can be renamed; the stale entry can be forgotten.
+
+## Remote wake and the pairing window (2.1.5)
+
+A 2.1.4 journal settles the host-switching question and raises two others.
+
+Switching **to** the Mac works and is fast: selection, outgoing link, report map
+read, both subscriptions and HID ready inside one second, with
+"second-stage refresh skipped" confirming the 2.1.3 rule doing its job — the
+host re-discovered the database, so no republication was spent tearing the new
+session down.
+
+Switching **back** to the Linux host does not. Its link connects, but it never
+reads the report map and never subscribes; nothing arrives from it at all. The
+recovery ladder ran in full and reported "Немає відповіді", which is the honest
+answer: recovery can make the phone reachable, but it cannot make a host
+subscribe. The refusals interleaved through that journal are the Mac
+reconnecting on its own and being correctly refused while another host is
+selected. Re-attaching the profile from the Linux side, which
+`scripts/linux-hid-connect.sh` exists to do, is the path to test next.
+
+### The pairing window went to whichever host reconnected first
+
+`allows` fell through to `allowsPairing` for any peer once the selected host was
+cleared, and `beginPairing` clears it. A bonded computer reconnects in about a
+second, so opening the window to add a new computer handed it to a saved one
+instead, which is the opposite of its purpose. A saved host is now refused
+while the window is open: those are chosen from the list, which pins them
+directly. Forgetting a computer removes it from that set, so re-pairing still
+works.
+
+### The host was told this device cannot wake it
+
+The Mac does not wake from sleep for the app while a Logitech mouse does. HID
+Information (`0x2A4A`) carried flags `0x02`: NormallyConnectable set,
+**RemoteWake clear**. That bit is how a HOGP device declares it can wake a
+sleeping host, and this one was declaring the opposite. The flags are now
+`0x03`, and the value moved to `RemoteHIDDescriptor.information` so the bits are
+covered by `Tests/DirectHIDTests.swift`.
+
+Whether macOS then honours it is not established here. Remote wake also depends
+on the host's own policy — macOS keeps a per-device wake allowlist — and on iOS
+continuing to advertise while the Mac sleeps. Declaring the bit is a
+prerequisite, not a guarantee; the device check is to select the Mac, let it
+sleep, and press a key.
+
+### What the app cannot supply
+
+The pairing sheet suggested `bluetoothctl connect <MAC> 00001812-…`, leaving the
+address to be looked up. iOS exposes no Bluetooth address to applications, and
+the phone advertises with a rotating private address, so the app cannot fill it
+in. The hint now points at `scripts/linux-hid-connect.sh`, which resolves the
+paired device itself, and names `bluetoothctl devices Paired` for doing it by
+hand.

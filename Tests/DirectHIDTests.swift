@@ -112,6 +112,12 @@ struct DirectHIDTests {
         check(session.isReady, "Explicitly selected second host works")
         session = HIDHostSession(preferredHost: nil, allowsPairing: false)
         check(!session.allows(first), "Closed pairing window rejects new hosts")
+        session = HIDHostSession(preferredHost: nil, allowsPairing: true)
+        session.knownHosts = [first]
+        check(!session.allows(first), "A saved computer cannot claim the pairing window by reconnecting first")
+        check(session.allows(second), "A new computer is what the pairing window is for")
+        _ = session.subscribe(.keyboard, from: second)
+        check(!session.allows(first), "Pairing stays pinned to the host that claimed it")
     }
 
     static func disconnectPolicy() {
@@ -260,5 +266,9 @@ struct DirectHIDTests {
         }
         check(input == [1: 64, 2: 40], "Report map must describe eight keyboard and five mouse bytes")
         check(output == [1: 8], "Keyboard LED output is one byte")
+        let information = [UInt8](RemoteHIDDescriptor.information)
+        check(information.count == 4, "HID Information is bcdHID, country code, and flags")
+        check(information[3] & 1 == 1, "Declare remote wake, or the host is told this device cannot wake it")
+        check(information[3] & 2 == 2, "Declare normally connectable so the host reconnects on its own")
     }
 }

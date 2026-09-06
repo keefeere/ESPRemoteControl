@@ -99,7 +99,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         isRunning = true
         lastError = nil
         let preferred = hostStore.selectedHostID
-        session = HIDHostSession(preferredHost: preferred, allowsPairing: hostStore.shouldPairOnStart)
+        session = makeSession(preferredHost: preferred, allowsPairing: hostStore.shouldPairOnStart)
         watchdog.reset()
         if preferred != nil { recoveryPlan.beginStagedReconnect() }
         isPairing = hostStore.shouldPairOnStart
@@ -184,7 +184,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 self.browser.cancelConnection()
                 self.pairingTimer?.cancel()
                 self.host = nil
-                self.session = HIDHostSession(preferredHost: nil, allowsPairing: false)
+                self.session = self.makeSession(preferredHost: nil, allowsPairing: false)
                 self.isPairing = false
                 self.lastError = nil
                 forget()
@@ -259,7 +259,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if staged { recoveryPlan.beginStagedReconnect() } else { recoveryPlan.cancel() }
         browser.cancelConnection()
         host = nil
-        session = HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
+        session = makeSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
         clearInput()
         browser.setKnownHosts(hostStore.hosts)
         record(reason)
@@ -294,7 +294,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         attributes.removeAll()
         canPair = false
         host = nil
-        session = HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
+        session = makeSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
         clearInput()
         connectedHostID = nil
         lastReadyHostID = nil
@@ -351,7 +351,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.record("Automatic second-stage HID service refresh; selected \(self.peerTag(preferred))")
             self.browser.cancelConnection()
             self.host = nil
-            self.session = HIDHostSession(preferredHost: preferred, allowsPairing: self.isPairing)
+            self.session = self.makeSession(preferredHost: preferred, allowsPairing: self.isPairing)
             self.clearInput()
             self.statusText = "Оновлення HID-сервісу…"
             self.isReady = false
@@ -626,6 +626,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             record("Refusing \(peerTag(id)) (\(peerName)); selected \(peerTag(selected)) (\(selected.map { hostName(for: $0) } ?? "none")), our link to it \(link)")
         }
         if first || repeating { record("Rejected \(action): \(peerTag(id))") }
+    }
+
+    /// Every session carries the saved computers, so an open pairing window
+    /// can tell a genuinely new host from one that is merely reconnecting.
+    private func makeSession(preferredHost: UUID?, allowsPairing: Bool) -> HIDHostSession {
+        var session = HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
+        session.knownHosts = Set(hostStore.hosts.map(\.id))
+        return session
     }
 
     private func peerTag(_ id: UUID?) -> String {
@@ -1020,7 +1028,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             cancelWatchdog(rewind: true)
             updateWatchdog()
             record("Report map read: \(peerTag(request.central.identifier)), offset \(request.offset)")
-        case .information: value = Data([0x11, 0x01, 0, 0x02])
+        case .information: value = RemoteHIDDescriptor.information
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
         case .manufacturer: value = Data("ESP Remote Control".utf8)
         case .model: value = Data("Direct HID v2".utf8)

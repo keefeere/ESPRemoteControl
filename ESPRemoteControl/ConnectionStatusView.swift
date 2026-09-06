@@ -181,10 +181,12 @@ private struct DirectBluetoothSheet: View {
                 Section("Сполучення з комп’ютера") {
                     Text("У налаштуваннях Bluetooth комп’ютера вибери «\(transport.advertisedName)» або ім’я цього iPhone. Підтвердь системний запит, якщо він з’явиться.")
                         .font(.subheadline)
-                    Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу:")
+                    Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу, запусти на комп’ютері:")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("bluetoothctl connect <MAC> 00001812-0000-1000-8000-00805f9b34fb")
+                    Text("./scripts/linux-hid-connect.sh")
                         .font(.caption2.monospaced()).textSelection(.enabled)
+                    Text("Скрипт сам знаходить адресу iPhone. Вручну її покаже bluetoothctl devices Paired, далі bluetoothctl connect <адреса> 00001812-…. Підставити адресу сюди не можна: iOS не дає застосункам Bluetooth-адресу пристрою.")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Button(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення") {
                         transport.beginPairing()
                     }
