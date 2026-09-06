@@ -251,17 +251,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         clearInput()
         browser.setKnownHosts(hostStore.hosts)
         record(reason)
+        // Every saved computer keeps its link, including the one just left.
+        // Switching is then a change of notification target, not a fresh
+        // connection, which is the difference between instant and tens of
+        // seconds.
+        browser.maintainLinks(to: hostStore.hosts.map(\.id))
         if let id, adoptLiveSubscriptions(of: id) {
             record("Adopted live HID subscriptions: \(peerTag(id))")
-        } else if browser.requestedHost == id {
-            // The auxiliary link already points at this host. Cancelling and
-            // re-requesting it in the same breath races the cancellation
-            // against the new request, and the cancellation wins — dropping
-            // the very link the selection was trying to use.
-            record("Keeping the existing outgoing link: \(peerTag(id))")
-        } else {
-            browser.cancelConnection()
-            browser.reconnectRememberedHost(ifMatching: id)
         }
         refreshStatus()
     }
@@ -293,7 +289,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     ) {
         stackRecoveryWork?.cancel()
         stackRecoveryWork = nil
-        browser.cancelConnection()
         host = nil
         session = makeSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
         clearInput()
@@ -541,7 +536,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             canPair = true
             refreshStatus()
             if isPairing { armPairingTimeout() }
-            browser.reconnectRememberedHost(ifMatching: session.preferredHost)
+            browser.maintainLinks(to: hostStore.hosts.map(\.id))
             return
         }
         addingService = serviceQueue.removeFirst()

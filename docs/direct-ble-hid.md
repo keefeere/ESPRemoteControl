@@ -699,3 +699,35 @@ and the pairing state now says where to look: "Готові до сполуче�
 «ESP Remote» на комп'ютері". Together with "Комп'ютер призупинив ввід" above,
 this was the third status in a row that reported a protocol fact as if it were
 the user's problem.
+
+### Holding every computer's link instead of one
+
+Switching still went through a fresh connection, because the browser held
+exactly one central-role link and `connect(to:)` cancelled the previous host's
+before requesting the next. Each switch therefore destroyed the other computer's
+link, and switching back had to build it again — the cost the adoption path was
+meant to remove, reintroduced one layer down.
+
+A peripheral serves several subscribed centrals at once. The browser now holds a
+link to every saved computer (`maintainLinks`), and switching only changes which
+central `transmit` notifies. Forgetting a computer drops its link; nothing else
+does.
+
+### What "recovery in five seconds" can and cannot mean
+
+Every rung of the recovery ladder is a phone-side action, and none of them can
+make a host connect. When a computer has genuinely dropped, the time is its own
+reconnection and discovery, which this app does not control; compressing the
+rungs to fit five seconds reproduces 2.1.5, where republishing landed while
+hosts were still discovering and nothing ever finished.
+
+The bound that is achievable is the one that matters in use: switching between
+computers that are both connected costs a session swap, well under a second,
+because nothing is torn down and nothing is rediscovered. Keeping the links open
+is what buys that, and it is also why the ladder should rarely run at all — a
+host that never lost its link has nothing to recover.
+
+The delays as they stand: rung 1 reissues the advertisement at 5 s and disturbs
+no established link; rungs 2 and 3 republish at 25 s and rebuild the managers at
+70 s, both deliberately far apart. Everything else is either a user-facing
+window (120 s pairing, 15 s scan) or sub-second input pacing.
