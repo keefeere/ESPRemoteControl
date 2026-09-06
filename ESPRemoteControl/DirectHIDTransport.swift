@@ -29,6 +29,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private let hostStore: HIDHostStore
     private var advertising = HIDAdvertisingState()
     private var advertisingError: String?
+    private var advertisingRetry: DispatchWorkItem?
+    private var advertisingFailures = 0
     private var lastReadyHostID: UUID?
     private var manager: CBPeripheralManager?
     private var isRunning = false
@@ -325,6 +327,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         browser.stop()
         advertising = HIDAdvertisingState()
         advertisingError = nil
+        advertisingFailures = 0
         servicesInstalled = false
         serviceQueue.removeAll()
         addingService = nil
@@ -347,6 +350,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func cancelRecovery() {
+        advertisingRetry?.cancel()
+        advertisingRetry = nil
         watchdogWork?.cancel()
         watchdogWork = nil
         // The ladder itself is not rewound here: every escalation calls this,
@@ -406,6 +411,26 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             )
         }
         refreshStatus()
+    }
+
+    /// A failed start is the one failure nothing else recovers from: no host
+    /// event can arrive, because no host can see the phone to produce one.
+    /// Every other repair in this file is triggered by something happening;
+    /// this one has to trigger itself, so it retries on its own with a backoff
+    /// rather than waiting for an event that cannot come.
+    private func scheduleAdvertisingRetry() {
+        guard isRunning, advertisingRetry == nil else { return }
+        let backoff: [TimeInterval] = [2, 5, 10, 20, 30]
+        let delay = backoff[min(advertisingFailures, backoff.count - 1)]
+        advertisingFailures += 1
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.advertisingRetry = nil
+            self.record("Retrying the advertisement after a failed start")
+            self.restartAdvertising()
+        }
+        advertisingRetry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Reissues the advertisement without touching the GATT database. A start
@@ -530,9 +555,16 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         manager?.add(addingService!)
     }
 
+    /// A mouse advertises the whole time it is switched on and not talking to
+    /// anyone, and it never stops because of what it is doing internally — that
+    /// is the half of the job the device owns, and the computer owns the other
+    /// half by keeping a connect request pending. Gating this on a *selected*
+    /// computer meant any other paired computer that wanted to reconnect found
+    /// nothing to connect to, and gating it on a release drain made the phone
+    /// disappear for the length of the drain. The only real conditions are that
+    /// the radio is on and the attribute table exists.
     private func advertise() {
         let wanted = isRunning && servicesInstalled && manager?.state == .poweredOn
-            && afterDrain == nil && (isPairing || session.preferredHost != nil)
         applyAdvertising(advertising.update(wanted: wanted))
     }
 
@@ -906,9 +938,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             advertisingError = "Помилка видимості Bluetooth: \(error.localizedDescription)"
             if !session.isReady { lastError = advertisingError }
             record("Advertising failed: \(error.domain)/\(error.code): \(error.localizedDescription)")
+            scheduleAdvertisingRetry()
         } else {
             if lastError == advertisingError { lastError = nil }
             advertisingError = nil
+            advertisingFailures = 0
+            advertisingRetry?.cancel()
+            advertisingRetry = nil
             record("Advertising HID")
         }
         refreshStatus(updateAdvertisement: false)

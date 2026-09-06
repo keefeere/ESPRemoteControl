@@ -764,6 +764,36 @@ intact — the same second a mouse takes. What is *not* achievable is forcing a
 computer that has stopped trying to try again; that is what the ladder is for,
 and it should almost never run.
 
+### Doing the device's half of the job, and only that
+
+The division of labour a physical mouse relies on is: the device advertises
+whenever it has nothing to talk to, and the computer keeps a connect request
+pending and scans in the background. Nobody searches at switch-on; the first
+advertisement completes a request made long before.
+
+The app was doing that half conditionally. `advertise()` was gated on a
+*selected* computer, so a second paired computer that wanted to reconnect found
+nothing to connect to, and on `afterDrain == nil`, so the phone vanished for the
+length of every key-release drain. It now advertises for as long as direct mode
+is on and the radio is up — no other condition.
+
+The other half of being findable is recovering from a failed start.
+`peripheralManagerDidStartAdvertising` with an error left the phone silent and
+waited for some later event to try again, but there is no such event by
+construction: no computer can produce one about a phone it cannot see. That is
+now the one repair that schedules itself, on a 2/5/10/20/30-second backoff,
+reset by the first success.
+
+What remains is the computer's half, which the phone cannot reach. In order of
+how often it is the real cause: the device is not marked trusted, so BlueZ waits
+for a human who is not there; the bond has no Identity Resolving Key, so the
+computer cannot recognise iOS's rotating advertising address and its pending
+request never matches; the bond is classic-only, with no LE long-term key; or
+the computer simply has no pending request, because BlueZ stops trying after an
+explicit disconnect and does not resume until the next `Connect()`.
+`scripts/linux-hid-connect.sh --why` checks all of these and prints the commands
+for the two it cannot determine from the host alone.
+
 ### Fixes found by auditing the whole transport
 
 Removing republication exposed four defects that the old rebuild-everything

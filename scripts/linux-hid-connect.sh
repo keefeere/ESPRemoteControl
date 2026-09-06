@@ -41,6 +41,7 @@ drop_audio=0
 trust=0
 status_only=0
 debug_only=0
+why_only=0
 
 usage() {
   cat <<'USAGE'
@@ -58,6 +59,9 @@ Usage: linux-hid-connect.sh [options]
       --status           Print the current state and exit.
       --debug            Print paired devices, the target, and every HID
                          device the kernel exposes, then exit.
+      --why              Check everything on this computer that can stop it
+                         from reconnecting to the phone by itself, then exit.
+                         Run with sudo to include the bonding keys.
   -h, --help             Show this help.
 
 With no -d/-n, the paired device that offers HID and also looks like a phone
@@ -71,6 +75,7 @@ Examples:
   linux-hid-connect.sh --trust     # one-off HID-only connect
   linux-hid-connect.sh --watch     # keep the HID profile connected
   linux-hid-connect.sh --debug     # what is paired and what the kernel sees
+  sudo linux-hid-connect.sh --why  # why this computer is not reconnecting
 USAGE
 }
 
@@ -289,6 +294,123 @@ resolve_device() {
   exit 1
 }
 
+# A BLE keyboard is ready the instant you switch it on because the device only
+# has to advertise while the computer keeps a connect request pending for it.
+# The phone's half is not something this script can see; this is everything on
+# *this* computer that can stop its half, in the order it tends to break.
+verdict() {
+  case "$1" in
+    ok) printf '  [ ok ] %s\n' "$2" ;;
+    bad) printf '  [FAIL] %s\n' "$2" ;;
+    *) printf '  [ ?? ] %s\n' "$2" ;;
+  esac
+}
+
+info_says() {
+  printf '%s' "$2" | grep -qiE "^[[:space:]]*$1:[[:space:]]*yes"
+}
+
+bond_dir() {
+  local mac="$1" adapter_mac
+  adapter_mac="$(bluetoothctl show "$adapter" 2>/dev/null \
+    | awk '/^Controller /{ print $2; exit }')"
+  [ -n "$adapter_mac" ] || return 1
+  printf '/var/lib/bluetooth/%s/%s' "$adapter_mac" "$mac"
+}
+
+why_not_reconnecting() {
+  local mac="$1" info dir
+  info="$(device_info "$mac")"
+
+  printf '== what can stop this computer from reconnecting on its own ==\n'
+
+  if bluetoothctl show "$adapter" 2>/dev/null | grep -qiE '^[[:space:]]*Powered:[[:space:]]*yes'; then
+    verdict ok "adapter $adapter is powered"
+  else
+    verdict bad "adapter $adapter is off — nothing scans, nothing reconnects"
+  fi
+
+  if info_says Paired "$info"; then
+    verdict ok "device is paired"
+  else
+    verdict bad "device is not paired — pair it in the desktop applet first"
+  fi
+
+  if info_says Blocked "$info"; then
+    verdict bad "device is BLOCKED — run: bluetoothctl unblock $mac"
+  else
+    verdict ok "device is not blocked"
+  fi
+
+  # Without Trusted, BlueZ asks a human before accepting an incoming link, and
+  # on a headless or locked session nobody answers, so the attempt dies.
+  if info_says Trusted "$info"; then
+    verdict ok "device is trusted"
+  else
+    verdict bad "device is NOT trusted — run: bluetoothctl trust $mac (or --trust)"
+  fi
+
+  if has_hid_service "$mac"; then
+    verdict ok "device offers the HID service"
+  else
+    verdict bad "device does not offer HID — the phone is not in direct mode, or the bond predates it"
+  fi
+
+  # iOS advertises with a rotating resolvable private address. Without the
+  # Identity Resolving Key from bonding, this computer cannot tell that any of
+  # those addresses is the phone, so its connect request never matches and it
+  # waits forever on a device that is right there advertising.
+  if dir="$(bond_dir "$mac")" && [ -r "$dir/info" ]; then
+    if grep -q '^\[IdentityResolvingKey\]' "$dir/info"; then
+      verdict ok "bond has the phone's identity key (its rotating address resolves)"
+    else
+      verdict bad "bond has NO IdentityResolvingKey — this computer cannot recognise the phone's rotating address; remove the device and pair again"
+    fi
+    if grep -qE '^\[(LongTermKey|PeripheralLongTermKey|SlaveLongTermKey)\]' "$dir/info"; then
+      verdict ok "bond has an LE long-term key"
+    else
+      verdict bad "bond has no LE long-term key — this is a classic-only bond; remove the device and pair again"
+    fi
+  elif [ "$(id -u)" != 0 ]; then
+    verdict unknown "bonding keys not readable — re-run with sudo to check the identity key"
+  else
+    verdict bad "no bond record on disk for $mac — the pairing is gone"
+  fi
+
+  if is_linked "$mac"; then
+    verdict ok "a link is up right now"
+    if has_hid_device "$mac"; then
+      verdict ok "the HID profile is attached (kernel has the input device)"
+    else
+      verdict bad "link is up but HID is NOT attached — run this script with no options to attach it"
+    fi
+  else
+    verdict unknown "no link right now — that is normal while the phone is idle; it becomes a problem only if it stays this way with the app open"
+  fi
+
+  cat <<'NOTE'
+
+Two things this computer cannot tell you, and how to settle them:
+
+  * Whether the phone is advertising. Run, while the app is open and the phone
+    is NOT connected here:
+        bluetoothctl --timeout 12 scan le | grep -i 'ESP Remote'
+    Nothing found means the phone's half is broken (app closed, Bluetooth off,
+    out of range) and no amount of host-side fixing will help.
+
+  * Whether BlueZ still has a pending connect for it. BlueZ stops trying after
+    an explicit disconnect and does not resume until the next Connect() — so
+    `bluetoothctl disconnect`, the applet's Disconnect button, and this
+    script's own drop-and-retry all leave it idle by design. Re-arm it with:
+        bluetoothctl connect <MAC>        # or just run this script
+    A device that is Trusted and bonded is re-armed automatically at boot and
+    when the adapter is powered back on, but not after a manual disconnect.
+
+Everything else that stops it is physical: the phone is off, out of range, or
+its Bluetooth is disabled.
+NOTE
+}
+
 report() {
   local mac="$1"
   printf '%s (%s): link %s, keyboard %s\n' \
@@ -356,6 +478,7 @@ while [ $# -gt 0 ]; do
     --trust) trust=1; shift ;;
     --status) status_only=1; shift ;;
     --debug) debug_only=1; shift ;;
+    --why) why_only=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -364,7 +487,7 @@ done
 require bluetoothctl
 if [ -z "$device" ]; then
   # Debugging must still report what it can when the target is ambiguous.
-  if [ "$debug_only" -eq 1 ]; then
+  if [ "$debug_only" -eq 1 ] || [ "$why_only" -eq 1 ]; then
     device="$(resolve_device || true)"
   else
     device="$(resolve_device)"
@@ -375,6 +498,13 @@ device="$(printf '%s' "$device" | tr 'a-z' 'A-Z')"
 if [ "$debug_only" -eq 1 ]; then
   [ -n "$device" ] && report "$device"
   dump_debug "$device"
+  exit 0
+fi
+
+if [ "$why_only" -eq 1 ]; then
+  [ -n "$device" ] || die "no paired iPhone found; pass --device <MAC>"
+  report "$device"
+  why_not_reconnecting "$device"
   exit 0
 fi
 
