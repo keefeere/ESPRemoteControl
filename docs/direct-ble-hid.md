@@ -639,3 +639,40 @@ The old behaviour had a test asserting it — "Host suspend prevents input" — 
 the suite confirmed the wrong model rather than catching it. That check now
 asserts the opposite, which is the property that matters: sending a report is
 how remote wake works.
+
+### The pairing prompt was our own refusal (2.1.7)
+
+A 2.1.6 device report shows macOS asking to pair over and over, with a fresh
+passkey each time, while the journal reads:
+
+```
+19:53:26 Refusing 9B25BF0B (schechu-us-la1); selected 04613D53 (KeeFRogBz)
+19:53:26 Rejected read: 9B25BF0B
+```
+
+Reads and writes from a computer other than the selected one were answered with
+`CBATTError.insufficientAuthorization`. On an already encrypted link that error
+says the bond is not good enough for this attribute, so macOS did the reasonable
+thing and tried to establish a better one — every reconnect, forever.
+
+Refusing them bought nothing. A read carries no input, and the pinning that
+matters is that only the selected host is notified, which `transmit` enforces by
+sending to one central. Reads are now answered for any bonded computer, writes
+are accepted and discarded unless they come from the selected host, and the
+journal records the unrouted access instead of an ATT error.
+
+### Selecting a host dropped the link it was about to use
+
+The same report shows the handheld never connecting, with this in the journal:
+
+```
+19:54:26 Host selected: 04613D53
+19:54:26 Outgoing BLE requested: 04613D53, state 3
+19:54:26 Outgoing BLE disconnected: 04613D53, no error
+```
+
+State 3 is connected: the auxiliary central-role link was already up when the
+host was selected. `selectHost` cancelled it and re-requested it in the same
+breath, and the asynchronous cancellation landed after the new request, taking
+the link with it. It now keeps a link that already points at the selected host
+and only cancels one pointing somewhere else.

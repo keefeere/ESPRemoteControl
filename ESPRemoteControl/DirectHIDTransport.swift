@@ -253,6 +253,12 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         record(reason)
         if let id, adoptLiveSubscriptions(of: id) {
             record("Adopted live HID subscriptions: \(peerTag(id))")
+        } else if browser.requestedHost == id {
+            // The auxiliary link already points at this host. Cancelling and
+            // re-requesting it in the same breath races the cancellation
+            // against the new request, and the cancellation wins — dropping
+            // the very link the selection was trying to use.
+            record("Keeping the existing outgoing link: \(peerTag(id))")
         } else {
             browser.cancelConnection()
             browser.reconnectRememberedHost(ifMatching: id)
@@ -961,11 +967,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         scheduleSend()
     }
 
+    // Reads are answered for any bonded computer, not only the selected one.
+    // Refusing them with an ATT security error told macOS its bond was
+    // inadequate, and it responded by asking to pair again on every reconnect.
+    // Reads carry no input anyway: the pinning that matters is that only the
+    // selected host is ever notified, which `transmit` enforces.
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
-        guard isRunning, session.allows(request.central.identifier) else {
-            noteRejectedPeer(request.central.identifier, action: "read", repeating: false)
-            peripheral.respond(to: request, withResult: .insufficientAuthorization)
+        guard isRunning else {
+            peripheral.respond(to: request, withResult: .unlikelyError)
             return
+        }
+        if !session.allows(request.central.identifier) {
+            noteRejectedPeer(request.central.identifier, action: "read (answered, not routed)", repeating: false)
         }
         guard let attribute = attributes[ObjectIdentifier(request.characteristic)] else {
             peripheral.respond(to: request, withResult: .attributeNotFound)
@@ -1008,10 +1021,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         guard let first = requests.first else { return }
         // Validate the whole transaction before changing any state.
+        guard isRunning else {
+            peripheral.respond(to: first, withResult: .unlikelyError); return
+        }
+        // Another computer's writes are accepted and discarded rather than
+        // refused, for the same reason as reads: a security error provokes a
+        // fresh pairing attempt. Only the selected host changes our state.
+        let routed = session.allows(first.central.identifier)
         for request in requests {
-            guard isRunning, session.allows(request.central.identifier) else {
-                peripheral.respond(to: first, withResult: .insufficientAuthorization); return
-            }
             guard request.offset == 0 else {
                 peripheral.respond(to: first, withResult: .invalidOffset); return
             }
@@ -1026,6 +1043,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 }
             default: peripheral.respond(to: first, withResult: .writeNotPermitted); return
             }
+        }
+        guard routed else {
+            noteRejectedPeer(first.central.identifier, action: "write (answered, not applied)", repeating: false)
+            peripheral.respond(to: first, withResult: .success)
+            return
         }
         for request in requests {
             let value = request.value![0]
