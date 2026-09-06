@@ -153,9 +153,12 @@ anything is the opposite of what debugging needs:
 ```
 
 The script decides the profile is attached by finding the peer address anywhere
-in a HID device's `uevent`. Which key carries it varies between kernel and BlueZ
-versions, so if `--debug` lists the phone under a shape that does not contain
-the address at all, that output is what to report.
+in a HID device's `uevent`, or failing that by matching `HID_NAME` against the
+device's BlueZ name or the app's advertised name. Both are needed: which key
+carries the address varies between kernel and BlueZ versions, and iOS advertises
+with a rotating private address, so the address BlueZ stored at bonding and the
+one the kernel recorded need not be the same string. If `--debug` lists the
+phone under a shape that matches neither, that output is what to report.
 
 To run it in the background for a desktop session:
 
