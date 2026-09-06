@@ -593,6 +593,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         }
     }
 
+    /// The outgoing connect request stays pending indefinitely by design, so
+    /// `browser.requestedHost` alone must not keep the status reading as
+    /// progress once recovery has given up.
+    private func waitingStatus(for id: UUID, subscribing: Bool) -> String {
+        guard !watchdog.isExhausted else {
+            return "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
+        }
+        return subscribing
+            ? "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
+            : "Очікуємо · \(hostName(for: id))"
+    }
+
     private func peerTag(_ id: UUID?) -> String {
         id.map { String($0.uuidString.prefix(8)) } ?? "none"
     }
@@ -646,11 +658,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         } else if session.suspended {
             statusText = "Комп’ютер призупинив ввід"
         } else if let id = session.host ?? browser.requestedHost {
-            statusText = "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
+            statusText = waitingStatus(for: id, subscribing: true)
         } else if let id = session.preferredHost {
-            statusText = watchdog.isExhausted
-                ? "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
-                : "Очікуємо · \(hostName(for: id))"
+            statusText = waitingStatus(for: id, subscribing: false)
         } else if isPairing {
             statusText = "Готовий до сполучення · \(advertisedName)"
         } else {
@@ -980,7 +990,12 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .reportMap:
             value = RemoteHIDDescriptor.reportMap
             hostReadReportMap = true
+            // Reads never reach refreshStatus, so this rung has to be rearmed
+            // here. Rewinding alone leaves a host that reads the descriptor and
+            // then goes quiet — a Mac discovering without attaching HID — with
+            // no pending recovery at all.
             cancelWatchdog(rewind: true)
+            updateWatchdog()
             record("Report map read: \(peerTag(request.central.identifier)), offset \(request.offset)")
         case .information: value = Data([0x11, 0x01, 0, 0x02])
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])

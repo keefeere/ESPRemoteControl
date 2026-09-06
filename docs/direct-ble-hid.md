@@ -411,3 +411,30 @@ Device acceptance checks for this update:
 - Reconnect on a host that keeps its GATT cache and confirm the journal shows
   either a report-map read followed by "second-stage refresh skipped", or one
   "Automatic second-stage HID service refresh" — never both, and never repeated.
+
+## Rearming recovery after a descriptor read (2.1.4)
+
+Device testing of 2.1.3 confirmed that reconnect after a Linux host slept and
+woke now works without relaunching the app. Switching the selected computer to a
+Mac did not: the app stayed on "Очікуємо клавіатуру й мишу" indefinitely.
+
+The cause is in 2.1.3's own wiring. `didReceiveRead` treats a Report Map read as
+evidence of progress and rewinds the recovery ladder, but that delegate method
+never calls `refreshStatus`, which is the only place the next rung is scheduled.
+Cancelling the pending step there therefore left no pending recovery at all. A
+host that reads the descriptor and then goes quiet — a Mac performing GATT
+discovery without attaching HID — put the transport back into the exact state
+2.1.3 set out to remove. The read path now rearms explicitly.
+
+The status line hid this too. `browser.requestedHost` stays set because the
+outgoing connect request is deliberately never cancelled, so the branch reporting
+"Очікуємо клавіатуру й мишу" ran ahead of the exhausted-ladder branch and an
+abandoned reconnect still read as progress. Both waiting branches now share one
+helper that reports "Немає відповіді" once the ladder is spent.
+
+Neither fix is reachable from `Tests/DirectHIDTests.swift`: the defect is in the
+CoreBluetooth delegate wiring, not in `HIDReconnectWatchdog`, whose value-type
+behaviour was already correct and already covered. Device acceptance is to
+switch the selected computer to a Mac and confirm that the journal shows the
+ladder running — "Recovery 1/3" through "Recovery 3/3" — rather than falling
+silent after "Report map read".
