@@ -103,6 +103,13 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         discoveredNames[id] ?? peers[id]?.name
     }
 
+    /// Whether this app's own central-role link to a peer is established, as
+    /// opposed to merely requested. `requestedHost` stays set while a connect
+    /// request waits, so it cannot answer this on its own.
+    func isConnected(_ id: UUID) -> Bool {
+        peers[id]?.state == .connected
+    }
+
     func resolveName(for id: UUID) {
         guard let manager, manager.state == .poweredOn,
               let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else { return }

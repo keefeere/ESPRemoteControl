@@ -438,3 +438,44 @@ behaviour was already correct and already covered. Device acceptance is to
 switch the selected computer to a Mac and confirm that the journal shows the
 ladder running — "Recovery 1/3" through "Recovery 3/3" — rather than falling
 silent after "Report map read".
+
+### Refused peers and the two identities of one computer
+
+A 2.1.3 journal from a failing switch to a Mac shows the recovery ladder running
+correctly — `Recovery 1/3` through `3/3`, one second-stage refresh per staged
+reconnect — while every read and both report subscriptions are refused:
+
+```
+Selected: 14AE093E
+Read rejected:        9B25BF0B; selected 14AE093E
+Ignored subscription: 9B25BF0B, keyboard; selected 14AE093E
+```
+
+The recovery machinery cannot repair this, because the transport is refusing the
+peer on purpose: `HIDHostSession.allows` pins input to the selected host. No
+`Report map read` appears at all, since the read is refused before reaching that
+case.
+
+Which refusal this is cannot be told from the identifier. CoreBluetooth gives a
+peer separate identifiers in the central and peripheral roles, so the selected
+computer arriving as a GATT client is indistinguishable from a different machine
+by identifier alone. Both readings fit that journal:
+
+- The Mac under its `CBCentral` identity, while the saved entry holds the
+  `CBPeripheral` identity learned by the browser. The fix would be to keep both
+  identifiers against one saved computer.
+- A previously bonded Linux host reconnecting on its own. The refusal is then
+  correct, and the real fault is that the Mac never arrives.
+
+Adopting the refused peer automatically is not safe under the second reading: it
+would route input to the wrong computer, which is what the pinning exists to
+prevent. The journal instead now records, once per peer per publication, the
+name CoreBluetooth can resolve for the refused peer and whether this app's own
+central-role link to the selected host is connected at that moment. Repeated
+read refusals are no longer logged individually; they filled the 60-line journal
+without adding anything.
+
+Until that evidence arrives, the workaround is «Дозволити нове сполучення»,
+which routes through `prepareHost(nil)` and clears the selected host, so
+`allows` falls through to the pairing window and accepts the peer. It is saved
+as a separate computer and can be renamed; the stale entry can be forgotten.

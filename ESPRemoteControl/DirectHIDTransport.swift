@@ -57,6 +57,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var watchdog = HIDReconnectWatchdog()
     private var watchdogWork: DispatchWorkItem?
     private var hostReadReportMap = false
+    private var rejectedPeers: Set<UUID> = []
     private var loggedOversizedReport = false
 
     init(hostKey: String = "directHID.selectedHost") {
@@ -521,6 +522,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         canPair = false
         servicesInstalled = false
         hostReadReportMap = false
+        rejectedPeers.removeAll()
         manager.stopAdvertising()
         advertising = HIDAdvertisingState()
         manager.removeAllServices()
@@ -603,6 +605,27 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         return subscribing
             ? "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
             : "Очікуємо · \(hostName(for: id))"
+    }
+
+    /// Refusing a peer that is not the selected computer is the intended
+    /// pinning, but the identifier alone cannot say what was refused: a peer
+    /// has separate CoreBluetooth identifiers in the central and peripheral
+    /// roles, so the selected computer arriving as a GATT client looks exactly
+    /// like a different machine. Record once per peer what distinguishes them —
+    /// the name CoreBluetooth can resolve for it, and whether our own link to
+    /// the selected host is up at that moment. Later refusals from the same
+    /// peer only repeat for subscriptions; reads would otherwise bury the
+    /// journal without adding anything.
+    private func noteRejectedPeer(_ id: UUID, action: String, repeating: Bool) {
+        let first = rejectedPeers.insert(id).inserted
+        if first {
+            browser.resolveName(for: id)
+            let peerName = browser.resolvedName(for: id) ?? "no name"
+            let selected = session.preferredHost
+            let link = selected.map { browser.isConnected($0) ? "connected" : "not connected" } ?? "none"
+            record("Refusing \(peerTag(id)) (\(peerName)); selected \(peerTag(selected)) (\(selected.map { hostName(for: $0) } ?? "none")), our link to it \(link)")
+        }
+        if first || repeating { record("Rejected \(action): \(peerTag(id))") }
     }
 
     private func peerTag(_ id: UUID?) -> String {
@@ -936,7 +959,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard peripheral === manager, isRunning,
               case .input(let channel)? = attributes[ObjectIdentifier(characteristic)] else { return }
         guard session.subscribe(channel, from: central.identifier) else {
-            record("Ignored subscription: \(peerTag(central.identifier)), \(channel); selected \(peerTag(session.preferredHost))")
+            noteRejectedPeer(central.identifier, action: "\(channel) subscription", repeating: true)
             return
         }
         host = central
@@ -969,7 +992,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
         guard isRunning, session.allows(request.central.identifier) else {
-            record("Read rejected: \(peerTag(request.central.identifier)); selected \(peerTag(session.preferredHost))")
+            noteRejectedPeer(request.central.identifier, action: "read", repeating: false)
             peripheral.respond(to: request, withResult: .insufficientAuthorization)
             return
         }
