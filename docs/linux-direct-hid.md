@@ -127,9 +127,12 @@ bare link.
 ./scripts/linux-hid-connect.sh --status
 ```
 
-With no `--device`, the script uses the single paired device that offers the HID
-service; pass `--device AA:BB:CC:DD:EE:FF` or `--name iPhone` when several
-match. `--watch` polls every five seconds by default and reconnects the profile
+With no `--device`, the script picks the paired device to use. A computer that
+already has Bluetooth keyboards and mice paired has several devices offering
+HID, so it narrows to the one that also carries phone profiles — audio,
+phonebook, messages — which a keyboard or a mouse does not. When that is still
+ambiguous it lists the candidates, marking which look like a phone, and expects
+`--device AA:BB:CC:DD:EE:FF` or `--name iPhone`. `--watch` polls every five seconds by default and reconnects the profile
 whenever it drops, which covers a computer waking from sleep.
 
 `ConnectProfile` alone is not always enough. BlueZ answers it with "already
@@ -140,8 +143,10 @@ link and reconnects, because only that makes BlueZ redo the reconnection and
 reattach the profile.
 
 If the phone reports HID ready while the computer disagrees, `--debug` prints
-the paired devices, the target's `bluetoothctl info`, and every HID device the
-kernel exposes with its `HID_NAME`, `HID_PHYS` and `HID_UNIQ`:
+the paired devices with what each one offers, the target's `bluetoothctl info`,
+and every HID device the kernel exposes with its `HID_NAME`, `HID_PHYS` and
+`HID_UNIQ`. It reports even when the target is ambiguous, since refusing to say
+anything is the opposite of what debugging needs:
 
 ```bash
 ./scripts/linux-hid-connect.sh --debug
