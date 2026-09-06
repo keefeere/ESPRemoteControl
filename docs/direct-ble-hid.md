@@ -713,21 +713,75 @@ link to every saved computer (`maintainLinks`), and switching only changes which
 central `transmit` notifies. Forgetting a computer drops its link; nothing else
 does.
 
-### What "recovery in five seconds" can and cannot mean
+### Why a physical mouse is instant, and this was not
 
-Every rung of the recovery ladder is a phone-side action, and none of them can
-make a host connect. When a computer has genuinely dropped, the time is its own
-reconnection and discovery, which this app does not control; compressing the
-rungs to fit five seconds reproduces 2.1.5, where republishing landed while
-hosts were still discovering and nothing ever finished.
+The question that produced this section was the right one: a real mouse is ready
+the moment you switch it on, so why can software not be? The answer is that a
+mouse does three things, and the app was doing only two.
 
-The bound that is achievable is the one that matters in use: switching between
-computers that are both connected costs a session swap, well under a second,
-because nothing is torn down and nothing is rediscovered. Keeping the links open
-is what buys that, and it is also why the ladder should rarely run at all — a
-host that never lost its link has nothing to recover.
+1. It advertises the instant it has nothing to talk to. The app does too — the
+   advertisement stands for as long as a computer is selected.
+2. The computer keeps it in an allowlist with a connect request already pending,
+   so the link forms without anyone searching. The app relies on exactly the
+   same mechanism.
+3. **Its attribute table never changes.** The computer keeps the copy it cached
+   at pairing time; reconnecting is a re-encrypt and a re-subscribe, not a
+   rediscovery. This is the one the app kept breaking, by hand, several times a
+   session.
 
-The delays as they stand: rung 1 reissues the advertisement at 5 s and disturbs
-no established link; rungs 2 and 3 republish at 25 s and rebuild the managers at
-70 s, both deliberately far apart. Everything else is either a user-facing
-window (120 s pairing, 15 s scan) or sub-second input pacing.
+Four separate paths republished the GATT database, each one invalidating the
+cache on *every* paired computer at once:
+
+- the recovery ladder's middle rung, at 25 s;
+- the pairing window closing, which restored the selected host by rebuilding;
+- a peer disconnecting, which scheduled a full stack restart 0.5 s later;
+- an unsubscribe, which scheduled the same thing;
+- and returning to the foreground, which forced one unconditionally — so
+  glancing at another app for three seconds cost every computer its cache.
+
+That last one is the whole of the reported symptom. The computer was not slow;
+the app was throwing away the state that made it fast, and the rediscovery that
+followed was blamed on the computer.
+
+Now `installServices()` runs once per peripheral manager and nothing else calls
+it. Switching computers, closing a pairing window, losing a peer, an unsubscribe
+and a return from the background all leave the table alone. A disconnected
+computer keeps its bond and its cache and can come back in about a second, on
+its own, with the phone still advertising the whole time.
+
+The ladder is down to two rungs because there is nothing useful in between:
+reissue the advertisement at 5 s — a computer cannot reconnect to a phone it
+cannot see, and this disturbs no established link — and, only if 30 s more pass
+with nothing, rebuild both managers. That last rung does invalidate every cache,
+which is exactly why it is last and why nothing else does it. The other timers
+are a user-facing pairing window (120 s), a scan (15 s) and sub-second input
+pacing.
+
+So the achievable bound is not a compromise: switching between two connected
+computers is a change of notification target, well under a second, and a
+computer that dropped comes back at its own reconnect speed with its cache
+intact — the same second a mouse takes. What is *not* achievable is forcing a
+computer that has stopped trying to try again; that is what the ladder is for,
+and it should almost never run.
+
+### Fixes found by auditing the whole transport
+
+Removing republication exposed four defects that the old rebuild-everything
+paths had been papering over:
+
+- **The pairing window never closed.** `armPairingTimeout` was armed from the
+  service installation that used to follow every selection. Once selection
+  stopped installing services, nothing armed it, and `allowsPairing` stayed
+  true indefinitely. It is now armed where the window opens.
+- **Forgetting a computer left its link up.** Links are held by
+  `maintainLinks(to:)`, which never sets `requestedHost`, so `forget`'s
+  `requestedHost == id` check never fired. It now cancels the peer directly.
+- **Exit Suspend discarded the keystroke that caused it.** Both suspend
+  directions ran `clearInput()`, which empties the pending report queue — so the
+  key press that woke the computer lost its release. Only entering suspend
+  clears now.
+- **A boot-protocol host could not be adopted.** Adoption looked at
+  `session.keyboardChannel`, which a freshly built session always reports as the
+  report-protocol channel, so a host subscribed to the boot characteristics was
+  never recognised. Adoption now tries both pairs and takes the protocol from
+  whichever the host is actually holding.

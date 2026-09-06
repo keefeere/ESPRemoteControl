@@ -123,9 +123,17 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         addKnownHosts()
     }
 
+    /// Drops the held link as well as the record of it. Links are established
+    /// by `maintainLinks(to:)`, which never sets `requestedHost`, so leaving
+    /// the cancellation to that check kept a forgotten computer connected for
+    /// the life of the app.
     func forget(_ id: UUID) {
         maintained.remove(id)
         if requestedHost == id { cancelConnection() }
+        if let peer = peers[id], peer.state != .disconnected {
+            markIntentionalCancellation(id)
+            manager?.cancelPeripheralConnection(peer)
+        }
         knownHosts.removeAll { $0.id == id }
         peers.removeValue(forKey: id)
         discoveredNames.removeValue(forKey: id)
