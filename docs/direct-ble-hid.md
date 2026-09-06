@@ -676,3 +676,26 @@ host was selected. `selectHost` cancelled it and re-requested it in the same
 breath, and the asynchronous cancellation landed after the new request, taking
 the link with it. It now keeps a link that already points at the selected host
 and only cancels one pointing somewhere else.
+
+### The status line described the transport, not the situation
+
+"Очікуємо клавіатуру й мишу · <host>" was the internal state read aloud: the
+host has not yet subscribed to the keyboard and mouse report characteristics.
+To the person holding the phone it says the app is waiting for a keyboard and a
+mouse — which the app itself is. It also said "waiting" while the recovery
+ladder was actively advertising and retrying, so it read as passive when it was
+not.
+
+The status now names the computer as the actor and says what is happening:
+"Під'єднуємось до <host>…" while recovery still has rungs, and
+"<host> не відповідає. Підключи iPhone на комп'ютері." once it has given up,
+which is the only point where the next move really is the user's. The
+distinction between having a link and not having one went with it: it was a
+distinction in the transport, not in anything a user can act on.
+
+The other strings got the same treatment — "Підготовка Bluetooth" became
+"Готуємо Bluetooth", "Відновлення HID" became "Відновлюємо зв'язок з <host>",
+and the pairing state now says where to look: "Готові до сполучення · знайди
+«ESP Remote» на комп'ютері". Together with "Комп'ютер призупинив ввід" above,
+this was the third status in a row that reported a protocol fact as if it were
+the user's problem.

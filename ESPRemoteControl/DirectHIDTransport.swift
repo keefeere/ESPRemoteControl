@@ -101,7 +101,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         selectedHostID = preferred
         browser.setKnownHosts(hostStore.hosts)
         record("Starting HID; selected \(peerTag(preferred)); pairing \(isPairing)")
-        statusText = "Запуск прямого Bluetooth…"
+        statusText = "Вмикаємо прямий Bluetooth…"
         // Register system connection events before exposing HID services.
         browser.start()
     }
@@ -333,7 +333,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         connectedHostID = nil
         lastReadyHostID = nil
         isReady = false
-        statusText = "Відновлення Bluetooth…"
+        statusText = "Перезапускаємо Bluetooth…"
         browser.setKnownHosts(hostStore.hosts)
         record("\(reason); rebuilding Bluetooth managers; selected \(peerTag(preferredHost))")
         browser.start()
@@ -570,16 +570,16 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         }
     }
 
+    /// This app *is* the keyboard and mouse, so it must never report waiting
+    /// for one: what it is really waiting for is the computer to accept it,
+    /// and until recovery gives up it is actively advertising and retrying.
     /// The outgoing connect request stays pending indefinitely by design, so
-    /// `browser.requestedHost` alone must not keep the status reading as
-    /// progress once recovery has given up.
-    private func waitingStatus(for id: UUID, subscribing: Bool) -> String {
-        guard !watchdog.isExhausted else {
-            return "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
-        }
-        return subscribing
-            ? "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
-            : "Очікуємо · \(hostName(for: id))"
+    /// its presence alone must not keep the status reading as progress once
+    /// recovery has given up.
+    private func connectingStatus(for id: UUID) -> String {
+        watchdog.isExhausted
+            ? "\(hostName(for: id)) не відповідає. Підключи iPhone на комп’ютері."
+            : "Під’єднуємось до \(hostName(for: id))…"
     }
 
     /// Refusing a peer that is not the selected computer is the intended
@@ -646,20 +646,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             statusText = lastError
         } else if stackRecoveryWork != nil {
             if let id = session.preferredHost {
-                statusText = "Відновлення HID · \(hostName(for: id))"
+                statusText = "Відновлюємо зв’язок з \(hostName(for: id))…"
             } else {
-                statusText = "Відновлення HID…"
+                statusText = "Відновлюємо зв’язок…"
             }
         } else if afterDrain != nil {
             statusText = "Відпускання клавіш…"
         } else if !servicesInstalled {
-            statusText = "Підготовка Bluetooth…"
-        } else if let id = session.host ?? browser.requestedHost {
-            statusText = waitingStatus(for: id, subscribing: true)
-        } else if let id = session.preferredHost {
-            statusText = waitingStatus(for: id, subscribing: false)
+            statusText = "Готуємо Bluetooth…"
+        } else if let id = session.host ?? browser.requestedHost ?? session.preferredHost {
+            statusText = connectingStatus(for: id)
         } else if isPairing {
-            statusText = "Готовий до сполучення · \(advertisedName)"
+            statusText = "Готові до сполучення · знайди «\(advertisedName)» на комп’ютері"
         } else {
             statusText = "Вибери комп’ютер або відкрий сполучення"
         }
