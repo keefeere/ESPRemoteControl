@@ -96,17 +96,32 @@ jobs:
           ipa_size="$(stat -f '%z' dist/ESPRemoteControl-unsigned.ipa)"
           download_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/ESPRemoteControl-unsigned.ipa"
 
-          git switch --force-create sidestore-source-update origin/main
-          python3 scripts/update-sidestore-source.py \
-            --source sidestore-source.json \
-            --version "$version" \
-            --date "$(date -u +%F)" \
-            --download-url "$download_url" \
-            --size "$ipa_size" \
-            --description "ESP Remote Control ${version}"
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add sidestore-source.json
-          git commit -m "Update SideStore source for ${GITHUB_REF_NAME}"
-          git push origin HEAD:main
+
+          # This runs on a tag, so origin/main is whatever it was when the run
+          # checked out. Another merge landing meanwhile makes the push a
+          # non-fast-forward and loses the release from the feed, so rebuild the
+          # change on a freshly fetched main and retry rather than failing.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git switch --force-create sidestore-source-update origin/main
+            python3 scripts/update-sidestore-source.py \
+              --source sidestore-source.json \
+              --version "$version" \
+              --date "$(date -u +%F)" \
+              --download-url "$download_url" \
+              --size "$ipa_size" \
+              --description "ESP Remote Control ${version}"
+
+            git add sidestore-source.json
+            if git diff --cached --quiet; then
+              echo "::notice::SideStore source already lists ${version}"
+              exit 0
+            fi
+            git commit -m "Update SideStore source for ${GITHUB_REF_NAME}"
+            if git push origin HEAD:main; then exit 0; fi
+            echo "::warning::main moved while publishing; retrying (attempt ${attempt})"
+          done
+          echo "::error::could not publish ${version} to the SideStore source"
+          exit 1
