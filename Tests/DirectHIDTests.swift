@@ -100,7 +100,7 @@ struct DirectHIDTests {
         _ = session.subscribe(.bootMouse, from: first)
         check(session.isReady, "Boot keyboard and mouse ready")
         session.suspended = true
-        check(!session.isReady, "Host suspend prevents input")
+        check(session.isReady, "Suspend must not stop input: sending a report is how remote wake works")
         session.disconnect(first)
         check(session.host == nil && session.subscriptions.isEmpty && !session.bootProtocol, "Disconnect clears connection state")
         check(!session.allows(second) && session.allows(first), "Reconnect stays pinned to selected host")

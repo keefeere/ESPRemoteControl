@@ -601,3 +601,41 @@ so `Tests/DirectHIDTests.swift` cannot reach it; only the ladder's schedule is
 covered there. The device check is to switch between two connected computers and
 see input follow immediately, with "Adopted live HID subscriptions" in the
 journal and no "Service registered" lines.
+
+## Suspend must not stop input (2.1.7)
+
+Recovering a Mac from sleep left 2.1.6 stuck on "Комп'ютер призупинив ввід" until
+the refresh button was pressed. The journal shows why:
+
+```
+19:45:16 HID ready: 9B25BF0B
+19:45:16 Host suspended input
+19:45:21 Recovery 1/3: reissuing the HID advertisement
+19:45:30 Manual full Bluetooth restart
+```
+
+The Mac writes `0x00`, Suspend, to the HID Control Point as it sleeps.
+`HIDHostSession.isReady` required `!suspended`, so the transport refused to send
+anything — and Exit Suspend never arrives, because nothing wakes the host. The
+deadlock is exact: waking the host requires sending a report, and sending was
+forbidden precisely because the host was asleep. Only rebuilding the stack, which
+discards the flag, escaped it.
+
+HOGP asks a suspended device to reduce its own power, not to stop reporting. A
+device that declares RemoteWake — which this one now does, since 2.1.5 — wakes its
+host by sending an input report, and the host answers with Exit Suspend once
+awake. Readiness no longer consults `suspended`.
+
+Two supporting changes keep that from waking hosts by accident. Entering suspend
+clears held input locally rather than transmitting releases, and
+`releaseAllInput` does nothing but clear while suspended, so backgrounding the
+app cannot light up a sleeping computer. Only deliberate input earns a wake.
+
+The status line says "комп'ютер спить" beside "HID готовий" rather than blaming
+the host for stopping input, and the recovery ladder no longer arms during
+suspend, since it was only running because readiness was false.
+
+The old behaviour had a test asserting it — "Host suspend prevents input" — so
+the suite confirmed the wrong model rather than catching it. That check now
+asserts the opposite, which is the property that matters: sending a report is
+how remote wake works.

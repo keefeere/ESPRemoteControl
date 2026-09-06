@@ -632,7 +632,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                     browser.resolveName(for: id)
                 }
                 browser.rememberReadyHost(id)
-                statusText = "HID готовий · \(hostName(for: id))"
+                statusText = session.suspended
+                    ? "HID готовий · \(hostName(for: id)) · комп’ютер спить"
+                    : "HID готовий · \(hostName(for: id))"
             }
         } else if let lastError {
             statusText = lastError
@@ -646,8 +648,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             statusText = "Відпускання клавіш…"
         } else if !servicesInstalled {
             statusText = "Підготовка Bluetooth…"
-        } else if session.suspended {
-            statusText = "Комп’ютер призупинив ввід"
         } else if let id = session.host ?? browser.requestedHost {
             statusText = waitingStatus(for: id, subscribing: true)
         } else if let id = session.preferredHost {
@@ -675,6 +675,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     func releaseAllInput() {
+        // Releasing into a suspended host would wake it for nothing — putting
+        // the app in the background must not light up a sleeping computer.
+        // Only deliberate input earns a wake.
+        guard !session.suspended else {
+            clearInput()
+            return
+        }
         sendWork?.cancel()
         sendWork = nil
         queue.removeAll()
@@ -1030,8 +1037,12 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 releaseAllInput()
             case .controlPoint:
                 session.suspended = value == 0
-                record(value == 0 ? "Host suspended input" : "Host resumed input")
-                releaseAllInput()
+                record(value == 0
+                    ? "Host entered suspend; input will wake it"
+                    : "Host exited suspend")
+                // Drop held keys without transmitting: sending here would wake
+                // the host the moment it went to sleep.
+                clearInput()
             default: break
             }
         }

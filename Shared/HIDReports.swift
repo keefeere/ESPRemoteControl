@@ -201,12 +201,16 @@ struct HIDHostSession {
     private(set) var host: UUID?
     private(set) var subscriptions: Set<HIDInputChannel> = []
     var bootProtocol = false
+    /// The host told us it is entering suspend. It does not stop input: a
+    /// device that declares RemoteWake wakes its host precisely by sending a
+    /// report, and the host answers with Exit Suspend once it is awake.
+    /// Refusing to send here is a deadlock — the host cannot ask to be woken.
     var suspended = false
 
     var keyboardChannel: HIDInputChannel { bootProtocol ? .bootKeyboard : .keyboard }
     var mouseChannel: HIDInputChannel { bootProtocol ? .bootMouse : .mouse }
     var isReady: Bool {
-        host != nil && !suspended && subscriptions.contains(keyboardChannel)
+        host != nil && subscriptions.contains(keyboardChannel)
             && subscriptions.contains(mouseChannel)
     }
 
