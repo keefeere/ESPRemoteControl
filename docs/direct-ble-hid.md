@@ -913,11 +913,20 @@ the answer was not pairing at all:
 15:04:06 HID ready: 9B25BF0B
 ```
 
-The Report Map is `readEncryptionRequired`, so a successful read at 15:01:56
-proves the link was already encrypted — the computer had never lost its bond and
-needed no pairing. It then subscribed to both report characteristics and **the
-app refused it**, for two minutes, and it worked two seconds after the window
-closed.
+`9B25BF0B` is a computer already in the app's own list. That is not an
+inference from the name: `Outgoing BLE link connected` comes from
+`BluetoothHostBrowser.connected(_:)`, which is gated on
+`maintained.contains(id) || requestedHost == id`, and `requestedHost` is set
+only by `connect(to:)`, which has no callers — so the line can only be emitted
+for a peer in `maintained`, which is `hostStore.hosts`. At 15:04:06 it
+subscribed to characteristics declared `notifyEncryptionRequired`, which is
+impossible without an encrypted link, so it holds a live bond.
+
+It is therefore a *saved, bonded* computer that the app refused for two minutes
+and that worked two seconds after the window closed. It is not whichever machine
+the user was trying to pair at the time; a different peer, `4FC15751`, was the
+one being paired. Do not read this transcript as evidence about a pairing
+attempt — it is evidence about a bonded computer being locked out.
 
 The refusal came from `HIDHostSession.allows(_:)`, which excluded `knownHosts`
 during an open window. That guard was added in 2.1.6 to stop a saved computer
@@ -947,6 +956,19 @@ Known consequence, not a bug: opening a window still hands the device to
 whoever connects next, so it ends an established session. The window is for
 adding a computer; connecting one already in the list is what tapping it in the
 list is for.
+
+This change does **not** explain why pairing a genuinely new computer from Linux
+fails. That is still open. What is known about it: BlueZ connects, resolves every
+service, starts SMP and displays a numeric-comparison passkey on its side, and
+iOS never displays the matching prompt, so the pairing times out with
+`org.bluez.Error.AuthenticationFailed`. The untested lead is the order of
+operations — iOS surfaces a peripheral-role pairing prompt when the pairing
+arises from an ATT request on an app attribute that requires encryption, and
+`bluetoothctl pair` (and the desktop applet's Pair button) initiate SMP
+explicitly instead, before any such request. `bluetoothctl connect`, or
+`scripts/linux-hid-connect.sh`, drives the HoG plugin into reading the Report
+Map first, which is the path that produces the error and the app context with
+it.
 
 ## Waking a sleeping Mac: what is and is not reachable
 
