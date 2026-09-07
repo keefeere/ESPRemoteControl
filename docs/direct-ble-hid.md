@@ -963,3 +963,37 @@ If pairing works again, the cause is in that pair of commits and can be narrowed
 further. If it does not, the cause is not in the 2.1.6→2.1.7 diff at all, and
 that is worth knowing too — the next measurement is `btmon -w` over the SMP
 exchange, which will show whether iOS sends a Pairing Response and what ends it.
+
+### The journal could not answer the question, and that is why the guesses happened
+
+Three wrong diagnoses of one pairing failure share a cause: the app's journal
+was incapable of showing what actually happened at the ATT layer.
+
+- It was capped at **60 lines**, and the noisiest thing in it was the recovery
+  ladder's `Recovery n/2` + `Advertising requested` + `Advertising HID` triple
+  every 30 seconds. Useful lines were evicted before the user could copy the
+  journal at all.
+- Exactly **one** ATT request was recorded — the report-map read. Every other
+  read and write was answered silently, so a computer refused at the very first
+  attribute looked identical to a computer that never arrived. The BlueZ log had
+  to supply what the app should have said itself.
+- `maintainLinks(to:)` issued outgoing connect requests with no diagnostic at
+  all, so the one hypothesis about outgoing links interfering was untestable
+  from the phone.
+- `recoverAfterForeground()` returned before logging when no computer was
+  selected, so background and foreground transitions were invisible in exactly
+  the state the pairing tests ran in.
+
+All four are fixed. The cap is 400 lines, the advertising confirmation is one
+line instead of two, `maintainLinks` announces what it holds and drops, the
+foreground return always records, and every ATT request now records the
+attribute by name and the answer given — deduplicated per peer, attribute and
+kind of answer, so a repeated read stays quiet while a *changed* answer shows
+up.
+
+What that buys is a decisive next reading rather than another hypothesis. The
+Report Map is declared `readEncryptionRequired`, so
+`ATT read reportMap from X: success` is proof the link is encrypted and the peer
+is bonded, and `ATT read hidInformation from X: success` with no report-map line
+after it is proof that iOS refused the encrypted attribute. The order of
+attributes a host asks for, and the answer each got, is now on the record.

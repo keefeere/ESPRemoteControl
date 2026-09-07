@@ -21,6 +21,21 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private enum Attribute {
         case input(HIDInputChannel), leds, protocolMode, controlPoint
         case reportMap, information, battery, manufacturer, model, pnpID
+
+        var label: String {
+            switch self {
+            case .input(let channel): return "report/\(channel)"
+            case .leds: return "leds"
+            case .protocolMode: return "protocolMode"
+            case .controlPoint: return "controlPoint"
+            case .reportMap: return "reportMap"
+            case .information: return "hidInformation"
+            case .battery: return "battery"
+            case .manufacturer: return "manufacturer"
+            case .model: return "model"
+            case .pnpID: return "pnpID"
+            }
+        }
     }
     private static func uuid(_ short: String) -> CBUUID {
         CBUUID(string: "0000\(short)-0000-1000-8000-00805F9B34FB")
@@ -55,6 +70,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var watchdog = HIDReconnectWatchdog()
     private var watchdogWork: DispatchWorkItem?
     private var rejectedPeers: Set<UUID> = []
+    private var loggedATT: Set<String> = []
     private var loggedOversizedReport = false
 
     init(hostKey: String = "directHID.selectedHost") {
@@ -264,9 +280,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     /// that cost were blamed on the computer. Make the phone visible again and
     /// let the ladder handle a session that really is gone.
     func recoverAfterForeground() {
-        guard isRunning, hostStore.selectedHostID != nil else { return }
+        guard isRunning else { return }
+        loggedATT.removeAll()
+        record("App returned to foreground; selected \(peerTag(hostStore.selectedHostID))")
+        guard hostStore.selectedHostID != nil else { refreshStatus(); return }
         watchdog.reset()
-        record("App returned to foreground; reissuing the advertisement")
         restartAdvertising()
         refreshStatus()
     }
@@ -524,6 +542,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         canPair = false
         servicesInstalled = false
         rejectedPeers.removeAll()
+        loggedATT.removeAll()
         manager.stopAdvertising()
         advertising = HIDAdvertisingState()
         manager.removeAllServices()
@@ -590,7 +609,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard let manager else { return }
         switch action {
         case .start:
-            record("Advertising requested; selected \(peerTag(session.preferredHost))")
             manager.startAdvertising([
                 CBAdvertisementDataLocalNameKey: advertisedName,
                 CBAdvertisementDataServiceUUIDsKey: [Self.uuid("1812")]
@@ -648,7 +666,22 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func record(_ event: String) {
         let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         diagnostics.append("\(time) \(event)")
-        if diagnostics.count > 60 { diagnostics.removeFirst(diagnostics.count - 60) }
+        if diagnostics.count > 400 { diagnostics.removeFirst(diagnostics.count - 400) }
+    }
+
+    /// Every ATT request and the answer given, once per peer, attribute and
+    /// kind of answer. Three diagnoses of the same pairing failure were wrong
+    /// because this did not exist: the journal recorded only the report-map
+    /// read, so a computer being refused at the very first attribute looked
+    /// identical to a computer that never arrived. Deduplicating on the answer
+    /// rather than the request keeps a repeated read quiet while still showing
+    /// the moment an answer changes.
+    private func noteATT(_ action: String, _ attribute: String, _ peer: UUID,
+                         _ result: String, detail: String = "") {
+        if loggedATT.count > 400 { loggedATT.removeAll() }
+        guard loggedATT.insert("\(peerTag(peer))/\(action)/\(attribute)/\(result)").inserted else { return }
+        record("ATT \(action) \(attribute) from \(peerTag(peer)): \(result)"
+               + (detail.isEmpty ? "" : " (\(detail))"))
     }
 
     private func refreshStatus(updateAdvertisement: Bool = true) {
@@ -961,7 +994,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             advertisingFailures = 0
             advertisingRetry?.cancel()
             advertisingRetry = nil
-            record("Advertising HID")
+            record("Advertising HID; selected \(peerTag(session.preferredHost))")
         }
         refreshStatus(updateAdvertisement: false)
     }
@@ -1004,14 +1037,17 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     // Reads carry no input anyway: the pinning that matters is that only the
     // selected host is ever notified, which `transmit` enforces.
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+        let peer = request.central.identifier
         guard isRunning else {
+            noteATT("read", "-", peer, "unlikelyError", detail: "transport stopped")
             peripheral.respond(to: request, withResult: .unlikelyError)
             return
         }
-        if !session.allows(request.central.identifier) {
-            noteRejectedPeer(request.central.identifier, action: "read (answered, not routed)", repeating: false)
+        if !session.allows(peer) {
+            noteRejectedPeer(peer, action: "read (answered, not routed)", repeating: false)
         }
         guard let attribute = attributes[ObjectIdentifier(request.characteristic)] else {
+            noteATT("read", request.characteristic.uuid.uuidString, peer, "attributeNotFound")
             peripheral.respond(to: request, withResult: .attributeNotFound)
             return
         }
@@ -1023,6 +1059,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .leds: value = Data([leds])
         case .protocolMode: value = Data([session.bootProtocol ? 0 : 1])
         case .controlPoint:
+            noteATT("read", attribute.label, peer, "readNotPermitted")
             peripheral.respond(to: request, withResult: .readNotPermitted)
             return
         case .reportMap:
@@ -1033,7 +1070,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             // no pending recovery at all.
             cancelWatchdog(rewind: true)
             updateWatchdog()
-            record("Report map read: \(peerTag(request.central.identifier)), offset \(request.offset)")
         case .information: value = RemoteHIDDescriptor.information
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
         case .manufacturer: value = Data("ESP Remote Control".utf8)
@@ -1042,17 +1078,22 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .pnpID: value = Data([1, 0xFF, 0xFF, 1, 0, 0, 2])
         }
         guard request.offset <= value.count else {
+            noteATT("read", attribute.label, peer, "invalidOffset", detail: "offset \(request.offset)")
             peripheral.respond(to: request, withResult: .invalidOffset)
             return
         }
         request.value = Data(value.dropFirst(request.offset))
+        noteATT("read", attribute.label, peer, "success",
+                detail: "\(value.count) B, offset \(request.offset)")
         peripheral.respond(to: request, withResult: .success)
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         guard let first = requests.first else { return }
         // Validate the whole transaction before changing any state.
+        let peer = first.central.identifier
         guard isRunning else {
+            noteATT("write", "-", peer, "unlikelyError", detail: "transport stopped")
             peripheral.respond(to: first, withResult: .unlikelyError); return
         }
         // Outside that one window, another computer's writes are accepted and
@@ -1061,23 +1102,31 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         // host changes our state.
         let routed = session.allows(first.central.identifier)
         for request in requests {
+            let attribute = attributes[ObjectIdentifier(request.characteristic)]
+            let label = attribute?.label ?? request.characteristic.uuid.uuidString
             guard request.offset == 0 else {
+                noteATT("write", label, peer, "invalidOffset", detail: "offset \(request.offset)")
                 peripheral.respond(to: first, withResult: .invalidOffset); return
             }
             guard let value = request.value, value.count == 1 else {
+                noteATT("write", label, peer, "invalidAttributeValueLength",
+                        detail: "\(request.value?.count ?? 0) B")
                 peripheral.respond(to: first, withResult: .invalidAttributeValueLength); return
             }
-            switch attributes[ObjectIdentifier(request.characteristic)] {
+            switch attribute {
             case .leds: break
             case .protocolMode, .controlPoint:
                 guard value[0] <= 1 else {
+                    noteATT("write", label, peer, "requestNotSupported", detail: "value \(value[0])")
                     peripheral.respond(to: first, withResult: .requestNotSupported); return
                 }
-            default: peripheral.respond(to: first, withResult: .writeNotPermitted); return
+            default:
+                noteATT("write", label, peer, "writeNotPermitted")
+                peripheral.respond(to: first, withResult: .writeNotPermitted); return
             }
         }
         guard routed else {
-            noteRejectedPeer(first.central.identifier, action: "write (answered, not applied)", repeating: false)
+            noteRejectedPeer(peer, action: "write (answered, not applied)", repeating: false)
             peripheral.respond(to: first, withResult: .success)
             return
         }
@@ -1102,6 +1151,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 if value == 0 { clearInput() }
             default: break
             }
+        }
+        for request in requests {
+            let label = attributes[ObjectIdentifier(request.characteristic)]?.label
+                ?? request.characteristic.uuid.uuidString
+            noteATT("write", label, peer, "success", detail: "value \(request.value![0])")
         }
         peripheral.respond(to: first, withResult: .success)
         refreshStatus()
