@@ -29,8 +29,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private let hostStore: HIDHostStore
     private var advertising = HIDAdvertisingState()
     private var advertisingError: String?
-    private var advertisingRetry: DispatchWorkItem?
-    private var advertisingFailures = 0
     private var lastReadyHostID: UUID?
     private var manager: CBPeripheralManager?
     private var isRunning = false
@@ -52,10 +50,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var afterInputQueueDrains: (() -> Void)?
     private var drainTimer: DispatchWorkItem?
     private var finishingDrain = false
+    private var stackRecoveryWork: DispatchWorkItem?
     private var watchdog = HIDReconnectWatchdog()
     private var watchdogWork: DispatchWorkItem?
     private var rejectedPeers: Set<UUID> = []
-    private var pairingNudged: Set<UUID> = []
     private var loggedOversizedReport = false
 
     init(hostKey: String = "directHID.selectedHost") {
@@ -103,7 +101,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         selectedHostID = preferred
         browser.setKnownHosts(hostStore.hosts)
         record("Starting HID; selected \(peerTag(preferred)); pairing \(isPairing)")
-        statusText = "Вмикаємо прямий Bluetooth…"
+        statusText = "Запуск прямого Bluetooth…"
         // Register system connection events before exposing HID services.
         browser.start()
     }
@@ -215,12 +213,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 allowsPairing: true,
                 reason: id == nil ? "Pairing window opened" : "Host selected: \(self.peerTag(id))"
             )
-            // The window used to be closed by the service installation that
-            // followed every selection. Selecting a host no longer installs
-            // anything, so the timeout has to be armed where the window opens
-            // — otherwise it never closes and any computer can claim the
-            // session hours later.
-            self.armPairingTimeout()
         }
     }
 
@@ -240,18 +232,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         }
     }
 
-    /// iOS can stop the advertisement while the app is in the background, but
-    /// it does not invalidate the bond, the subscriptions or the host's cached
-    /// database. Rebuilding the stack here — which is what this did — threw all
-    /// three away every time the user glanced at another app, and the seconds
-    /// that cost were blamed on the computer. Make the phone visible again and
-    /// let the ladder handle a session that really is gone.
     func recoverAfterForeground() {
         guard isRunning, hostStore.selectedHostID != nil else { return }
         watchdog.reset()
-        record("App returned to foreground; reissuing the advertisement")
-        restartAdvertising()
-        refreshStatus()
+        scheduleStackRecovery(reason: "App returned to foreground", force: true, delay: 0.15)
     }
 
     /// Redirecting input to another computer needs no new GATT database: the
@@ -260,21 +244,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     /// seconds. A physical multi-host keyboard holds its links and simply
     /// changes where it sends, and so does this now.
     private func selectHost(_ id: UUID?, allowsPairing: Bool, reason: String) {
+        stackRecoveryWork?.cancel()
+        stackRecoveryWork = nil
         host = nil
-        // Opening or changing a window is a fresh attempt, so every peer may be
-        // asked to pair again.
-        pairingNudged.removeAll()
         session = makeSession(preferredHost: id, allowsPairing: allowsPairing)
         clearInput()
         browser.setKnownHosts(hostStore.hosts)
         record(reason)
-        // Every saved computer keeps its link, including the one just left.
-        // Switching is then a change of notification target, not a fresh
-        // connection, which is the difference between instant and tens of
-        // seconds.
-        browser.maintainLinks(to: hostStore.hosts.map(\.id))
         if let id, adoptLiveSubscriptions(of: id) {
             record("Adopted live HID subscriptions: \(peerTag(id))")
+        } else {
+            browser.cancelConnection()
+            browser.reconnectRememberedHost(ifMatching: id)
         }
         refreshStatus()
     }
@@ -286,34 +267,37 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     /// trade.
     private func adoptLiveSubscriptions(of id: UUID) -> Bool {
         guard servicesInstalled else { return false }
-        func subscribed(_ channel: HIDInputChannel) -> CBCentral? {
-            (inputs[channel]?.subscribedCentrals ?? []).first { $0.identifier == id }
-        }
-        // The fresh session defaults to report protocol, but the host's choice
-        // of protocol survives in the subscriptions it is still holding, so
-        // look for either pair rather than assuming.
-        let boot = session.bootProtocol
-        session.bootProtocol = false
-        var central = subscribed(.keyboard)
-        if central == nil || subscribed(.mouse) == nil {
-            session.bootProtocol = true
-            central = subscribed(.bootKeyboard)
-            if central == nil || subscribed(.bootMouse) == nil {
-                session.bootProtocol = boot
-                return false
-            }
-        }
-        guard let central else { session.bootProtocol = boot; return false }
+        let keyboard = inputs[session.keyboardChannel]?.subscribedCentrals ?? []
+        let mouse = inputs[session.mouseChannel]?.subscribedCentrals ?? []
+        guard let central = keyboard.first(where: { $0.identifier == id }),
+              mouse.contains(where: { $0.identifier == id }) else { return false }
         guard session.subscribe(session.keyboardChannel, from: id),
-              session.subscribe(session.mouseChannel, from: id) else {
-            session.bootProtocol = boot
-            return false
-        }
+              session.subscribe(session.mouseChannel, from: id) else { return false }
         host = central
         // A baseline report lets the host resynchronise its view of held input.
         _ = queue.append([state.keyboard, state.mouse()])
         scheduleSend()
         return true
+    }
+
+    private func rebuildHIDServices(
+        preferredHost: UUID?,
+        allowsPairing: Bool,
+        reason: String
+    ) {
+        stackRecoveryWork?.cancel()
+        stackRecoveryWork = nil
+        browser.cancelConnection()
+        host = nil
+        session = makeSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
+        clearInput()
+        browser.setKnownHosts(hostStore.hosts)
+        record(reason)
+        if manager?.state == .poweredOn {
+            installServices()
+        } else {
+            refreshStatus()
+        }
     }
 
     private func restartBluetoothStack(
@@ -331,7 +315,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         browser.stop()
         advertising = HIDAdvertisingState()
         advertisingError = nil
-        advertisingFailures = 0
         servicesInstalled = false
         serviceQueue.removeAll()
         addingService = nil
@@ -344,7 +327,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         connectedHostID = nil
         lastReadyHostID = nil
         isReady = false
-        statusText = "Перезапускаємо Bluetooth…"
+        statusText = "Відновлення Bluetooth…"
         browser.setKnownHosts(hostStore.hosts)
         record("\(reason); rebuilding Bluetooth managers; selected \(peerTag(preferredHost))")
         browser.start()
@@ -353,9 +336,32 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         updateWatchdog()
     }
 
+    private func scheduleStackRecovery(reason: String, force: Bool, delay: TimeInterval = 0.5) {
+        guard isRunning, (session.preferredHost ?? hostStore.selectedHostID) != nil else { return }
+        stackRecoveryWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.stackRecoveryWork = nil
+            guard force || !self.session.isReady else {
+                self.record("Automatic stack restart cancelled; fresh HID subscriptions arrived")
+                return
+            }
+            let preferred = self.session.preferredHost ?? self.hostStore.selectedHostID
+            self.restartBluetoothStack(
+                preferredHost: preferred,
+                allowsPairing: self.isPairing,
+                reason: reason
+            )
+        }
+        stackRecoveryWork = work
+        record("Automatic stack restart scheduled: \(reason)")
+        refreshStatus()
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     private func cancelRecovery() {
-        advertisingRetry?.cancel()
-        advertisingRetry = nil
+        stackRecoveryWork?.cancel()
+        stackRecoveryWork = nil
         watchdogWork?.cancel()
         watchdogWork = nil
         // The ladder itself is not rewound here: every escalation calls this,
@@ -380,7 +386,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             cancelWatchdog(rewind: true)
             return
         }
-        guard watchdogWork == nil else { return }
+        // A scheduled stack restart already owns the timeline; escalating on
+        // top of one would only interrupt it.
+        guard watchdogWork == nil, stackRecoveryWork == nil else { return }
         guard let next = watchdog.next(pairingOnly: session.preferredHost == nil) else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -406,6 +414,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .restartAdvertising:
             record("Recovery \(position): reissuing the HID advertisement")
             restartAdvertising()
+        case .republishServices:
+            record("Recovery \(position): republishing HID services")
+            rebuildHIDServices(
+                preferredHost: preferred,
+                allowsPairing: isPairing,
+                reason: "Automatic HID service republication; selected \(peerTag(preferred))"
+            )
         case .restartStack:
             record("Recovery \(position): rebuilding the Bluetooth managers")
             restartBluetoothStack(
@@ -415,26 +430,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             )
         }
         refreshStatus()
-    }
-
-    /// A failed start is the one failure nothing else recovers from: no host
-    /// event can arrive, because no host can see the phone to produce one.
-    /// Every other repair in this file is triggered by something happening;
-    /// this one has to trigger itself, so it retries on its own with a backoff
-    /// rather than waiting for an event that cannot come.
-    private func scheduleAdvertisingRetry() {
-        guard isRunning, advertisingRetry == nil else { return }
-        let backoff: [TimeInterval] = [2, 5, 10, 20, 30]
-        let delay = backoff[min(advertisingFailures, backoff.count - 1)]
-        advertisingFailures += 1
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.isRunning else { return }
-            self.advertisingRetry = nil
-            self.record("Retrying the advertisement after a failed start")
-            self.restartAdvertising()
-        }
-        advertisingRetry = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Reissues the advertisement without touching the GATT database. A start
@@ -452,23 +447,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func armPairingTimeout() {
         pairingTimer?.cancel()
         let timer = DispatchWorkItem { [weak self] in
-            guard let self, self.isPairing else { return }
+            guard let self, self.isPairing, !self.session.isReady else { return }
             self.isPairing = false
             self.session.allowsPairing = false
             self.record("Pairing window closed")
-            self.pairingNudged.removeAll()
-            // A window that produced a working session has nothing to undo, but
-            // it still has to close: leaving it open let any computer claim the
-            // session later.
-            guard !self.session.isReady else { self.refreshStatus(); return }
             // An incomplete new pairing must not replace the last saved host.
             if self.session.preferredHost != self.hostStore.selectedHostID {
                 self.drainReleases { [weak self] in
                     guard let self else { return }
                     self.host = nil
                     let preferred = self.hostStore.selectedHostID
-                    self.selectHost(
-                        preferred,
+                    self.rebuildHIDServices(
+                        preferredHost: preferred,
                         allowsPairing: false,
                         reason: "Pairing timed out; restoring selected host"
                     )
@@ -498,20 +488,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         return item
     }
 
-    /// Builds the attribute table once per peripheral manager, and never again
-    /// while it lives. A mouse is ready the instant you switch it on because
-    /// its attributes never move: the computer keeps the copy it cached at
-    /// pairing time and only has to re-establish the link. Every republication
-    /// invalidates that cache on every host at once and costs a full
-    /// rediscovery — seconds where there should be none — so switching
-    /// computers, closing a pairing window and recovering a stalled link all
-    /// leave this table alone. Only a full stack rebuild reaches here again.
     private func installServices() {
         guard let manager, manager.state == .poweredOn else { return }
         canPair = false
         servicesInstalled = false
         rejectedPeers.removeAll()
-        pairingNudged.removeAll()
         manager.stopAdvertising()
         advertising = HIDAdvertisingState()
         manager.removeAllServices()
@@ -554,23 +535,16 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             canPair = true
             refreshStatus()
             if isPairing { armPairingTimeout() }
-            browser.maintainLinks(to: hostStore.hosts.map(\.id))
+            browser.reconnectRememberedHost(ifMatching: session.preferredHost)
             return
         }
         addingService = serviceQueue.removeFirst()
         manager?.add(addingService!)
     }
 
-    /// A mouse advertises the whole time it is switched on and not talking to
-    /// anyone, and it never stops because of what it is doing internally — that
-    /// is the half of the job the device owns, and the computer owns the other
-    /// half by keeping a connect request pending. Gating this on a *selected*
-    /// computer meant any other paired computer that wanted to reconnect found
-    /// nothing to connect to, and gating it on a release drain made the phone
-    /// disappear for the length of the drain. The only real conditions are that
-    /// the radio is on and the attribute table exists.
     private func advertise() {
         let wanted = isRunning && servicesInstalled && manager?.state == .poweredOn
+            && afterDrain == nil && (isPairing || session.preferredHost != nil)
         applyAdvertising(advertising.update(wanted: wanted))
     }
 
@@ -590,16 +564,16 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         }
     }
 
-    /// This app *is* the keyboard and mouse, so it must never report waiting
-    /// for one: what it is really waiting for is the computer to accept it,
-    /// and until recovery gives up it is actively advertising and retrying.
     /// The outgoing connect request stays pending indefinitely by design, so
-    /// its presence alone must not keep the status reading as progress once
-    /// recovery has given up.
-    private func connectingStatus(for id: UUID) -> String {
-        watchdog.isExhausted
-            ? "\(hostName(for: id)) не відповідає. Підключи iPhone на комп’ютері."
-            : "Під’єднуємось до \(hostName(for: id))…"
+    /// `browser.requestedHost` alone must not keep the status reading as
+    /// progress once recovery has given up.
+    private func waitingStatus(for id: UUID, subscribing: Bool) -> String {
+        guard !watchdog.isExhausted else {
+            return "Немає відповіді · \(hostName(for: id)). Підключи iPhone на комп’ютері."
+        }
+        return subscribing
+            ? "Очікуємо клавіатуру й мишу · \(hostName(for: id))"
+            : "Очікуємо · \(hostName(for: id))"
     }
 
     /// Refusing a peer that is not the selected computer is the intended
@@ -621,28 +595,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             record("Refusing \(peerTag(id)) (\(peerName)); selected \(peerTag(selected)) (\(selected.map { hostName(for: $0) } ?? "none")), our link to it \(link)")
         }
         if first || repeating { record("Rejected \(action): \(peerTag(id))") }
-    }
-
-    /// A peripheral cannot ask to be paired. The only way it can get iOS to put
-    /// its pairing prompt on screen is to answer an ATT request with
-    /// Insufficient Authorization: the host reacts by starting SMP, and SMP is
-    /// what raises the prompt. 2.1.7 deleted that answer outright, because
-    /// sending it to an already-bonded Mac on every read told macOS its bond
-    /// was inadequate and produced an endless run of pairing requests. Both
-    /// observations were real, and they are the same mechanism seen from
-    /// opposite sides — so the error now goes exactly where it is wanted:
-    ///
-    ///   * only while the user has an "add a computer" window open, which is
-    ///     the only moment a pairing prompt is something they asked for;
-    ///   * only while nothing has bonded yet, so the reads that follow a
-    ///     successful pairing are answered normally;
-    ///   * and at most once per peer. One error is all a host needs to start
-    ///     pairing. The second one is what reads as "your bond is no good".
-    private func mustProvokePairing(_ id: UUID) -> Bool {
-        guard isPairing, session.preferredHost == nil, session.host == nil else { return false }
-        guard pairingNudged.insert(id).inserted else { return false }
-        record("Asking \(peerTag(id)) to pair: answering Insufficient Authorization once")
-        return true
     }
 
     /// Every session carries the saved computers, so an open pairing window
@@ -686,14 +638,22 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             }
         } else if let lastError {
             statusText = lastError
+        } else if stackRecoveryWork != nil {
+            if let id = session.preferredHost {
+                statusText = "Відновлення HID · \(hostName(for: id))"
+            } else {
+                statusText = "Відновлення HID…"
+            }
         } else if afterDrain != nil {
             statusText = "Відпускання клавіш…"
         } else if !servicesInstalled {
-            statusText = "Готуємо Bluetooth…"
-        } else if let id = session.host ?? browser.requestedHost ?? session.preferredHost {
-            statusText = connectingStatus(for: id)
+            statusText = "Підготовка Bluetooth…"
+        } else if let id = session.host ?? browser.requestedHost {
+            statusText = waitingStatus(for: id, subscribing: true)
+        } else if let id = session.preferredHost {
+            statusText = waitingStatus(for: id, subscribing: false)
         } else if isPairing {
-            statusText = "Готові до сполучення · знайди «\(advertisedName)» на комп’ютері"
+            statusText = "Готовий до сполучення · \(advertisedName)"
         } else {
             statusText = "Вибери комп’ютер або відкрий сполучення"
         }
@@ -906,12 +866,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         session.disconnect(id)
         host = nil
         clearInput()
-        // Nothing is torn down here. A computer that closed the link still
-        // holds its bond and its cached database, so it can come back in about
-        // a second; rebuilding the stack half a second later took that away and
-        // forced a full rediscovery. `refreshStatus` arms the ladder, whose own
-        // last rung rebuilds if the computer really never returns.
         refreshStatus()
+        scheduleStackRecovery(reason: "Peer disconnected: \(cause.rawValue)", force: true)
     }
 
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
@@ -920,10 +876,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if peripheral.state == .poweredOn {
             advertising = HIDAdvertisingState(isAdvertising: peripheral.isAdvertising)
             lastError = nil
-            // Recovery cannot repair a radio that is off, so the ladder may
-            // have run itself out while it was. Its return is the progress that
-            // rewinds it.
-            cancelWatchdog(rewind: true)
             if servicesInstalled {
                 canPair = true
                 refreshStatus()
@@ -966,13 +918,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             advertisingError = "Помилка видимості Bluetooth: \(error.localizedDescription)"
             if !session.isReady { lastError = advertisingError }
             record("Advertising failed: \(error.domain)/\(error.code): \(error.localizedDescription)")
-            scheduleAdvertisingRetry()
         } else {
             if lastError == advertisingError { lastError = nil }
             advertisingError = nil
-            advertisingFailures = 0
-            advertisingRetry?.cancel()
-            advertisingRetry = nil
             record("Advertising HID")
         }
         refreshStatus(updateAdvertisement: false)
@@ -1003,6 +951,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if session.host == nil { host = nil }
         refreshStatus()
         releaseAllInput()
+        if !session.isReady {
+            scheduleStackRecovery(reason: "HID report subscription ended", force: false)
+        }
     }
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
@@ -1010,22 +961,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         scheduleSend()
     }
 
-    // Reads are answered for any bonded computer, not only the selected one.
-    // Refusing them with an ATT security error told macOS its bond was
-    // inadequate, and it responded by asking to pair again on every reconnect.
-    // Reads carry no input anyway: the pinning that matters is that only the
-    // selected host is ever notified, which `transmit` enforces.
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
-        guard isRunning else {
-            peripheral.respond(to: request, withResult: .unlikelyError)
-            return
-        }
-        if mustProvokePairing(request.central.identifier) {
+        guard isRunning, session.allows(request.central.identifier) else {
+            noteRejectedPeer(request.central.identifier, action: "read", repeating: false)
             peripheral.respond(to: request, withResult: .insufficientAuthorization)
             return
-        }
-        if !session.allows(request.central.identifier) {
-            noteRejectedPeer(request.central.identifier, action: "read (answered, not routed)", repeating: false)
         }
         guard let attribute = attributes[ObjectIdentifier(request.characteristic)] else {
             peripheral.respond(to: request, withResult: .attributeNotFound)
@@ -1068,19 +1008,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         guard let first = requests.first else { return }
         // Validate the whole transaction before changing any state.
-        guard isRunning else {
-            peripheral.respond(to: first, withResult: .unlikelyError); return
-        }
-        if mustProvokePairing(first.central.identifier) {
-            peripheral.respond(to: first, withResult: .insufficientAuthorization)
-            return
-        }
-        // Outside that one window, another computer's writes are accepted and
-        // discarded rather than refused, for the same reason as reads: a
-        // security error provokes a fresh pairing attempt. Only the selected
-        // host changes our state.
-        let routed = session.allows(first.central.identifier)
         for request in requests {
+            guard isRunning, session.allows(request.central.identifier) else {
+                peripheral.respond(to: first, withResult: .insufficientAuthorization); return
+            }
             guard request.offset == 0 else {
                 peripheral.respond(to: first, withResult: .invalidOffset); return
             }
@@ -1096,11 +1027,6 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             default: peripheral.respond(to: first, withResult: .writeNotPermitted); return
             }
         }
-        guard routed else {
-            noteRejectedPeer(first.central.identifier, action: "write (answered, not applied)", repeating: false)
-            peripheral.respond(to: first, withResult: .success)
-            return
-        }
         for request in requests {
             let value = request.value![0]
             switch attributes[ObjectIdentifier(request.characteristic)] {
@@ -1114,12 +1040,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 record(value == 0
                     ? "Host entered suspend; input will wake it"
                     : "Host exited suspend")
-                // Entering suspend drops held keys without transmitting them:
-                // sending here would wake the host the moment it went to sleep.
-                // Exit Suspend is the opposite situation — it is the answer to
-                // a report the user just sent, and clearing then threw away the
-                // rest of that keystroke, including its release.
-                if value == 0 { clearInput() }
+                // Drop held keys without transmitting: sending here would wake
+                // the host the moment it went to sleep.
+                clearInput()
             default: break
             }
         }

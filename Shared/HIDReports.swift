@@ -152,19 +152,20 @@ struct HIDReconnectWatchdog {
         /// Reissue the advertisement. A failed or stalled start otherwise
         /// leaves the phone invisible, and an invisible phone is unreachable.
         case restartAdvertising
+        /// Republish the GATT database so a host holding a cached copy of it
+        /// re-discovers the HID service.
+        case republishServices
         /// Recreate both CoreBluetooth managers: the in-app equivalent of the
-        /// relaunch users perform by hand today. The GATT database is rebuilt
-        /// as a side effect, so every host has to rediscover it — which is why
-        /// nothing else in the app republishes, and why this is the last rung.
+        /// relaunch users perform by hand today.
         case restartStack
     }
 
-    /// Seconds to wait before each escalation. A physical mouse reconnects
-    /// instantly because its attribute table never changes: the host keeps its
-    /// cached copy and only has to re-establish the link. The app now behaves
-    /// the same, which leaves exactly two useful repairs — make the phone
-    /// visible again, and, far later, rebuild everything.
-    static let schedule: [TimeInterval] = [5, 30]
+    /// Seconds to wait before each escalation. Switching hosts no longer
+    /// republishes anything, so the normal path never reaches this ladder and
+    /// the first rung can be soon: reissuing an advertisement disturbs no
+    /// established link. The later rungs stay far apart, because republishing
+    /// or rebuilding while a host is still discovering destroys its progress.
+    static let schedule: [TimeInterval] = [5, 20, 45]
 
     private(set) var attempt = 0
     var isExhausted: Bool { attempt >= Self.schedule.count }
@@ -180,6 +181,7 @@ struct HIDReconnectWatchdog {
         let step: Step
         switch attempt {
         case 0: step = .restartAdvertising
+        case 1: step = .republishServices
         default: step = .restartStack
         }
         attempt += 1

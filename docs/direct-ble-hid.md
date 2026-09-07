@@ -894,3 +894,54 @@ this app. Wake-from-sleep on macOS is decided per device, and a peer that
 identifies itself as a phone is not treated as a wake-capable input device
 however correct its HID service is. The RemoteWake bit in HID Information
 (2.1.5) is necessary but is not the whole of what macOS looks at.
+
+## Reverting to the last build that could pair (2.1.10)
+
+Pairing a new computer from Linux worked in 2.1.6 and did not work in 2.1.7,
+2.1.8 or 2.1.9. Three successive hypotheses about which change caused it were
+each wrong:
+
+1. *The pairing window stopped issuing a fresh advertisement.* Refuted by the
+   user: the computer sees the phone and connects.
+2. *2.1.7 deleted the Insufficient Authorization answer, which is what provokes
+   SMP.* 2.1.8 restored it, scoped to an open window. The journal shows it being
+   sent (`Asking 5126E502 to pair: answering Insufficient Authorization once`)
+   and pairing still failing.
+3. *The pairing window locked out the computer being paired.* The transcript
+   that suggested it was about a different peer — a saved, bonded computer —
+   and the machine being paired was never in the app's list at all.
+
+The failure is the same in every case and independent of how the computer
+initiates: BlueZ connects, resolves every service, starts SMP and displays a
+numeric-comparison passkey, and iOS never displays the matching prompt, so it
+times out with `org.bluez.Error.AuthenticationFailed`.
+
+At that point continuing to guess is worse than reverting. The transport,
+browser and shared value types are restored to `ios-v2.1.6` exactly, plus one
+commit — `183ce0c`, which removed `!suspended` from `HIDHostSession.isReady` so
+a Mac writing Suspend cannot deadlock the session it is trying to wake. That is
+verifiable mechanically: the diff against `ios-v2.1.6` for
+`ESPRemoteControl/`, `Shared/` and `Tests/` is byte-identical to that commit's
+diff and contains nothing else.
+
+What comes back with the revert, knowingly:
+
+- An already-bonded Mac that is not the selected host is answered with
+  Insufficient Authorization on every read, and asks to pair repeatedly.
+- An open pairing window refuses saved computers.
+- Every host selection republishes the GATT database, so switching computers
+  costs a rediscovery instead of a session swap.
+- Returning to the foreground restarts the Bluetooth stack unconditionally.
+- The advertisement stops when no computer is selected and during release
+  drains, and a failed `startAdvertising` is not retried.
+
+Each of those is a real defect with a real fix, and each of those fixes is in
+the history and can be re-applied one at a time on top of a build that pairs.
+Shipping them together, unverified, is what produced four releases in two days
+that could not do the one thing the app exists for.
+
+The next step is not another hypothesis. It is `btmon` on the computer during a
+pairing attempt: the SMP exchange will show whether iOS sends a Pairing
+Response, with what IO capability and authentication requirements, and what ends
+the exchange. Until that exists, the cause is unknown and should be stated as
+unknown.

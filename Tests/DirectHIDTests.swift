@@ -151,13 +151,10 @@ struct DirectHIDTests {
             steps.append(next.step)
             delays.append(next.delay)
         }
-        check(steps == [.restartAdvertising, .restartStack],
-              "Recovery escalates from visibility straight to a rebuilt stack")
-        check(steps.filter { $0 == .restartStack }.count == 1 && steps.last == .restartStack,
-              "Rebuilding the stack invalidates every host's cache, so it happens once, last")
+        check(steps == [.restartAdvertising, .republishServices, .restartStack],
+              "Recovery escalates from visibility to a republished database to a rebuilt stack")
         check(delays == HIDReconnectWatchdog.schedule, "Escalations follow the documented backoff")
-        check(delays[0] < delays[1], "Recovery backs off instead of fighting the host")
-        check(delays[0] <= 5, "The cheap repair happens inside the five seconds a switch is allowed")
+        check(delays[0] < delays[1] && delays[1] < delays[2], "Recovery backs off instead of fighting the host")
         check(watchdog.isExhausted, "Recovery stops instead of restarting Bluetooth forever")
 
         watchdog.reset()
