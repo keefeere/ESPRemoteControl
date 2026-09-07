@@ -815,3 +815,82 @@ paths had been papering over:
   report-protocol channel, so a host subscribed to the boot characteristics was
   never recognised. Adoption now tries both pairs and takes the protocol from
   whichever the host is actually holding.
+
+## A peripheral cannot ask to be paired (2.1.8)
+
+2.1.7 broke pairing from Linux, and the `bluetoothctl` transcript of the failure
+is worth keeping because it isolates the step exactly:
+
+```
+[bluetooth]# pair 63:93:CF:A2:8D:2F
+Attempting to pair with 63:93:CF:A2:8D:2F
+[CHG] Device ... Connected: yes
+Request confirmation
+   ... full discovery, including 00001812 with Report Map, three Reports and
+       the boot characteristics; [CHG] ServicesResolved: yes
+[agent] Confirm passkey 727359 (yes/no): yes
+[SIGNAL] LE.Disconnected - org.bluez.Reason.Unknown, Unspecified
+Failed to pair: org.bluez.Error.AuthenticationFailed
+```
+
+Everything up to and including SMP worked: the link came up, the whole GATT
+database was read, numeric comparison started, and the computer's side was
+confirmed. The phone never showed its half, so the comparison could not
+complete and the pairing timed out.
+
+That step — iOS putting a pairing prompt on screen — is not something a
+CoreBluetooth peripheral can request. There is no API for it. The only way to
+reach it is to answer an ATT request with Insufficient Authorization: the host
+reacts by starting SMP, and iOS raises the prompt because the pairing is now
+attributable to an attribute of this app. 2.1.7 deleted that answer from both
+the read and the write path.
+
+It was deleted for a real reason. Sending it to an already-bonded Mac on every
+read told macOS its bond was inadequate, and macOS answered with an endless run
+of pairing requests — the user's complaint that produced the deletion. Both
+observations are correct, and they are the same mechanism seen from opposite
+sides: the error is what makes a computer try to pair, so sending it always
+means always being asked to pair, and sending it never means never being able
+to pair.
+
+So it is now sent exactly where it is wanted and nowhere else:
+
+- only while the user has an "add a computer" window open, which is the only
+  moment an unprompted pairing dialog is something they asked for;
+- only while `session.host` is nil, so the reads that follow a successful
+  pairing are answered normally;
+- and at most once per peer per window. One error is all a host needs to start
+  pairing; the second is what reads as "your bond is no good".
+
+`pairingNudged` holds the peers already asked, and is cleared when a window
+opens or closes and when services are installed.
+
+### What the same transcript says about the Mac
+
+The discovery dump also shows what a computer actually sees, which explains a
+difference that had looked like a bug in this app. Our three services are
+appended after iOS's own — Generic Access, Generic Attribute, Current Time,
+the Apple Notification Center and Media services, and iOS's own Device
+Information and Battery services — so ours start around handle 0x008a, and the
+first `180a`/`180f` pair a host finds is iOS's, not ours (ours is the
+Device Information that also carries a PnP ID).
+
+More importantly:
+
+```
+[CHG] Device ... Name: iPhone
+[CHG] Device ... Appearance: 0x0040 (64)
+[CHG] Device ... Icon: phone
+```
+
+The GAP Device Name characteristic returns the device name, overriding the
+advertised "ESP Remote", and GAP Appearance is 0x0040, Generic Phone. A real
+mouse reports 0x03C2 and a keyboard 0x03C1. Neither value is settable from
+CoreBluetooth: the advertised local name is the only name this app controls,
+and Appearance is not exposed at all.
+
+That is the most likely reason a Mac wakes for a physical mouse and not for
+this app. Wake-from-sleep on macOS is decided per device, and a peer that
+identifies itself as a phone is not treated as a wake-capable input device
+however correct its HID service is. The RemoteWake bit in HID Information
+(2.1.5) is necessary but is not the whole of what macOS looks at.
