@@ -55,6 +55,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var watchdog = HIDReconnectWatchdog()
     private var watchdogWork: DispatchWorkItem?
     private var rejectedPeers: Set<UUID> = []
+    private var pairingNudged: Set<UUID> = []
     private var loggedOversizedReport = false
 
     init(hostKey: String = "directHID.selectedHost") {
@@ -260,6 +261,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     /// changes where it sends, and so does this now.
     private func selectHost(_ id: UUID?, allowsPairing: Bool, reason: String) {
         host = nil
+        // Opening or changing a window is a fresh attempt, so every peer may be
+        // asked to pair again.
+        pairingNudged.removeAll()
         session = makeSession(preferredHost: id, allowsPairing: allowsPairing)
         clearInput()
         browser.setKnownHosts(hostStore.hosts)
@@ -452,6 +456,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.isPairing = false
             self.session.allowsPairing = false
             self.record("Pairing window closed")
+            self.pairingNudged.removeAll()
             // A window that produced a working session has nothing to undo, but
             // it still has to close: leaving it open let any computer claim the
             // session later.
@@ -506,6 +511,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         canPair = false
         servicesInstalled = false
         rejectedPeers.removeAll()
+        pairingNudged.removeAll()
         manager.stopAdvertising()
         advertising = HIDAdvertisingState()
         manager.removeAllServices()
@@ -615,6 +621,28 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             record("Refusing \(peerTag(id)) (\(peerName)); selected \(peerTag(selected)) (\(selected.map { hostName(for: $0) } ?? "none")), our link to it \(link)")
         }
         if first || repeating { record("Rejected \(action): \(peerTag(id))") }
+    }
+
+    /// A peripheral cannot ask to be paired. The only way it can get iOS to put
+    /// its pairing prompt on screen is to answer an ATT request with
+    /// Insufficient Authorization: the host reacts by starting SMP, and SMP is
+    /// what raises the prompt. 2.1.7 deleted that answer outright, because
+    /// sending it to an already-bonded Mac on every read told macOS its bond
+    /// was inadequate and produced an endless run of pairing requests. Both
+    /// observations were real, and they are the same mechanism seen from
+    /// opposite sides — so the error now goes exactly where it is wanted:
+    ///
+    ///   * only while the user has an "add a computer" window open, which is
+    ///     the only moment a pairing prompt is something they asked for;
+    ///   * only while nothing has bonded yet, so the reads that follow a
+    ///     successful pairing are answered normally;
+    ///   * and at most once per peer. One error is all a host needs to start
+    ///     pairing. The second one is what reads as "your bond is no good".
+    private func mustProvokePairing(_ id: UUID) -> Bool {
+        guard isPairing, session.preferredHost == nil, session.host == nil else { return false }
+        guard pairingNudged.insert(id).inserted else { return false }
+        record("Asking \(peerTag(id)) to pair: answering Insufficient Authorization once")
+        return true
     }
 
     /// Every session carries the saved computers, so an open pairing window
@@ -992,6 +1020,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             peripheral.respond(to: request, withResult: .unlikelyError)
             return
         }
+        if mustProvokePairing(request.central.identifier) {
+            peripheral.respond(to: request, withResult: .insufficientAuthorization)
+            return
+        }
         if !session.allows(request.central.identifier) {
             noteRejectedPeer(request.central.identifier, action: "read (answered, not routed)", repeating: false)
         }
@@ -1039,9 +1071,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard isRunning else {
             peripheral.respond(to: first, withResult: .unlikelyError); return
         }
-        // Another computer's writes are accepted and discarded rather than
-        // refused, for the same reason as reads: a security error provokes a
-        // fresh pairing attempt. Only the selected host changes our state.
+        if mustProvokePairing(first.central.identifier) {
+            peripheral.respond(to: first, withResult: .insufficientAuthorization)
+            return
+        }
+        // Outside that one window, another computer's writes are accepted and
+        // discarded rather than refused, for the same reason as reads: a
+        // security error provokes a fresh pairing attempt. Only the selected
+        // host changes our state.
         let routed = session.allows(first.central.identifier)
         for request in requests {
             guard request.offset == 0 else {
