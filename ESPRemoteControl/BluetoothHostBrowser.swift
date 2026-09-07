@@ -183,6 +183,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         let wanted = Set(ids)
         for id in maintained.subtracting(wanted) {
             guard let peer = peers[id] else { continue }
+            onDiagnostic?("Dropping outgoing link: \(id.uuidString.prefix(8))")
             markIntentionalCancellation(id)
             manager.cancelPeripheralConnection(peer)
         }
@@ -194,6 +195,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             guard peer.state != .connected else { continue }
             // Connect requests do not time out; a computer that is off simply
             // completes this later, which is exactly the behaviour wanted.
+            onDiagnostic?("Holding outgoing link request: \(id.uuidString.prefix(8))")
             manager.connect(peer, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
         }
     }
