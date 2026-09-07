@@ -50,7 +50,9 @@ ESP32 mode remains the initial default, and the app remembers the selected mode.
    USB bridge. Switching releases held input and cancels queued text.
 5. On Linux, start the connection from the computer and connect only the HID
    service; see [the Linux guide](docs/linux-direct-hid.md) and
-   `./scripts/linux-hid-connect.sh`. A BlueZ desktop does not advertise over
+   `./scripts/linux-hid-connect.sh`. Run the helper with `--install` once for
+   automatic HID-only reconnect after sleep and a persistent WirePlumber audio
+   isolation rule. A BlueZ desktop does not advertise over
    BLE, so step 3 cannot find it, and its generic "Connect" also brings up the
    iPhone's audio profiles.
 6. If input does not become ready, use **Поділитися журналом** in the pairing

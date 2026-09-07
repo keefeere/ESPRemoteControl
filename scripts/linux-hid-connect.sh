@@ -42,6 +42,8 @@ trust=0
 status_only=0
 debug_only=0
 why_only=0
+install_service=0
+uninstall_service=0
 
 usage() {
   cat <<'USAGE'
@@ -62,6 +64,10 @@ Usage: linux-hid-connect.sh [options]
       --why              Check everything on this computer that can stop it
                          from reconnecting to the phone by itself, then exit.
                          Run with sudo to include the bonding keys.
+      --install          Install a user service that reconnects HID after
+                         login/wake and permanently hides this phone from
+                         WirePlumber audio routing. Implies --trust.
+      --uninstall        Remove that service and its WirePlumber rule.
   -h, --help             Show this help.
 
 With no -d/-n, the paired device that offers HID and also looks like a phone
@@ -76,6 +82,7 @@ Examples:
   linux-hid-connect.sh --watch     # keep the HID profile connected
   linux-hid-connect.sh --debug     # what is paired and what the kernel sees
   sudo linux-hid-connect.sh --why  # why this computer is not reconnecting
+  linux-hid-connect.sh --install   # persistent HID-only connection
 USAGE
 }
 
@@ -464,6 +471,63 @@ connect_hid() {
   has_hid_device "$mac"
 }
 
+install_user_service() {
+  local mac="$1"
+  local libexec="$HOME/.local/libexec/esp-remote-control"
+  local units="$HOME/.config/systemd/user"
+  local wireplumber="$HOME/.config/wireplumber/wireplumber.conf.d"
+  local installed="$libexec/linux-hid-connect.sh"
+  local card="bluez_card.${mac//:/_}"
+
+  require install
+  require systemctl
+  mkdir -p "$libexec" "$units" "$wireplumber"
+  install -m 0755 "${BASH_SOURCE[0]}" "$installed"
+  cat >"$units/esp-remote-hid.service" <<UNIT
+[Unit]
+Description=Keep ESP Remote connected as HID only
+After=bluetooth.target
+
+[Service]
+ExecStart="$installed" --device $mac --watch
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+  cat >"$wireplumber/51-esp-remote.conf" <<WIREPLUMBER
+-- Keep the iPhone available to BlueZ HID while excluding it from audio.
+monitor.bluez.rules = [
+  {
+    matches = [ { device.name = "~$card" } ]
+    actions = { update-props = { device.disabled = true } }
+  }
+]
+WIREPLUMBER
+
+  bluetoothctl trust "$mac" >/dev/null 2>&1 \
+    || printf 'warning: could not mark %s trusted\n' "$mac" >&2
+  systemctl --user daemon-reload
+  systemctl --user enable --now esp-remote-hid.service
+  systemctl --user try-restart wireplumber.service >/dev/null 2>&1 || true
+  printf 'Installed persistent HID reconnect for %s. Audio routing is disabled for %s.\n' "$mac" "$card"
+}
+
+uninstall_user_service_files() {
+  command -v systemctl >/dev/null 2>&1 && {
+    systemctl --user disable --now esp-remote-hid.service >/dev/null 2>&1 || true
+  }
+  rm -f "$HOME/.config/systemd/user/esp-remote-hid.service"
+  rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-esp-remote.conf"
+  rm -f "$HOME/.local/libexec/esp-remote-control/linux-hid-connect.sh"
+  command -v systemctl >/dev/null 2>&1 && {
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user try-restart wireplumber.service >/dev/null 2>&1 || true
+  }
+  printf 'Removed the persistent ESP Remote HID service and audio-isolation rule.\n'
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     -d|--device) device="${2:-}"; shift 2 ;;
@@ -479,10 +543,18 @@ while [ $# -gt 0 ]; do
     --status) status_only=1; shift ;;
     --debug) debug_only=1; shift ;;
     --why) why_only=1; shift ;;
+    --install) install_service=1; trust=1; shift ;;
+    --uninstall) uninstall_service=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
+
+if [ "$uninstall_service" -eq 1 ]; then
+  install_service=0
+  uninstall_user_service_files
+  exit 0
+fi
 
 require bluetoothctl
 if [ -z "$device" ]; then
@@ -505,6 +577,14 @@ if [ "$why_only" -eq 1 ]; then
   [ -n "$device" ] || die "no paired iPhone found; pass --device <MAC>"
   report "$device"
   why_not_reconnecting "$device"
+  exit 0
+fi
+
+if [ "$install_service" -eq 1 ]; then
+  [ -n "$device" ] || die "no paired iPhone found; pass --device <MAC>"
+  has_hid_service "$device" \
+    || die "$device is not paired or does not offer the HID service"
+  install_user_service "$device"
   exit 0
 fi
 
