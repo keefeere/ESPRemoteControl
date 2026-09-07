@@ -112,9 +112,8 @@ struct DirectHIDTests {
         session = HIDHostSession(preferredHost: nil, allowsPairing: false)
         check(!session.allows(first), "Closed pairing window rejects new hosts")
         session = HIDHostSession(preferredHost: nil, allowsPairing: true)
-        session.knownHosts = [first]
-        check(!session.allows(first), "A saved computer cannot claim the pairing window by reconnecting first")
-        check(session.allows(second), "A new computer is what the pairing window is for")
+        check(session.allows(first), "An open window accepts a saved computer: refusing it made the window the one state where a bonded host could not connect")
+        check(session.allows(second), "An open window accepts a new computer too")
         _ = session.subscribe(.keyboard, from: second)
         check(!session.allows(first), "Pairing stays pinned to the host that claimed it")
     }

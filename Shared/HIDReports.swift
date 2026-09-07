@@ -192,10 +192,6 @@ struct HIDReconnectWatchdog {
 struct HIDHostSession {
     var preferredHost: UUID?
     var allowsPairing: Bool
-    /// Computers already in the app's list. A pairing window exists to add a
-    /// new one; a bonded host reconnects in about a second, so letting saved
-    /// hosts claim the window makes it unusable for its only purpose.
-    var knownHosts: Set<UUID> = []
     private(set) var host: UUID?
     private(set) var subscriptions: Set<HIDInputChannel> = []
     var bootProtocol = false
@@ -215,9 +211,14 @@ struct HIDHostSession {
     func allows(_ id: UUID) -> Bool {
         if let host { return host == id }
         if let preferredHost { return preferredHost == id }
-        // A saved computer is chosen from the list, which pins it directly;
-        // it must not win the pairing window away from the new one.
-        return allowsPairing && !knownHosts.contains(id)
+        // An open window accepts whoever connects, saved or not. Excluding
+        // saved computers was meant to stop one from claiming a window opened
+        // for a new machine, and it did — by making the window the one state in
+        // which an already-bonded computer could not connect at all. A user who
+        // opens it to get a computer working watches that computer get refused
+        // for two minutes and then work the instant the window closes. A mouse
+        // in pairing mode takes whoever arrives; so does this.
+        return allowsPairing
     }
 
     mutating func subscribe(_ channel: HIDInputChannel, from id: UUID) -> Bool {

@@ -639,18 +639,20 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     ///   * and at most once per peer. One error is all a host needs to start
     ///     pairing. The second one is what reads as "your bond is no good".
     private func mustProvokePairing(_ id: UUID) -> Bool {
-        guard isPairing, session.preferredHost == nil, session.host == nil else { return false }
+        guard isPairing, session.preferredHost == nil else { return false }
+        // Never at the computer currently being typed on.
+        guard session.host != id else { return false }
+        // A computer already in the list is already bonded: it needs nothing
+        // from us but to be let in, and the error costs it the link it just
+        // made — the journal shows the disconnect landing in the same second.
+        guard !hostStore.hosts.contains(where: { $0.id == id }) else { return false }
         guard pairingNudged.insert(id).inserted else { return false }
         record("Asking \(peerTag(id)) to pair: answering Insufficient Authorization once")
         return true
     }
 
-    /// Every session carries the saved computers, so an open pairing window
-    /// can tell a genuinely new host from one that is merely reconnecting.
     private func makeSession(preferredHost: UUID?, allowsPairing: Bool) -> HIDHostSession {
-        var session = HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
-        session.knownHosts = Set(hostStore.hosts.map(\.id))
-        return session
+        HIDHostSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
     }
 
     private func peerTag(_ id: UUID?) -> String {

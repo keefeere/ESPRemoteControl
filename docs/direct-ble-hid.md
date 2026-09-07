@@ -894,3 +894,96 @@ this app. Wake-from-sleep on macOS is decided per device, and a peer that
 identifies itself as a phone is not treated as a wake-capable input device
 however correct its HID service is. The RemoteWake bit in HID Information
 (2.1.5) is necessary but is not the whole of what macOS looks at.
+
+## The pairing window was the only state a bonded computer could not use (2.1.9)
+
+The 2.1.8 journal settled what 2.1.7 and 2.1.8 had both been guessing at, and
+the answer was not pairing at all:
+
+```
+15:01:54 Asking 9B25BF0B to pair: answering Insufficient Authorization once
+15:01:56 Report map read: 9B25BF0B, offset 0
+15:01:57 Rejected keyboard subscription: 9B25BF0B
+15:01:57 Rejected mouse subscription: 9B25BF0B
+...
+15:04:04 Pairing window closed
+15:04:04 Pairing timed out; restoring selected host
+15:04:06 Subscribed: keyboard, host 9B25BF0B, 512 B notifications
+15:04:06 Subscribed: mouse, host 9B25BF0B, 512 B notifications
+15:04:06 HID ready: 9B25BF0B
+```
+
+The Report Map is `readEncryptionRequired`, so a successful read at 15:01:56
+proves the link was already encrypted — the computer had never lost its bond and
+needed no pairing. It then subscribed to both report characteristics and **the
+app refused it**, for two minutes, and it worked two seconds after the window
+closed.
+
+The refusal came from `HIDHostSession.allows(_:)`, which excluded `knownHosts`
+during an open window. That guard was added in 2.1.6 to stop a saved computer
+from claiming a window opened for a new one — a real annoyance, since a bonded
+host reconnects in about a second and a new one takes longer to set up. But the
+cure was far worse than the disease: it made an open pairing window the single
+state in which an already-bonded computer could not connect at all. A user whose
+computer is not working opens the window precisely *because* it is not working,
+and the window is what keeps it from working.
+
+The exclusion is gone. An open window accepts whoever connects, saved or not,
+the way a mouse in pairing mode does. If a saved computer claims a window opened
+for a new one, the outcome is a working computer and a window the user can open
+again — not two minutes of a computer being refused.
+
+Two related corrections in the same change:
+
+- `mustProvokePairing` no longer sends Insufficient Authorization to a computer
+  already in the list. Such a computer is bonded, needs nothing but to be let
+  in, and the journal shows the error costing it the link in the same second it
+  was sent (`15:01:54 Asking … to pair` / `15:01:54 Outgoing BLE disconnected`).
+  It is also never sent to the host currently being typed on.
+- `HIDHostSession.knownHosts` and its injection in `makeSession` are removed,
+  since nothing reads them any more.
+
+Known consequence, not a bug: opening a window still hands the device to
+whoever connects next, so it ends an established session. The window is for
+adding a computer; connecting one already in the list is what tapping it in the
+list is for.
+
+## Waking a sleeping Mac: what is and is not reachable
+
+Recorded because it keeps coming back, and because the honest answer is that
+this app cannot do it.
+
+macOS decides wake-from-sleep per device, from what the device says it is. A
+`bluetoothctl` read of this phone shows:
+
+```
+Name: iPhone            (GAP Device Name 0x2A00, overriding the advertised name)
+Appearance: 0x0040      (Generic Phone)
+Icon: phone
+```
+
+A mouse reports Appearance 0x03C2 and a keyboard 0x03C1. Neither field is
+reachable from CoreBluetooth:
+
+- The GAP service 0x1800 and Generic Attribute 0x1801 are owned by iOS.
+  `CBPeripheralManager.add(_:)` does not accept them, so Device Name and
+  Appearance cannot be published by an app.
+- Peripheral advertising accepts only `CBAdvertisementDataLocalNameKey` and
+  `CBAdvertisementDataServiceUUIDsKey`. There is no appearance key, and the
+  local name is not what a host reads for the device name once connected.
+- The HID Information RemoteWake bit (2.1.5) and a correct PnP ID are necessary
+  and are already set, but they are not what macOS classifies on.
+
+So the levers that do exist are all on the Mac or outside the direct transport:
+
+1. Check the Mac's own setting — System Settings → Bluetooth → Advanced →
+   "Allow Bluetooth devices to wake this computer", or `pmset -g | grep -i
+   btwake`. It is global, not per device, and if it is off nothing will wake it.
+2. Use the ESP32 bridge transport (`BLEKeyboardBridge`) for a Mac that must be
+   woken. The ESP32 is a real HID device: it publishes its own GAP service with
+   Appearance 0x03C1/0x03C2 and a keyboard name, so macOS classifies it as a
+   wake-capable input device. This is the only route in this project that can
+   actually wake a sleeping Mac, and it is a hardware answer, not a software
+   one.
+3. Wake the Mac by any other means and the direct transport reconnects normally
+   — the bond, the cache and the advertisement all survive sleep since 2.1.7.
