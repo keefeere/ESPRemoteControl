@@ -130,6 +130,20 @@ bare link.
 ./scripts/linux-hid-connect.sh --status
 ```
 
+For the seamless setup, install the per-user reconnect service and audio rule
+in one command after pairing:
+
+```bash
+./scripts/linux-hid-connect.sh --install
+```
+
+The installer copies the helper into `~/.local/libexec`, marks the selected
+phone trusted, enables `esp-remote-hid.service`, and writes a device-specific
+WirePlumber rule. The service continuously restores only HOGP after login,
+adapter restarts, sleep, and wake; the WirePlumber rule keeps the same phone out
+of Linux audio routing without disabling its kernel HID device. Remove both
+pieces with `./scripts/linux-hid-connect.sh --uninstall`.
+
 With no `--device`, the script picks the paired device to use. A computer that
 already has Bluetooth keyboards and mice paired has several devices offering
 HID, so it narrows to the one that also carries phone profiles — audio,
@@ -163,7 +177,8 @@ with a rotating private address, so the address BlueZ stored at bonding and the
 one the kernel recorded need not be the same string. If `--debug` lists the
 phone under a shape that matches neither, that output is what to report.
 
-To run it in the background for a desktop session:
+To run it in the background for a desktop session manually (the `--install`
+command above automates this):
 
 ```bash
 mkdir -p ~/.config/systemd/user

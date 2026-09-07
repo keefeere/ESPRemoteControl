@@ -997,3 +997,19 @@ Report Map is declared `readEncryptionRequired`, so
 is bonded, and `ATT read hidInformation from X: success` with no report-map line
 after it is proof that iOS refused the encrypted attribute. The order of
 attributes a host asks for, and the answer each got, is now on the record.
+
+## Persistent Linux companion setup (2.1.11)
+
+The iPhone side now already behaves like a physical multi-host mouse: its GATT
+table remains stable, every saved outgoing link is kept warm, reports are routed
+only to the selected subscriber, RemoteWake is declared, and advertising stays
+available for reconnect. Linux still owns the host half of that contract, and
+BlueZ does not keep retrying after every desktop-session or profile failure.
+
+`linux-hid-connect.sh --install` turns the existing HID-only connector into a
+durable per-user setup. It installs and enables a supervised `--watch` service,
+trusts the selected bonded phone for unattended reconnect, and installs a
+WirePlumber rule scoped to that phone's BlueZ card. This provides reconnect
+after login, adapter restart, and suspend/resume while preventing Linux audio
+policy from claiming the iPhone. `--uninstall` cleanly removes all installed
+pieces. The app itself continues to publish no audio profile.
