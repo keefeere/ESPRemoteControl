@@ -894,3 +894,72 @@ this app. Wake-from-sleep on macOS is decided per device, and a peer that
 identifies itself as a phone is not treated as a wake-capable input device
 however correct its HID service is. The RemoteWake bit in HID Information
 (2.1.5) is necessary but is not the whole of what macOS looks at.
+
+## What BlueZ's own log says about our ATT answers (2.1.10)
+
+`journalctl -u bluetooth` on the computer, at the exact second the app recorded
+`Asking 5126E502 to pair: answering Insufficient Authorization once`:
+
+```
+16:15:56 dis.c:read_pnpid_cb()          Error reading PNP_ID value: Attribute requires authorization
+16:15:56 hog-lib.c:proto_mode_read_cb() Protocol Mode read failed: Attribute requires authentication
+16:16:27 hog-lib.c:report_ccc_written_cb() Write report descriptor failed: Attribute requires authentication
+```
+
+Two different errors, and the difference is the whole answer:
+
+| ATT error | BlueZ wording | What a client can do about it |
+| --- | --- | --- |
+| `0x08` Insufficient **Authorization** | "requires authorization" | Nothing. Authorization is an application decision; pairing does not change it, so BlueZ logs the failure and stops. |
+| `0x05` Insufficient **Authentication** | "requires authentication" | Pair. This is the error that makes a client start SMP. |
+
+Every refusal this app has ever sent — 2.1.5's, 2.1.6's, and 2.1.8's
+`mustProvokePairing` — used `CBATTError.insufficientAuthorization`, which is
+`0x08`. It could never have provoked a pairing, and the theory that removing it
+in 2.1.7 broke pairing was wrong at the protocol level, not in its details.
+
+2.1.8 made it actively harmful. The nudge fired on the *first* request from a
+new peer, and BlueZ's first request is PnP ID from Device Information — a
+characteristic this app publishes as plain `.readable`, needing no encryption at
+all. Refusing it with an error the client cannot act on aborts the HoG setup
+before it reaches the characteristics that would have produced `0x05`.
+
+The same log also shows that no provocation was ever needed: iOS returns `0x05`
+by itself, correctly, on Protocol Mode and on the report CCC write, because
+those are declared `readEncryptionRequired` and `notifyEncryptionRequired`. The
+app's job in pairing is to stay out of the way.
+
+So `mustProvokePairing` is gone, and with it the last of the app-level
+authorization refusals in the pairing path.
+
+### The one remaining difference in the pairing path
+
+Removing the nudge returns the ATT behaviour to 2.1.7, which also could not
+pair. Eliminating the rest of the 2.1.7 diff against the failure:
+
+- `183ce0c` (suspend) touches `isReady` and `releaseAllInput`; nothing in SMP.
+- `577ae6b` is status strings.
+- `01d6e77` (advertise unconditionally) cannot be it — the computer sees the
+  phone and connects, which the user verified directly.
+- `06fdc5d` (removing the `0x08` answers) cannot be it either, and this one is
+  provable from `allows(_:)` rather than argued: for a *new* peer during an open
+  window, 2.1.6 evaluated `allowsPairing && !knownHosts.contains(id)` to `true`,
+  so it served that peer normally and never sent the error. The commit changed
+  behaviour only for saved-but-not-selected computers.
+
+That leaves `1cf88c3` and `2989d42`, which together removed one thing from the
+pairing path: 2.1.6 opened a window through `rebuildHIDServices`, which dropped
+the outgoing central-role link and republished the entire attribute table.
+Nothing since does either.
+
+2.1.10 restores exactly that, on exactly the path that opens a window —
+`prepareHost` with no host named. It is gated on `id == nil`, because
+`prepareHost` also serves "select this computer" and republishing *there* is
+what made switching cost a rediscovery. Everything else keeps 2.1.7's stable
+table: selecting a computer, a disconnect, an unsubscribe and a return from the
+background all leave it alone.
+
+If pairing works again, the cause is in that pair of commits and can be narrowed
+further. If it does not, the cause is not in the 2.1.6→2.1.7 diff at all, and
+that is worth knowing too — the next measurement is `btmon -w` over the SMP
+exchange, which will show whether iOS sends a Pairing Response and what ends it.
