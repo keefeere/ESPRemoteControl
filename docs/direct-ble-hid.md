@@ -1,5 +1,46 @@
 # Direct BLE HID: v2 research
 
+## Current device-validated baseline — 2026-09-08
+
+**ESP Remote 2.1.14 (42)** is the maintainer-confirmed working baseline for
+reconnection and switching between the tested Linux and Mac computers.
+
+- Release: [ios-v2.1.14](https://github.com/keefeere/ESPRemoteControl/releases/tag/ios-v2.1.14).
+- App source commit: `efb03823e8f5b754caa4818e9bf36cf218fb0edf`
+  ([PR #30](https://github.com/keefeere/ESPRemoteControl/pull/30)).
+- Device feedback: the maintainer explicitly confirmed that reconnections now
+  work as expected and switching computers also works as expected.
+- This is physical-device feedback, in addition to the successful HID tests,
+  simulator tests and IPA build. No measured reconnect latency, test duration,
+  or exhaustive host/power-state matrix was supplied.
+- **Mac wake remains unresolved and unverified.** The maintainer will supply
+  a sleep/wake journal later; reconnection success does not establish wake.
+
+Preserve this baseline when investigating wake. Automatic recovery and the
+ordinary reconnect button must retain the shared GATT services and other hosts'
+pending/connected links. Further changes should be checked against reconnection
+and host switching as well as their specific wake scenario.
+
+### Wake probe destination checked against the released code
+
+`requestWakeProbe()` only queues the Shift press/release when HID is ready and
+`session.host == session.preferredHost`; an outgoing BLE connection alone is
+insufficient. `transmit()` submits reports with
+`onSubscribedCentrals: [host]`, targeting that HID subscriber explicitly.
+The selected computer is the destination, so a Mac probe requires selecting
+the Mac. Suspend does not itself prohibit input. Unsent probes are cleared
+when the input session is changed.
+
+The journal distinguishes:
+- `Wake probe requested`: the button was pressed; this is not a sent report.
+- `Wake probe not sent`: the readiness or input-state checks prevented sending.
+- `Wake probe report accepted by CoreBluetooth`: iOS accepted that report for
+  the named host/UUID; this is not a host-side delivery acknowledgment.
+- `Wake probe submitted`: both reports were accepted locally. Physical delivery
+  and the Mac actually waking still need device evidence.
+
+## Historical initial validation
+
 Reviewed: 2026-09-04. Status: the v2 prototype is implemented. HID report/session
 tests and the Xcode 26.6 iOS build passed for commit `802bb64`, producing version
 2.0.0 (16) ([run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
@@ -1088,8 +1129,10 @@ Disconnect handling remains unchanged: a real disconnect invalidates stale HID
 subscriptions; app-cancelled or failed helper connections retain live HID. The
 new recovery path does not cancel those links.
 
-These are code-level recovery fixes, not proof of Linux reconnection or Mac
-wake. The supplied wake attempts all target KeeFRogBz while HID is not ready;
+At release time these were code-level recovery fixes. The maintainer has since
+confirmed reconnection and host switching on 2.1.14 (42), as recorded at the top
+of this document. Mac wake remains unverified. The supplied 2.1.13 wake attempts
+all target KeeFRogBz while HID is not ready;
 none sends a report to the Mac. A pending phone-initiated request also does not
 prove that Linux is advertising or attempting its own HID connection. Apple's
 [connect documentation](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/connect(_:options:))
