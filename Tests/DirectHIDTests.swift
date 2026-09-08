@@ -10,6 +10,7 @@ struct DirectHIDTests {
         keyboardTransitions()
         mouseTransitions()
         notificationBackpressure()
+        wakeProbe()
         hostSelection()
         disconnectPolicy()
         reconnectWatchdog()
@@ -117,6 +118,25 @@ struct DirectHIDTests {
         check(session.allows(second), "A new computer is what the pairing window is for")
         _ = session.subscribe(.keyboard, from: second)
         check(!session.allows(first), "Pairing stays pinned to the host that claimed it")
+    }
+
+    static func wakeProbe() {
+        let probe = HIDInputState.wakeProbe
+        check(probe.count == 2 && probe.allSatisfy { $0.kind == .keyboard && $0.isWakeProbe }, "Wake probe is a tagged keyboard press/release")
+        check(probe[0].data == Data([2, 0, 0, 0, 0, 0, 0, 0]), "Wake probe presses only left Shift, without typing a character")
+        check(probe[1].data == Data(repeating: 0, count: 8), "Wake probe releases Shift")
+        check(!HIDInputState().keyboard.isWakeProbe, "Ordinary input is not reported as a wake probe")
+        var queue = HIDReportQueue()
+        check(queue.append(probe), "Queue accepts complete wake probe")
+        _ = queue.sendNext { _ in true }
+        _ = queue.sendNext { _ in false }
+        check(queue.count == 1, "Backpressure must retain the wake key release")
+        var delivered: HIDInputReport?
+        _ = queue.sendNext { delivered = $0; return true }
+        check(delivered == probe[1] && queue.isEmpty, "Wake metadata and release survive retry")
+        _ = queue.append(probe)
+        queue.removeAll()
+        check(queue.isEmpty, "A host switch must discard any unsent wake probe")
     }
 
     static func disconnectPolicy() {

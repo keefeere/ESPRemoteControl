@@ -72,6 +72,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var rejectedPeers: Set<UUID> = []
     private var loggedATT: Set<String> = []
     private var loggedOversizedReport = false
+    private var wakeProbeReportsRemaining = 0
+    private var wakeProbeBlocked = false
 
     init(hostKey: String = "directHID.selectedHost") {
         hostStore = HIDHostStore(hostKey: hostKey)
@@ -94,7 +96,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         browser.onPeerDisconnected = { [weak self] id, cause in self?.disconnected(id, cause: cause) }
         browser.onLinkConnected = { [weak self] id in
             guard let self, self.isRunning else { return }
-            self.record("Outgoing BLE link connected: \(id.uuidString.prefix(8))")
+            self.record("Outgoing BLE link connected: \(self.peerTag(id))")
             self.refreshStatus()
         }
     }
@@ -102,9 +104,47 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     var diagnosticText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        let selected = selectedHostID.map { String($0.uuidString.prefix(8)) } ?? "none"
-        let connected = connectedHostID.map { String($0.uuidString.prefix(8)) } ?? "none"
-        return "ESP Remote \(version) (\(build)) · iOS \(UIDevice.current.systemVersion)\n\(statusText)\nSelected: \(selected); HID ready: \(connected)\n" + diagnostics.joined(separator: "\n")
+        let hosts = savedHosts.map { "\(hostName(for: $0.id)) · UUID: \($0.id.uuidString)" }.joined(separator: "\n")
+        return "ESP Remote \(version) (\(build)) · iOS \(UIDevice.current.systemVersion)\n\(statusText)\n"
+            + "Selected: \(peerTag(selectedHostID)); HID ready: \(peerTag(connectedHostID))\n"
+            + "Host identifiers are iOS UUIDs, not Bluetooth MAC addresses.\n\(hosts)\n"
+            + connectionSnapshot + "\n" + diagnostics.joined(separator: "\n")
+    }
+
+    private var connectionSnapshot: String {
+        let ids = Set(savedHosts.map(\.id) + [session.host, session.preferredHost].compactMap { $0 })
+        let links = ids.sorted { $0.uuidString < $1.uuidString }.map { id in
+            let subscriptions = inputs.compactMap { channel, characteristic -> String? in
+                (characteristic.subscribedCentrals ?? []).contains { $0.identifier == id }
+                    ? String(describing: channel) : nil
+            }.sorted().joined(separator: ",")
+            return "Peer \(peerTag(id)): outgoing=\(browser.linkState(for: id)); HID subscriptions=[\(subscriptions)]"
+        }
+        return (["State: selected=\(peerTag(session.preferredHost)); ready=\(isReady); protocol=\(session.bootProtocol ? "boot" : "report"); suspend=\(session.suspended); queued=\(queue.count)"] + links).joined(separator: "\n")
+    }
+
+    func recordConnectionSnapshot() {
+        for line in connectionSnapshot.split(separator: "\n") { record(String(line)) }
+    }
+
+    func requestWakeProbe() {
+        record("Wake probe requested: \(peerTag(session.preferredHost))")
+        recordConnectionSnapshot()
+        guard isReady, afterDrain == nil, session.host == session.preferredHost else {
+            record("Wake probe not sent: selected host has no ready HID session")
+            return
+        }
+        guard queue.isEmpty, wakeProbeReportsRemaining == 0,
+              state.modifiers == 0, state.keys.isEmpty, state.buttons == 0 else {
+            record("Wake probe not sent: release held input and wait for the queue to drain")
+            return
+        }
+        let reports = HIDInputState.wakeProbe
+        guard queue.append(reports) else { return }
+        wakeProbeReportsRemaining = reports.count
+        wakeProbeBlocked = false
+        record("Wake probe queued: Shift press/release to \(peerTag(session.host))")
+        scheduleSend()
     }
 
     func start() {
@@ -181,13 +221,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     func forgetHost(_ id: UUID) {
         guard afterDrain == nil else { return }
+        let forgottenTag = peerTag(id)
         let forget = { [weak self] in
             guard let self else { return }
             self.hostStore.forget(id)
             self.savedHosts = self.hostStore.hosts
             self.browser.forget(id)
             self.browser.setKnownHosts(self.savedHosts)
-            self.record("Forgot host in app: \(self.peerTag(id)); system bond unchanged")
+            self.record("Forgot host in app: \(forgottenTag); system bond unchanged")
         }
         if session.preferredHost == id || hostStore.selectedHostID == id {
             cancelRecovery()
@@ -645,12 +686,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         let first = rejectedPeers.insert(id).inserted
         if first {
             browser.resolveName(for: id)
-            let peerName = browser.resolvedName(for: id) ?? "no name"
             let selected = session.preferredHost
             let link = selected.map { browser.isConnected($0) ? "connected" : "not connected" } ?? "none"
-            record("Refusing \(peerTag(id)) (\(peerName)); selected \(peerTag(selected)) (\(selected.map { hostName(for: $0) } ?? "none")), our link to it \(link)")
+            record("Not routing \(peerTag(id)); selected \(peerTag(selected)); outgoing link to selected host \(link)")
         }
-        if first || repeating { record("Rejected \(action): \(peerTag(id))") }
+        if first || repeating { record("Not routed \(action): \(peerTag(id))") }
     }
 
     private func makeSession(preferredHost: UUID?, allowsPairing: Bool) -> HIDHostSession {
@@ -660,7 +700,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func peerTag(_ id: UUID?) -> String {
-        id.map { String($0.uuidString.prefix(8)) } ?? "none"
+        id.map { "\(hostName(for: $0)) [\($0.uuidString.prefix(8))]" } ?? "none"
     }
 
     private func record(_ event: String) {
@@ -679,7 +719,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func noteATT(_ action: String, _ attribute: String, _ peer: UUID,
                          _ result: String, detail: String = "") {
         if loggedATT.count > 400 { loggedATT.removeAll() }
-        guard loggedATT.insert("\(peerTag(peer))/\(action)/\(attribute)/\(result)").inserted else { return }
+        guard loggedATT.insert("\(peer.uuidString)/\(action)/\(attribute)/\(result)").inserted else { return }
         record("ATT \(action) \(attribute) from \(peerTag(peer)): \(result)"
                + (detail.isEmpty ? "" : " (\(detail))"))
     }
@@ -725,6 +765,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func clearInput() {
+        cancelWakeProbe()
         sendWork?.cancel()
         sendWork = nil
         loggedOversizedReport = false
@@ -736,10 +777,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     func releaseAllInput() {
+        // If a diagnostic Shift press has already been submitted, its release
+        // is necessary even if the host has not sent Exit Suspend yet.
+        let releaseWakeProbe = wakeProbeReportsRemaining == 1
+        cancelWakeProbe()
         // Releasing into a suspended host would wake it for nothing — putting
         // the app in the background must not light up a sleeping computer.
         // Only deliberate input earns a wake.
-        guard !session.suspended else {
+        guard !session.suspended || releaseWakeProbe else {
             clearInput()
             return
         }
@@ -807,9 +852,15 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     }
 
     private func transmit(_ report: HIDInputReport) -> Bool {
-        guard let manager, manager.state == .poweredOn, let host else { return true }
+        guard let manager, manager.state == .poweredOn, let host else {
+            if report.isWakeProbe { cancelWakeProbe() }
+            return true
+        }
         let channel = report.kind == .keyboard ? session.keyboardChannel : session.mouseChannel
-        guard session.subscriptions.contains(channel), let characteristic = inputs[channel] else { return true }
+        guard session.subscriptions.contains(channel), let characteristic = inputs[channel] else {
+            if report.isWakeProbe { cancelWakeProbe() }
+            return true
+        }
         let data = channel == .bootMouse ? Data(report.data.prefix(3)) : report.data
         guard data.count <= host.maximumUpdateValueLength else {
             // Reporting backpressure here would wait for a readiness callback
@@ -819,9 +870,25 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 loggedOversizedReport = true
                 record("Dropped a \(data.count) B report; host accepts \(host.maximumUpdateValueLength) B")
             }
+            if report.isWakeProbe { cancelWakeProbe() }
             return true
         }
-        guard manager.updateValue(data, for: characteristic, onSubscribedCentrals: [host]) else { return false }
+        guard manager.updateValue(data, for: characteristic, onSubscribedCentrals: [host]) else {
+            if report.isWakeProbe, !wakeProbeBlocked {
+                wakeProbeBlocked = true
+                record("Wake probe blocked by CoreBluetooth backpressure: \(peerTag(host.identifier)); report remains queued")
+            }
+            return false
+        }
+        if report.isWakeProbe {
+            record("Wake probe report accepted by CoreBluetooth: \(peerTag(host.identifier)); \(channel), \(data.count) B; suspend=\(session.suspended)")
+            if wakeProbeReportsRemaining > 0 {
+                wakeProbeReportsRemaining -= 1
+                if wakeProbeReportsRemaining == 0 {
+                    record("Wake probe submitted; host delivery and wake are not confirmed")
+                }
+            }
+        }
         if report.kind == .keyboard {
             lastKeyboard = report.data
         } else {
@@ -829,6 +896,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             lastMouse = Data([report.data[0], 0, 0, 0, 0])
         }
         return true
+    }
+
+    private func cancelWakeProbe() {
+        if wakeProbeReportsRemaining > 0 {
+            record("Wake probe interrupted: \(peerTag(session.host)); \(wakeProbeReportsRemaining) reports not submitted")
+        }
+        wakeProbeReportsRemaining = 0
+        wakeProbeBlocked = false
     }
 
     private func enqueue(_ reports: [HIDInputReport]) {
@@ -1068,8 +1143,12 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             // here. Rewinding alone leaves a host that reads the descriptor and
             // then goes quiet — a Mac discovering without attaching HID — with
             // no pending recovery at all.
-            cancelWatchdog(rewind: true)
-            updateWatchdog()
+            // Another saved computer discovering us is not progress toward
+            // the selected one. Its repeated reads must not postpone recovery.
+            if session.allows(peer) {
+                cancelWatchdog(rewind: true)
+                updateWatchdog()
+            }
         case .information: value = RemoteHIDDescriptor.information
         case .battery: value = Data([UInt8(max(0, min(100, Int(UIDevice.current.batteryLevel * 100))))])
         case .manufacturer: value = Data("ESP Remote Control".utf8)
@@ -1136,13 +1215,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             case .leds: leds = value & 0x1F
             case .protocolMode:
                 session.bootProtocol = value == 0
-                record("Protocol: \(value == 0 ? "boot" : "report")")
+                record("Protocol: \(value == 0 ? "boot" : "report"); host \(peerTag(peer))")
                 releaseAllInput()
             case .controlPoint:
                 session.suspended = value == 0
                 record(value == 0
-                    ? "Host entered suspend; input will wake it"
-                    : "Host exited suspend")
+                    ? "Host entered suspend: \(peerTag(peer)); input remains enabled for remote wake"
+                    : "Host exited suspend: \(peerTag(peer))")
                 // Entering suspend drops held keys without transmitting them:
                 // sending here would wake the host the moment it went to sleep.
                 // Exit Suspend is the opposite situation — it is the answer to

@@ -518,12 +518,11 @@ sleeping host, and this one was declaring the opposite. The flags are now
 `0x03`, and the value moved to `RemoteHIDDescriptor.information` so the bits are
 covered by `Tests/DirectHIDTests.swift`.
 
-Confirmed on device: with 2.1.5 the Mac wakes from sleep for the app, which it
-did not do while the flag was clear. That establishes the flag as the cause of
-the original symptom, and that macOS honours it without any per-device setup on
-this pair. It does not establish the same for other hosts — remote wake still
-depends on the host's own policy, and macOS keeps a per-device wake allowlist —
-so Windows and Linux need their own check.
+An earlier device report was recorded as successful wake with 2.1.5. The
+2.1.12 (40) report says Mac wake still fails, so that observation does not
+establish a reliable fix or isolate the original cause. RemoteWake remains set;
+we still need a sleep-time trace of the link, subscriptions, notification
+submission, and host behavior.
 
 Waking is not instant: the host has to wake, reconnect and resubscribe, so
 input returns after some seconds rather than immediately. That delay is the
@@ -889,11 +888,10 @@ mouse reports 0x03C2 and a keyboard 0x03C1. Neither value is settable from
 CoreBluetooth: the advertised local name is the only name this app controls,
 and Appearance is not exposed at all.
 
-That is the most likely reason a Mac wakes for a physical mouse and not for
-this app. Wake-from-sleep on macOS is decided per device, and a peer that
-identifies itself as a phone is not treated as a wake-capable input device
-however correct its HID service is. The RemoteWake bit in HID Information
-(2.1.5) is necessary but is not the whole of what macOS looks at.
+The phone appearance is a possible difference from a physical mouse, not proof
+that macOS refuses wake because of it. The discovery dump alone does not show
+the Mac's wake decision. Do not attribute the failure to appearance or an
+allowlist without a corresponding host-side trace.
 
 ## What BlueZ's own log says about our ATT answers (2.1.10)
 
@@ -1013,3 +1011,55 @@ WirePlumber rule scoped to that phone's BlueZ card. This provides reconnect
 after login, adapter restart, and suspend/resume while preventing Linux audio
 policy from claiming the iPhone. `--uninstall` cleanly removes all installed
 pieces. The app itself continues to publish no audio profile.
+
+## Host retry and wake diagnostics after 2.1.12
+
+The 2.1.12 (40) report describes intermittent host switching and failed Mac
+wake. Its host identifiers are shortened iOS CoreBluetooth UUIDs, not Bluetooth
+MAC addresses. The sample shows a link ending with an ATT indication timeout,
+then a saved Linux host reconnecting while another host is selected. Switching
+back to Linux adopts its existing subscriptions immediately. The sample does
+not capture a failed return to Linux, or an attempted Mac wake. The indication
+error alone does not identify which indication timed out.
+
+Two code defects can nevertheless strand a connection attempt:
+
+- `maintainLinks` does not set `requestedHost`, but `didFailToConnect` only
+  handled that one ID. Failures for maintained peers were silently ignored.
+  Both failed and disconnected maintained peers now get an independent retry
+  with a capped backoff. Already pending or connected peers are left alone,
+  and forgetting a peer, stopping the browser, or losing Bluetooth power
+  cancels the associated retry work.
+- A report-map read from an unselected host reset the selected host's recovery
+  watchdog. Such reads still receive normal ATT answers, but only an allowed
+  host can reset that timer.
+
+Pairing rows now display full UUIDs with a copy action. The quick picker and
+all peer events include a name and short UUID. Exported diagnostics include a
+full name/UUID mapping plus the outgoing BLE state and report subscriptions for
+each saved peer. Outgoing connectivity and HID readiness remain separate facts.
+
+The explicit wake probe queues a Shift press and release through the normal
+FIFO and sends only to the selected HID subscriber. It logs missing readiness,
+backpressure, each report accepted by CoreBluetooth, and interrupted attempts.
+It never stores a probe for delivery after a future reconnect or host switch.
+Acceptance by `updateValue` is local submission, not an acknowledgment from
+macOS and not proof of wake. Report metadata used for these logs is local only;
+the HID descriptor and payload sizes are unchanged.
+
+Physical acceptance checks:
+
+1. Switch Linux → Mac → Linux several times. If a link fails, check for a named
+   retry and then HID subscriptions; there should be no routine GATT rebuild.
+2. With Mac selected and HID ready, put it to sleep using Apple menu → Sleep,
+   initially with its lid open. Keep ESP Remote visible on the iPhone.
+3. Press «Спробувати пробудити» once, wait several seconds, then export the
+   journal. If it stays asleep, wake it manually and record that observation.
+4. Distinguish no HID session, a queued report blocked by iOS, and two locally
+   accepted reports without wake. The last case requires a Mac-side Bluetooth
+   capture (Apple PacketLogger) and sleep/wake evidence to investigate delivery
+   and host policy; it does not justify another descriptor or appearance fix.
+
+The Swift tests cover the Shift-only payload, its release surviving FIFO
+backpressure, local diagnostic tagging, and queue clearing between sessions.
+Actual BLE recovery and Mac wake require the physical checks above.

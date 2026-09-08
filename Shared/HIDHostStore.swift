@@ -10,6 +10,8 @@ struct SavedHIDHost: Codable, Identifiable, Equatable {
     var name: String {
         customName ?? discoveredName ?? "Комп’ютер · \(id.uuidString.prefix(8))"
     }
+
+    var diagnosticName: String { "\(name) [\(id.uuidString.prefix(8))]" }
 }
 
 /// App-local host selection, not the system Bluetooth bond database. The Share

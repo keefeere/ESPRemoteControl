@@ -10,12 +10,24 @@ enum HIDReportKind: UInt8 {
 struct HIDInputReport: Equatable {
     let kind: HIDReportKind
     let data: Data
+    // Local metadata only; it is never included in the Bluetooth payload.
+    var isWakeProbe = false
 }
 
 struct HIDInputState {
     private(set) var modifiers: UInt8 = 0
     private(set) var keys: [UInt8] = []
     private(set) var buttons: UInt8 = 0
+
+    /// A deliberate wake attempt sends a Shift press and release, without
+    /// typing a character or activating a button on the sleeping computer.
+    static var wakeProbe: [HIDInputReport] {
+        HIDInputState().tap(0, modifiers: 0x02).map { report in
+            var tagged = report
+            tagged.isWakeProbe = true
+            return tagged
+        }
+    }
 
     var keyboard: HIDInputReport {
         let usages = keys.count > 6 ? [UInt8](repeating: 1, count: 6)

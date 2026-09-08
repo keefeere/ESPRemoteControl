@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ConnectionStatusView: View {
     @ObservedObject var input: RemoteInputController
@@ -39,11 +40,11 @@ struct ConnectionStatusView: View {
                             ForEach(direct.savedHosts) { host in
                                 Button { direct.connect(to: host.id) } label: {
                                     if direct.connectedHostID == host.id {
-                                        Label(host.name, systemImage: "checkmark")
+                                        Label(host.diagnosticName, systemImage: "checkmark")
                                     } else if direct.selectedHostID == host.id {
-                                        Label("\(host.name) · очікуємо", systemImage: "clock")
+                                        Label("\(host.diagnosticName) · очікуємо", systemImage: "clock")
                                     } else {
-                                        Text(host.name)
+                                        Text(host.diagnosticName)
                                     }
                                 }
                                 .disabled(!direct.canPair)
@@ -143,6 +144,8 @@ private struct DirectBluetoothSheet: View {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(host.name)
+                                            Text("UUID: \(host.id.uuidString)")
+                                                .font(.caption2.monospaced()).foregroundStyle(.secondary)
                                             Text(hostStatus(host.id))
                                                 .font(.caption).foregroundStyle(.secondary)
                                         }
@@ -157,6 +160,9 @@ private struct DirectBluetoothSheet: View {
                                 }
                                 .disabled(!transport.canPair)
                                 Menu {
+                                    Button("Копіювати UUID", systemImage: "doc.on.doc") {
+                                        UIPasteboard.general.string = host.id.uuidString
+                                    }
                                     Button("Перейменувати", systemImage: "pencil") {
                                         editedName = host.customName ?? host.discoveredName ?? ""
                                         hostToRename = host
@@ -175,7 +181,7 @@ private struct DirectBluetoothSheet: View {
                     } header: {
                         Text("Мої комп’ютери")
                     } footer: {
-                        Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯. Для зміни комп’ютера іноді потрібно від’єднати iPhone від попереднього в налаштуваннях Bluetooth.")
+                        Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯. UUID — ідентифікатор у цьому iPhone; справжню Bluetooth MAC-адресу iOS застосунку не надає.")
                     }
                 }
                 Section("Сполучення з комп’ютера") {
@@ -211,6 +217,8 @@ private struct DirectBluetoothSheet: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(device.name)
+                                    Text("UUID: \(device.id.uuidString)")
+                                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
                                     if let signal = device.signal {
                                         Text("\(signal) dBm").font(.caption2).foregroundStyle(.secondary)
                                     }
@@ -224,13 +232,29 @@ private struct DirectBluetoothSheet: View {
                             }
                         }
                         .disabled(!transport.canPair || !device.isConnectable)
+                        .contextMenu {
+                            Button("Копіювати UUID", systemImage: "doc.on.doc") {
+                                UIPasteboard.general.string = device.id.uuidString
+                            }
+                        }
                     }
                 }
+                Section("Пробудження комп’ютера") {
+                    Button("Спробувати пробудити", systemImage: "sun.max") {
+                        transport.requestWakeProbe()
+                    }
+                    .disabled(!transport.canPair || transport.selectedHostID == nil)
+                    Text("Надсилає натискання й відпускання Shift вибраному комп’ютеру, якщо HID підключено. Перевір, чи він прокинувся; результат відправлення буде в журналі.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Журнал підключення") {
+                    Button("Записати поточний стан", systemImage: "list.bullet.clipboard") {
+                        transport.recordConnectionSnapshot()
+                    }
                     ShareLink(item: transport.diagnosticText) {
                         Label("Поділитися журналом", systemImage: "square.and.arrow.up")
                     }
-                    Text("Журнал містить етапи підключення, назву та скорочений ідентифікатор комп’ютера, без введеного тексту.")
+                    Text("Журнал містить назви й UUID комп’ютерів, стан BLE та HID, етапи підключення і спроби пробудження, без введеного тексту.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(Array(transport.diagnostics.suffix(12).enumerated()), id: \.offset) { _, line in
                         Text(line).font(.caption2.monospaced()).textSelection(.enabled)
