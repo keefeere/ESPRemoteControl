@@ -302,15 +302,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard isRunning, afterDrain == nil else { return }
         cancelRecovery()
         watchdog.reset()
-        let preferred = session.preferredHost ?? hostStore.selectedHostID
         drainReleases { [weak self] in
             guard let self, self.isRunning else { return }
             self.lastError = nil
-            self.restartBluetoothStack(
-                preferredHost: preferred,
-                allowsPairing: self.isPairing,
-                reason: "Manual full Bluetooth restart"
-            )
+            self.record("Manual reconnect; preserving Bluetooth managers, services and host links")
+            self.retryHostLinks()
         }
     }
 
@@ -389,41 +385,13 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         return true
     }
 
-    private func restartBluetoothStack(
-        preferredHost: UUID?,
-        allowsPairing: Bool,
-        reason: String
-    ) {
-        guard isRunning else { return }
-        cancelRecovery()
-        pairingTimer?.cancel()
-        manager?.stopAdvertising()
-        manager?.removeAllServices()
-        manager?.delegate = nil
-        manager = nil
-        browser.stop()
-        advertising = HIDAdvertisingState()
-        advertisingError = nil
-        advertisingFailures = 0
-        servicesInstalled = false
-        serviceQueue.removeAll()
-        addingService = nil
-        inputs.removeAll()
-        attributes.removeAll()
-        canPair = false
-        host = nil
-        session = makeSession(preferredHost: preferredHost, allowsPairing: allowsPairing)
-        clearInput()
-        connectedHostID = nil
-        lastReadyHostID = nil
-        isReady = false
-        statusText = "Перезапускаємо Bluetooth…"
-        browser.setKnownHosts(hostStore.hosts)
-        record("\(reason); rebuilding Bluetooth managers; selected \(peerTag(preferredHost))")
-        browser.start()
-        // Cover the restart itself: a manager that never reaches poweredOn
-        // produces no callback, and no other timer is watching this window.
-        updateWatchdog()
+    /// Recover only ended requests. Waiting for one computer must not destroy
+    /// the GATT services and subscribed centrals shared with all other hosts.
+    private func retryHostLinks() {
+        browser.maintainLinks(to: hostStore.hosts.map(\.id))
+        restartAdvertising()
+        recordConnectionSnapshot()
+        refreshStatus()
     }
 
     private func cancelRecovery() {
@@ -431,8 +399,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         advertisingRetry = nil
         watchdogWork?.cancel()
         watchdogWork = nil
-        // The ladder itself is not rewound here: every escalation calls this,
-        // and resetting the attempt count would make recovery loop forever.
+        // Cancelling work does not rewind the bounded recovery schedule.
     }
 
     /// Schedules the next escalation whenever the transport wants to be
@@ -446,9 +413,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             return
         }
         // Bluetooth being off or unauthorised is not something recovery can
-        // repair, and powering on republishes services anyway. A manager that
-        // does not exist yet is different: that is the window a stalled
-        // restart never leaves on its own.
+        // repair; wait for the manager's powered-on callback in that case.
         if let state = manager?.state, state != .poweredOn {
             cancelWatchdog(rewind: true)
             return
@@ -473,19 +438,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func runWatchdogStep(_ step: HIDReconnectWatchdog.Step) {
         guard isRunning else { return }
         guard !session.isReady, afterDrain == nil else { refreshStatus(); return }
-        let preferred = session.preferredHost ?? hostStore.selectedHostID
         let position = "\(watchdog.attempt)/\(HIDReconnectWatchdog.schedule.count)"
         switch step {
         case .restartAdvertising:
             record("Recovery \(position): reissuing the HID advertisement")
             restartAdvertising()
-        case .restartStack:
-            record("Recovery \(position): rebuilding the Bluetooth managers")
-            restartBluetoothStack(
-                preferredHost: preferred,
-                allowsPairing: isPairing,
-                reason: "Automatic Bluetooth restart after no HID subscriptions"
-            )
+        case .retryLinks:
+            record("Recovery \(position): checking host links; preserving HID services and subscriptions")
+            retryHostLinks()
         }
         refreshStatus()
     }
@@ -577,7 +537,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     /// invalidates that cache on every host at once and costs a full
     /// rediscovery — seconds where there should be none — so switching
     /// computers, closing a pairing window and recovering a stalled link all
-    /// leave this table alone. Only a full stack rebuild reaches here again.
+    /// leave this table alone. Startup, Bluetooth power restoration and an
+    /// explicitly opened new-pairing window may publish it again.
     private func installServices() {
         guard let manager, manager.state == .poweredOn else { return }
         canPair = false
@@ -1005,8 +966,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         // Nothing is torn down here. A computer that closed the link still
         // holds its bond and its cached database, so it can come back in about
         // a second; rebuilding the stack half a second later took that away and
-        // forced a full rediscovery. `refreshStatus` arms the ladder, whose own
-        // last rung rebuilds if the computer really never returns.
+        // forced a full rediscovery. Recovery now keeps the shared database
+        // intact even when the selected computer never returns.
         refreshStatus()
     }
 
