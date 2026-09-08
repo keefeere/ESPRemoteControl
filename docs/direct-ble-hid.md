@@ -1063,3 +1063,50 @@ Physical acceptance checks:
 The Swift tests cover the Shift-only payload, its release surviving FIFO
 backpressure, local diagnostic tagging, and queue clearing between sessions.
 Actual BLE recovery and Mac wake require the physical checks above.
+
+## Preserve existing HID links during recovery (2.1.14 / build 42)
+
+The 2.1.13 device log shows KeeFRogBz remaining in outgoing `connecting`
+with no ATT requests or HID subscriptions. The Mac initially reaches HID
+ready. After Linux is selected, the global watchdog rebuilds both Bluetooth
+managers at 13:56:04 and again at 13:57:22, in addition to the user's manual
+restarts. Each rebuild removes the shared services and subscription objects.
+The new peripheral's powered-on callback also rewinds the watchdog, so its
+supposedly one-time final reset can repeat indefinitely. The 2.1.13 change
+that stops another host's descriptor reads postponing recovery exposes this
+existing destructive recovery path more readily.
+
+Recovery now refreshes advertising and rearms ended outgoing requests without
+recreating either manager or removing any HID service. Pending and connected
+requests for every saved computer stay in place. The reconnect button uses
+the same non-destructive path. Recovery stops after its bounded attempts while
+advertising and existing connection requests remain active. Switching direct
+Bluetooth off and on still explicitly stops and starts the transport; opening
+a new-pairing window retains its existing service-publication behavior.
+
+Disconnect handling remains unchanged: a real disconnect invalidates stale HID
+subscriptions; app-cancelled or failed helper connections retain live HID. The
+new recovery path does not cancel those links.
+
+These are code-level recovery fixes, not proof of Linux reconnection or Mac
+wake. The supplied wake attempts all target KeeFRogBz while HID is not ready;
+none sends a report to the Mac. A pending phone-initiated request also does not
+prove that Linux is advertising or attempting its own HID connection. Apple's
+[connect documentation](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/connect(_:options:))
+states that pending connection attempts do not time out.
+
+Device checks for this build:
+
+1. Establish HID on each computer, then switch Mac → Linux → Mac. Leave one
+   selected and unavailable for over 70 seconds. There must be no automatic
+   manager/service rebuild; the other computer's subscriptions must survive.
+2. Press reconnect while one computer is unavailable. The journal should show
+   `Manual reconnect; preserving Bluetooth managers, services and host links`.
+3. With the Mac selected and HID ready, put it to sleep, press the wake probe,
+   and export the journal including the sleep transition and probe outcome.
+4. If Linux still never sends an ATT request, capture its BlueZ/HID reconnect
+   state. This phone-only trace cannot identify the reason the host is silent.
+
+Regression tests cover exhausting recovery without an automatic manager reset
+and restarting its bounded schedule on explicit progress. Existing tests still
+cover physical-disconnect invalidation, helper-failure isolation and wake input.

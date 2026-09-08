@@ -154,28 +154,20 @@ enum HIDDisconnectPolicy {
     }
 }
 
-/// Escalating repair for a direct HID link that never becomes ready. Every other
-/// recovery path is edge triggered: a disconnect, an unsubscribe, or a return
-/// from the background. A computer that simply stops reconnecting produces no
-/// such edge, which left relaunching the app as the only repair. Steps run once
-/// each, cheapest first, and evidence of progress resets the ladder.
+/// Bounded recovery without destroying the shared GATT database. An absent
+/// selected host must not tear down another computer's HID or wake connection.
 struct HIDReconnectWatchdog {
     enum Step: Equatable {
         /// Reissue the advertisement. A failed or stalled start otherwise
         /// leaves the phone invisible, and an invisible phone is unreachable.
         case restartAdvertising
-        /// Recreate both CoreBluetooth managers: the in-app equivalent of the
-        /// relaunch users perform by hand today. The GATT database is rebuilt
-        /// as a side effect, so every host has to rediscover it — which is why
-        /// nothing else in the app republishes, and why this is the last rung.
-        case restartStack
+        /// Rearm ended outgoing requests and record the current HID state.
+        /// Pending/connected requests and the published services stay intact.
+        case retryLinks
     }
 
-    /// Seconds to wait before each escalation. A physical mouse reconnects
-    /// instantly because its attribute table never changes: the host keeps its
-    /// cached copy and only has to re-establish the link. The app now behaves
-    /// the same, which leaves exactly two useful repairs — make the phone
-    /// visible again, and, far later, rebuild everything.
+    /// Wait before each attempt. After these attempts, keep advertising and
+    /// holding pending links; an offline host does not justify a stack reset.
     static let schedule: [TimeInterval] = [5, 30]
 
     private(set) var attempt = 0
@@ -185,14 +177,14 @@ struct HIDReconnectWatchdog {
 
     /// The next escalation, or nil once the ladder is exhausted. An open
     /// pairing window with no selected host has nothing to reconnect to, so it
-    /// only repairs visibility; rebuilding the stack would close the window.
+    /// only repairs visibility.
     mutating func next(pairingOnly: Bool) -> (step: Step, delay: TimeInterval)? {
         guard !isExhausted else { return nil }
         let delay = Self.schedule[attempt]
         let step: Step
         switch attempt {
         case 0: step = .restartAdvertising
-        default: step = .restartStack
+        default: step = .retryLinks
         }
         attempt += 1
         return (pairingOnly ? .restartAdvertising : step, delay)

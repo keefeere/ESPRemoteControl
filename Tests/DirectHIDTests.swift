@@ -171,14 +171,14 @@ struct DirectHIDTests {
             steps.append(next.step)
             delays.append(next.delay)
         }
-        check(steps == [.restartAdvertising, .restartStack],
-              "Recovery escalates from visibility straight to a rebuilt stack")
-        check(steps.filter { $0 == .restartStack }.count == 1 && steps.last == .restartStack,
-              "Rebuilding the stack invalidates every host's cache, so it happens once, last")
+        check(steps == [.restartAdvertising, .retryLinks],
+              "An unavailable selected host only triggers visibility and outgoing-link retries")
         check(delays == HIDReconnectWatchdog.schedule, "Escalations follow the documented backoff")
         check(delays[0] < delays[1], "Recovery backs off instead of fighting the host")
         check(delays[0] <= 5, "The cheap repair happens inside the five seconds a switch is allowed")
-        check(watchdog.isExhausted, "Recovery stops instead of restarting Bluetooth forever")
+        check(watchdog.isExhausted, "Recovery stops without restarting the shared Bluetooth managers")
+        check(watchdog.next(pairingOnly: false) == nil,
+              "Waiting longer for an offline host never escalates to a database rebuild")
 
         watchdog.reset()
         check(!watchdog.isExhausted, "Evidence of progress restores the full ladder")
