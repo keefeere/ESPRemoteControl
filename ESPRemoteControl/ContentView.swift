@@ -10,6 +10,7 @@ struct ContentView: View {
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
     @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.controlSpace.rawValue
+    @AppStorage("developerMode") private var developerMode = false
 
     @State private var inputText = ""
     @State private var wantsFocus = false
@@ -363,6 +364,12 @@ struct ContentView: View {
                     ConnectionStatusView(input: ble)
                 }
 
+                Section {
+                    Toggle("Режим розробника", isOn: $developerMode)
+                } footer: {
+                    Text("Показує журнал підключення, ідентифікатори пристроїв і засоби діагностики Bluetooth.")
+                }
+
                 Section("Shortcuts") {
                     Text("Щоб надсилати з меню Share, у Shortcuts додай дію «Send to ESP», підстав «Shortcut Input» у поле Text і в Details увімкни Show in Share Sheet.")
                         .font(.caption)
@@ -398,7 +405,7 @@ struct ContentView: View {
     private var appVersion: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
-        return "\(version) (\(build))"
+        return developerMode ? "\(version) (\(build))" : version
     }
 
     private var layoutBinding: Binding<KeyboardLayout> {

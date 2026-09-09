@@ -244,7 +244,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         let entry = BluetoothHostCandidate(
             id: peer.identifier,
-            name: resolvedName(for: peer.identifier) ?? previous?.name ?? "Без назви · \(peer.identifier.uuidString.prefix(8))",
+            name: resolvedName(for: peer.identifier) ?? previous?.name ?? "Комп’ютер без назви",
             signal: signal ?? previous?.signal,
             isConnectable: connectable
         )

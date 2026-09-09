@@ -6,6 +6,7 @@ struct ConnectionStatusView: View {
     @ObservedObject private var direct: DirectHIDTransport
     var compact = false
     @State private var showsBluetooth = false
+    @AppStorage("developerMode") private var developerMode = false
 
     init(input: RemoteInputController, compact: Bool = false) {
         self.input = input
@@ -40,11 +41,11 @@ struct ConnectionStatusView: View {
                             ForEach(direct.savedHosts) { host in
                                 Button { direct.connect(to: host.id) } label: {
                                     if direct.connectedHostID == host.id {
-                                        Label(host.diagnosticName, systemImage: "checkmark")
+                                        Label(developerMode ? host.diagnosticName : host.name, systemImage: "checkmark")
                                     } else if direct.selectedHostID == host.id {
-                                        Label("\(host.diagnosticName) · очікуємо", systemImage: "clock")
+                                        Label("\(developerMode ? host.diagnosticName : host.name) · очікуємо", systemImage: "clock")
                                     } else {
-                                        Text(host.diagnosticName)
+                                        Text(developerMode ? host.diagnosticName : host.name)
                                     }
                                 }
                                 .disabled(!direct.canPair)
@@ -62,7 +63,7 @@ struct ConnectionStatusView: View {
                 .layoutPriority(1)
                 .disabled(input.isSwitching)
                 .accessibilityLabel("Вибрати комп’ютер")
-                .accessibilityValue(input.statusText)
+                .accessibilityValue(displayStatus)
                 .accessibilityHint("Показати збережені комп’ютери")
             } else {
                 statusLabel
@@ -110,11 +111,18 @@ struct ConnectionStatusView: View {
     }
 
     private var statusLabel: some View {
-        Text(input.statusText)
+        Text(displayStatus)
             .font(compact ? .caption2 : .caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var displayStatus: String {
+        if !developerMode, input.mode == .bluetooth, let id = direct.selectedHostID {
+            return direct.hostName(for: id)
+        }
+        return input.statusText
     }
 }
 
@@ -125,14 +133,15 @@ private struct DirectBluetoothSheet: View {
     @State private var hostToRename: SavedHIDHost?
     @State private var hostToForget: SavedHIDHost?
     @State private var editedName = ""
+    @AppStorage("developerMode") private var developerMode = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Label(transport.statusText, systemImage: transport.isReady ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
+                    Label(developerMode ? transport.statusText : transport.statusText.replacingOccurrences(of: "HID готовий", with: "Підключено"), systemImage: transport.isReady ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
                         .foregroundStyle(transport.isReady ? .green : .primary)
-                    if let error = transport.lastError {
+                    if developerMode, let error = transport.lastError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
                 }
@@ -144,8 +153,10 @@ private struct DirectBluetoothSheet: View {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(host.name)
-                                            Text("UUID: \(host.id.uuidString)")
-                                                .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                            if developerMode {
+                                                Text("UUID: \(host.id.uuidString)")
+                                                    .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                            }
                                             Text(hostStatus(host.id))
                                                 .font(.caption).foregroundStyle(.secondary)
                                         }
@@ -160,8 +171,10 @@ private struct DirectBluetoothSheet: View {
                                 }
                                 .disabled(!transport.canPair)
                                 Menu {
-                                    Button("Копіювати UUID", systemImage: "doc.on.doc") {
-                                        UIPasteboard.general.string = host.id.uuidString
+                                    if developerMode {
+                                        Button("Копіювати UUID", systemImage: "doc.on.doc") {
+                                            UIPasteboard.general.string = host.id.uuidString
+                                        }
                                     }
                                     Button("Перейменувати", systemImage: "pencil") {
                                         editedName = host.customName ?? host.discoveredName ?? ""
@@ -181,33 +194,43 @@ private struct DirectBluetoothSheet: View {
                     } header: {
                         Text("Мої комп’ютери")
                     } footer: {
-                        Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯. UUID — ідентифікатор у цьому iPhone; справжню Bluetooth MAC-адресу iOS застосунку не надає.")
+                        Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯.")
+                        if developerMode {
+                            Text("UUID — ідентифікатор у цьому iPhone; справжню Bluetooth MAC-адресу iOS застосунку не надає.")
+                        }
                     }
                 }
                 Section("Сполучення з комп’ютера") {
                     Text("У налаштуваннях Bluetooth комп’ютера вибери «\(transport.advertisedName)» або ім’я цього iPhone. Підтвердь системний запит, якщо він з’явиться.")
                         .font(.subheadline)
-                    Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу, запусти на комп’ютері:")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("./scripts/linux-hid-connect.sh")
-                        .font(.caption2.monospaced()).textSelection(.enabled)
-                    Text("Скрипт сам знаходить адресу iPhone. Вручну її покаже bluetoothctl devices Paired, далі bluetoothctl connect <адреса> 00001812-…. Підставити адресу сюди не можна: iOS не дає застосункам Bluetooth-адресу пристрою.")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    if developerMode {
+                        Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу, запусти на комп’ютері:")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("./scripts/linux-hid-connect.sh")
+                            .font(.caption2.monospaced()).textSelection(.enabled)
+                        Text("Скрипт сам знаходить адресу iPhone. Вручну її покаже bluetoothctl devices Paired, далі bluetoothctl connect <адреса> 00001812-…. Підставити адресу сюди не можна: iOS не дає застосункам Bluetooth-адресу пристрою.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     Button(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення") {
                         transport.beginPairing()
                     }
                     .disabled(!transport.canPair)
                 }
                 Section("Сполучення з iPhone") {
-                    Text("Якщо Mac уже знає iPhone й не показує його як клавіатуру, відкрий Bluetooth на Mac, запусти пошук тут і вибери Mac. Комп’ютер має бути доступний через Bluetooth LE.")
-                        .font(.subheadline)
-                    Text("Linux тут зазвичай не з’являється: комп’ютер під BlueZ сам не рекламує себе через Bluetooth LE, тому знайти його з iPhone неможливо. З’єднання завжди починає комп’ютер, а iPhone лише лишається видимим.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if developerMode {
+                        Text("Якщо Mac уже знає iPhone й не показує його як клавіатуру, відкрий Bluetooth на Mac, запусти пошук тут і вибери Mac. Комп’ютер має бути доступний через Bluetooth LE.")
+                            .font(.subheadline)
+                        Text("Linux тут зазвичай не з’являється: комп’ютер під BlueZ сам не рекламує себе через Bluetooth LE, тому знайти його з iPhone неможливо. З’єднання завжди починає комп’ютер, а iPhone лише лишається видимим.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Натисни «Знайти комп’ютер» і вибери Mac зі списку. Для Linux починай сполучення з комп’ютера.")
+                            .font(.subheadline)
+                    }
                     Button(browser.isScanning ? "Зупинити пошук" : "Знайти комп’ютер") {
                         if browser.isScanning { browser.stopScan() } else { browser.scan() }
                     }
                     .disabled(!transport.canPair)
-                    if !browser.statusText.isEmpty {
+                    if developerMode, !browser.statusText.isEmpty {
                         Text(browser.statusText).font(.caption).foregroundStyle(.secondary)
                     }
                     ForEach(browser.devices.filter { device in !transport.savedHosts.contains { $0.id == device.id } }) { device in
@@ -217,10 +240,12 @@ private struct DirectBluetoothSheet: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(device.name)
-                                    Text("UUID: \(device.id.uuidString)")
-                                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
-                                    if let signal = device.signal {
-                                        Text("\(signal) dBm").font(.caption2).foregroundStyle(.secondary)
+                                    if developerMode {
+                                        Text("UUID: \(device.id.uuidString)")
+                                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                        if let signal = device.signal {
+                                            Text("\(signal) dBm").font(.caption2).foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
                                 Spacer()
@@ -233,31 +258,35 @@ private struct DirectBluetoothSheet: View {
                         }
                         .disabled(!transport.canPair || !device.isConnectable)
                         .contextMenu {
-                            Button("Копіювати UUID", systemImage: "doc.on.doc") {
-                                UIPasteboard.general.string = device.id.uuidString
+                            if developerMode {
+                                Button("Копіювати UUID", systemImage: "doc.on.doc") {
+                                    UIPasteboard.general.string = device.id.uuidString
+                                }
                             }
                         }
                     }
                 }
-                Section("Пробудження комп’ютера") {
-                    Button("Спробувати пробудити", systemImage: "sun.max") {
-                        transport.requestWakeProbe()
+                if developerMode {
+                    Section("Пробудження комп’ютера") {
+                        Button("Спробувати пробудити", systemImage: "sun.max") {
+                            transport.requestWakeProbe()
+                        }
+                        .disabled(!transport.canPair || transport.selectedHostID == nil)
+                        Text("Надсилає натискання й відпускання Shift вибраному комп’ютеру, якщо HID підключено. Перевір, чи він прокинувся; результат відправлення буде в журналі.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .disabled(!transport.canPair || transport.selectedHostID == nil)
-                    Text("Надсилає натискання й відпускання Shift вибраному комп’ютеру, якщо HID підключено. Перевір, чи він прокинувся; результат відправлення буде в журналі.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("Журнал підключення") {
-                    Button("Записати поточний стан", systemImage: "list.bullet.clipboard") {
-                        transport.recordConnectionSnapshot()
-                    }
-                    ShareLink(item: transport.diagnosticText) {
-                        Label("Поділитися журналом", systemImage: "square.and.arrow.up")
-                    }
-                    Text("Журнал містить назви й UUID комп’ютерів, стан BLE та HID, етапи підключення і спроби пробудження, без введеного тексту.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    ForEach(Array(transport.diagnostics.suffix(12).enumerated()), id: \.offset) { _, line in
-                        Text(line).font(.caption2.monospaced()).textSelection(.enabled)
+                    Section("Журнал підключення") {
+                        Button("Записати поточний стан", systemImage: "list.bullet.clipboard") {
+                            transport.recordConnectionSnapshot()
+                        }
+                        ShareLink(item: transport.diagnosticText) {
+                            Label("Поділитися журналом", systemImage: "square.and.arrow.up")
+                        }
+                        Text("Журнал містить назви й UUID комп’ютерів, стан BLE та HID, етапи підключення і спроби пробудження, без введеного тексту.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(transport.diagnostics.suffix(12).enumerated()), id: \.offset) { _, line in
+                            Text(line).font(.caption2.monospaced()).textSelection(.enabled)
+                        }
                     }
                 }
             }
