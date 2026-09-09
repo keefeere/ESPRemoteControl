@@ -178,6 +178,8 @@ enum HID {
     static let keyLeftArrow: UInt8 = 0x50
     static let keyDownArrow: UInt8 = 0x51
     static let keyUpArrow: UInt8 = 0x52
+    static let keyApplication: UInt8 = 0x65
+    static let keyPower: UInt8 = 0x66
 
     private static let englishUSMap = makeEnglishUSMap()
     private static let ukrainianEnhancedMap = makeUkrainianEnhancedMap()
