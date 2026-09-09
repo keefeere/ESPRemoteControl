@@ -39,6 +39,38 @@ The journal distinguishes:
 - `Wake probe submitted`: both reports were accepted locally. Physical delivery
   and the Mac actually waking still need device evidence.
 
+## Developer mode — 2.1.15 (43)
+
+Settings now includes **Режим розробника**, off by default and persisted across
+launches. Normal mode shows computer names without UUID labels. Developer mode
+reveals UUIDs and their copy actions, scan signal strength, technical pairing
+instructions, the wake probe, and the connection journal/export. The build
+number is also shown only in developer mode.
+
+Logging continues while hidden so enabling the setting can expose preceding
+connection events. Toggling it does not restart Bluetooth or change host routing,
+recovery, pairing, or report delivery. Unnamed hosts use a plain fallback name;
+they can still be renamed and retain their original UUID identity.
+
+## Dual-boot observations — 2026-09-09
+
+On 2.1.14 (42), Windows input reportedly worked on the same physical computer
+previously paired under Linux. The saved name changed from KeeFRogBz to
+KEEFROGWIN while the iOS UUID remained the same. After returning to Linux,
+connection failed; pairing again under Linux restored operation. Returning to
+Windows after that new Linux pairing has not yet been tested.
+
+The app keys saved hosts by iOS UUID and refreshes discovered names. This
+explains one entry changing its name; it does not establish why authentication
+failed. App-level forgetting removes the saved entry and helper link, not the
+system Bluetooth bond. A new OS pairing replacing the phone's bond while the
+other OS retains older keys is a working hypothesis, not a confirmed diagnosis.
+The supplied journals contain no conclusive authentication/key-mismatch error.
+
+The supplied Mac wake journal has no ready HID session for the selected Mac;
+all wake probes were explicitly not sent. Linux reconnection success and Windows
+input therefore do not establish dual-boot bond persistence or Mac wake support.
+
 ## Historical initial validation
 
 Reviewed: 2026-09-04. Status: the v2 prototype is implemented. HID report/session

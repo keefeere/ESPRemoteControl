@@ -8,7 +8,7 @@ struct SavedHIDHost: Codable, Identifiable, Equatable {
     var lastConnectedAt: Date?
 
     var name: String {
-        customName ?? discoveredName ?? "Комп’ютер · \(id.uuidString.prefix(8))"
+        customName ?? discoveredName ?? "Комп’ютер без назви"
     }
 
     var diagnosticName: String { "\(name) [\(id.uuidString.prefix(8))]" }
