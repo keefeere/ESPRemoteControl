@@ -69,7 +69,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         stopScan()
         scanRequested = true
         addKnownHosts()
-        // Discoverability is independent of whether a host offers HID itself.
         manager.scanForPeripherals(withServices: nil, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: false
         ])
@@ -122,9 +121,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         discoveredNames[id] ?? peers[id]?.name
     }
 
-    /// Whether this app's own central-role link to a peer is established, as
-    /// opposed to merely requested. `requestedHost` stays set while a connect
-    /// request waits, so it cannot answer this on its own.
     func isConnected(_ id: UUID) -> Bool {
         peers[id]?.state == .connected
     }
@@ -140,10 +136,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         addKnownHosts()
     }
 
-    /// Drops the held link as well as the record of it. Links are established
-    /// by `maintainLinks(to:)`, which never sets `requestedHost`, so leaving
-    /// the cancellation to that check kept a forgotten computer connected for
-    /// the life of the app.
     func forget(_ id: UUID) {
         cancelLinkRetry(id)
         maintained.remove(id)
@@ -161,14 +153,11 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     func connect(to id: UUID) {
         guard let manager, manager.state == .poweredOn,
               let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else {
-            statusText = "Очікуємо комп’ютер. Підключи iPhone у його налаштуваннях Bluetooth або повтори пошук."
+            statusText = "Очікуємо пристрій. Підключи iPhone у його налаштуваннях Bluetooth або повтори пошук."
             return
         }
         stopScan()
         connectionTimer?.cancel()
-        // The link to any other computer is deliberately left alone: a
-        // peripheral serves several subscribed centrals at once, and keeping
-        // them all connected is what makes switching instant.
         maintained.insert(id)
         peers[id] = peer
         requestedHost = id
@@ -182,21 +171,13 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         let timer = DispatchWorkItem { [weak self, weak peer] in
             guard let self, self.requestedHost == id, let peer, peer.state != .connected else { return }
-            // CoreBluetooth keeps connect requests pending and completes them
-            // when the peer becomes available. Keep that request alive across
-            // computer sleep instead of cancelling it on an arbitrary timeout.
-            self.statusText = "Комп’ютер ще не відповів. Запит на з’єднання лишається активним."
+            self.statusText = "Пристрій ще не відповів. Запит на з’єднання лишається активним."
             self.onDiagnostic?("Outgoing BLE still pending: \(self.peerTag(id)), state \(self.linkState(for: id))")
         }
         connectionTimer = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timer)
     }
 
-    /// Hold a central-role link to every saved computer rather than to one at
-    /// a time. Switching then costs a change of notification target instead of
-    /// a fresh connection and rediscovery on the newly chosen host, which is
-    /// what made it take tens of seconds. Links to computers no longer in the
-    /// list are dropped, so forgetting one still releases it.
     func maintainLinks(to ids: [UUID]) {
         guard let manager, manager.state == .poweredOn else { return }
         let wanted = Set(ids)
@@ -213,8 +194,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             guard let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else { continue }
             peers[id] = peer
             guard peer.state == .disconnected, linkRetries[id] == nil else { continue }
-            // Connect requests do not time out; a computer that is off simply
-            // completes this later, which is exactly the behaviour wanted.
             onDiagnostic?("Holding outgoing link request: \(peerTag(id))")
             manager.connect(peer, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
         }
@@ -244,7 +223,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         let entry = BluetoothHostCandidate(
             id: peer.identifier,
-            name: resolvedName(for: peer.identifier) ?? previous?.name ?? "Комп’ютер без назви",
+            name: resolvedName(for: peer.identifier) ?? previous?.name ?? "Пристрій без назви",
             signal: signal ?? previous?.signal,
             isConnectable: connectable
         )
@@ -265,7 +244,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         guard central === manager else { return }
         if central.state == .poweredOn {
-            // Receive system links too, including hosts already known to iOS.
             central.registerForConnectionEvents(options: nil)
             addKnownHosts()
             onPoweredOn?()
@@ -344,9 +322,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
     }
 
-    /// A pending CoreBluetooth request survives sleep, but a failed or ended
-    /// request does not. Rearm each saved peer independently, without rebuilding
-    /// the shared HID database or cancelling another host's working link.
     private func scheduleLinkRetry(_ id: UUID) {
         guard maintained.contains(id), manager?.state == .poweredOn,
               linkRetries[id] == nil else { return }
@@ -362,7 +337,6 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
                   manager.state == .poweredOn,
                   let peer = self.peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else { return }
             self.peers[id] = peer
-            // A switch or a system connection may already have rearmed it.
             switch peer.state {
             case .disconnected:
                 self.onDiagnostic?("Reissuing outgoing BLE link: \(self.peerTag(id))")
