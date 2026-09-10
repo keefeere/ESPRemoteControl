@@ -112,6 +112,8 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     systemKeysCard
+                    mediaKeysCard
+                    audioDisplayKeysCard
                     mouseJigglerCard
                 }
                 .padding(.horizontal)
@@ -376,18 +378,61 @@ struct ContentView: View {
             Label("Системні клавіші", systemImage: "keyboard.badge.ellipsis")
                 .font(.headline)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                toolKey("Print Screen", keycode: HID.keyPrintScreen)
-                toolKey("Context Menu", keycode: HID.keyApplication)
-                toolKey("Lock PC · Win+L", keycode: HID.keyL, modifiers: HID.modLeftGUI)
-                toolKey("Pause", keycode: HID.keyPause)
-                toolKey("Page Up", keycode: HID.keyPageUp)
-                toolKey("Page Down", keycode: HID.keyPageDown)
-                toolKey("Scroll Lock", keycode: HID.keyScrollLock)
-                toolKey("Power", keycode: HID.keyPower)
+            toolGrid {
+                keyboardToolKey("Print Screen", keycode: HID.keyPrintScreen)
+                keyboardToolKey("Context Menu", keycode: HID.keyApplication)
+                keyboardToolKey("Lock PC · Win+L", keycode: HID.keyL, modifiers: HID.modLeftGUI)
+                keyboardToolKey("Pause", keycode: HID.keyPause)
+                keyboardToolKey("Page Up", keycode: HID.keyPageUp)
+                keyboardToolKey("Page Down", keycode: HID.keyPageDown)
+                keyboardToolKey("Scroll Lock", keycode: HID.keyScrollLock)
+                consumerToolKey("Power", usage: HIDConsumerUsage.power, prominent: true)
+                consumerToolKey("Sleep", usage: HIDConsumerUsage.sleep)
             }
 
-            Text("Це стандартні клавіші Keyboard/Keypad HID. Реакція Power і Win+L залежить від ОС та її налаштувань. Sleep, яскравість, медіа й гучність потребують окремих System/Consumer HID reports і підуть наступним кроком 2.2.x.")
+            Text("Кнопки поводяться як клавіші апаратної клавіатури: натискання тримає HID usage, відпускання його відпускає. Power, Sleep і Win+L залежать від підтримки та політик ОС.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var mediaKeysCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Медіа", systemImage: "playpause")
+                .font(.headline)
+
+            toolGrid {
+                consumerToolKey("Play / Pause", usage: HIDConsumerUsage.playPause)
+                consumerToolKey("Next", usage: HIDConsumerUsage.nextTrack)
+                consumerToolKey("Previous", usage: HIDConsumerUsage.previousTrack)
+                consumerToolKey("Fast Forward", usage: HIDConsumerUsage.fastForward)
+                consumerToolKey("Rewind", usage: HIDConsumerUsage.rewind)
+                consumerToolKey("Shuffle", usage: HIDConsumerUsage.randomPlay)
+                consumerToolKey("Repeat", usage: HIDConsumerUsage.repeatTrack)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var audioDisplayKeysCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Звук і дисплей", systemImage: "speaker.wave.2")
+                .font(.headline)
+
+            toolGrid {
+                consumerToolKey("Volume +", usage: HIDConsumerUsage.volumeIncrement)
+                consumerToolKey("Volume −", usage: HIDConsumerUsage.volumeDecrement)
+                consumerToolKey("Mute", usage: HIDConsumerUsage.mute)
+                consumerToolKey("Brightness +", usage: HIDConsumerUsage.brightnessIncrement)
+                consumerToolKey("Brightness −", usage: HIDConsumerUsage.brightnessDecrement)
+            }
+
+            Text("Mute microphone поки не тут: стандартний system-wide microphone mute — окремий Generic Desktop usage, не Consumer Control. Додамо його окремо, не підміняючи платформним shortcut.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -419,11 +464,48 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func toolKey(_ title: String, keycode: UInt8, modifiers: UInt8 = 0) -> some View {
-        Button(title) {
-            ble.sendKeyTap(modifiers: modifiers, hidKeycode: keycode)
+    private func toolGrid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            content()
         }
-        .buttonStyle(.bordered)
+    }
+
+    private func keyboardToolKey(
+        _ title: String,
+        keycode: UInt8,
+        modifiers: UInt8 = 0
+    ) -> some View {
+        PressableKeyButton(
+            title: title,
+            isCompact: true,
+            fontSize: 13,
+            minHeight: 46,
+            onPress: {
+                ble.sendKeyDown(modifiersMask: modifiers, keycode: keycode)
+            },
+            onRelease: {
+                ble.sendKeyUp(keycode: keycode)
+                if modifiers != 0 { ble.setModifiers(0) }
+            }
+        )
+        .frame(maxWidth: .infinity)
+        .disabled(!ble.isReady)
+    }
+
+    private func consumerToolKey(
+        _ title: String,
+        usage: UInt16,
+        prominent: Bool = false
+    ) -> some View {
+        PressableKeyButton(
+            title: title,
+            isProminent: prominent,
+            isCompact: true,
+            fontSize: 13,
+            minHeight: 46,
+            onPress: { ble.sendConsumerDown(usage: usage) },
+            onRelease: { ble.sendConsumerUp() }
+        )
         .frame(maxWidth: .infinity)
         .disabled(!ble.isReady)
     }
