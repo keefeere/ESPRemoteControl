@@ -113,6 +113,14 @@ final class RemoteInputController: ObservableObject {
         guard isReady else { return }
         active.sendKeyTaps(taps)
     }
+    func sendConsumerDown(usage: UInt16) {
+        guard isReady else { return }
+        active.sendConsumerDown(usage: usage)
+    }
+    func sendConsumerUp() {
+        guard isReady else { return }
+        active.sendConsumerUp()
+    }
     func sendMouseMove(dx: Int8, dy: Int8) {
         guard isReady else { return }
         active.sendMouseMove(dx: dx, dy: dy)
