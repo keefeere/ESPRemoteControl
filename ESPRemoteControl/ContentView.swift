@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var sendStatusToken = 0
     @State private var showsLayoutHelp = false
     @State private var showsPrivacyHelp = false
+    @State private var jigglerEnabled = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -37,9 +38,13 @@ struct ContentView: View {
             )
             .tabItem { Label("Клавіатура", systemImage: "keyboard.fill") }
             .tag(1)
+
+            toolsPage
+                .tabItem { Label("Інструменти", systemImage: "switch.2") }
+                .tag(2)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if selectedTab == 0 {
+            if selectedTab != 1 {
                 connectionHeader
             }
         }
@@ -59,6 +64,7 @@ struct ContentView: View {
                 receiveSharedTextIfNeeded()
                 receiveShortcutTextIfNeeded()
             } else if newPhase == .background {
+                jigglerEnabled = false
                 ble.enteredBackground()
             }
         }
@@ -69,6 +75,9 @@ struct ContentView: View {
             ble.start()
             receiveSharedTextIfNeeded()
             receiveShortcutTextIfNeeded()
+        }
+        .task(id: jigglerEnabled) {
+            await runJiggler()
         }
         .sheet(isPresented: $showsSettings) {
             settingsView
@@ -94,6 +103,22 @@ struct ContentView: View {
             )
             .background(Color(.systemGroupedBackground))
             .navigationTitle("ESP Remote")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var toolsPage: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    systemKeysCard
+                    mouseJigglerCard
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 14)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Інструменти")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -346,6 +371,63 @@ struct ContentView: View {
         }
     }
 
+    private var systemKeysCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Системні клавіші", systemImage: "keyboard.badge.ellipsis")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                toolKey("Print Screen", keycode: HID.keyPrintScreen)
+                toolKey("Context Menu", keycode: HID.keyApplication)
+                toolKey("Lock PC · Win+L", keycode: HID.keyL, modifiers: HID.modLeftGUI)
+                toolKey("Pause", keycode: HID.keyPause)
+                toolKey("Page Up", keycode: HID.keyPageUp)
+                toolKey("Page Down", keycode: HID.keyPageDown)
+                toolKey("Scroll Lock", keycode: HID.keyScrollLock)
+                toolKey("Power", keycode: HID.keyPower)
+            }
+
+            Text("Це стандартні клавіші Keyboard/Keypad HID. Реакція Power і Win+L залежить від ОС та її налаштувань. Sleep, яскравість, медіа й гучність потребують окремих System/Consumer HID reports і підуть наступним кроком 2.2.x.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var mouseJigglerCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Mouse Jiggler", systemImage: "cursorarrow.motionlines")
+                    .font(.headline)
+                Spacer()
+                Toggle("", isOn: $jigglerEnabled)
+                    .labelsHidden()
+            }
+
+            Text(jigglerEnabled ? "Активний · рух раз на 20 секунд" : "Вимкнений")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(jigglerEnabled ? Color.accentColor : Color.secondary)
+
+            Text("Рухається на 1 HID-крок і повертається назад, тому курсор практично не зміщується. Працює лише поки ESP Remote активний на екрані; при переході iOS у background автоматично вимикається.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func toolKey(_ title: String, keycode: UInt8, modifiers: UInt8 = 0) -> some View {
+        Button(title) {
+            ble.sendKeyTap(modifiers: modifiers, hidKeycode: keycode)
+        }
+        .buttonStyle(.bordered)
+        .frame(maxWidth: .infinity)
+        .disabled(!ble.isReady)
+    }
+
     private var settingsView: some View {
         NavigationStack {
             Form {
@@ -551,6 +633,30 @@ struct ContentView: View {
     private func maskedPendingText(_ text: String) -> String {
         guard isSecureInput else { return text }
         return String(repeating: "•", count: min(max(text.count, 8), 24))
+    }
+
+    private func runJiggler() async {
+        guard jigglerEnabled else { return }
+
+        while !Task.isCancelled, jigglerEnabled {
+            do {
+                try await Task.sleep(for: .seconds(20))
+            } catch {
+                return
+            }
+
+            guard jigglerEnabled, scenePhase == .active else { continue }
+            ble.sendMouseMove(dx: 1, dy: 0)
+
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+
+            guard jigglerEnabled, scenePhase == .active else { continue }
+            ble.sendMouseMove(dx: -1, dy: 0)
+        }
     }
 }
 
