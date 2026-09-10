@@ -9,6 +9,7 @@ struct DirectHIDTests {
     static func main() {
         keyboardTransitions()
         mouseTransitions()
+        consumerTransitions()
         notificationBackpressure()
         wakeProbe()
         hostSelection()
@@ -17,7 +18,7 @@ struct DirectHIDTests {
         descriptorSizes()
         savedHosts()
         advertisingLifecycle()
-        print("PASS: HID reports, held input, FIFO backpressure, host isolation, disconnect recovery, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
+        print("PASS: HID keyboard, mouse and consumer reports, held input, FIFO backpressure, host isolation, disconnect recovery, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
     }
 
     static func keyboardTransitions() {
@@ -36,8 +37,10 @@ struct DirectHIDTests {
         _ = state.keyUp(10)
         check(Array(state.keyboard.data.suffix(6)) == [4, 5, 6, 7, 8, 9], "Releasing rollover restores held keys")
         let reset = state.releaseAll()
+        check(reset.count == 3, "Release includes keyboard, mouse and consumer reports")
         check(reset[0].data == Data(repeating: 0, count: 8), "Release clears keyboard")
         check(reset[1].data == Data(repeating: 0, count: 5), "Release clears mouse")
+        check(reset[2].kind == .consumer && reset[2].data == Data([0, 0]), "Release clears consumer control")
     }
 
     static func mouseTransitions() {
@@ -49,6 +52,18 @@ struct DirectHIDTests {
         check(rightClick[0].data[0] == 3 && rightClick[1].data[0] == 1, "Right click preserves held left button")
         check(state.mouse(dx: -128).data[1] == 129, "Mouse delta respects descriptor minimum")
         check(state.buttonUp(7).data == Data(repeating: 0, count: 5), "Release all buttons")
+    }
+
+    static func consumerTransitions() {
+        var state = HIDInputState()
+        let volumeUp = state.consumerDown(HIDConsumerUsage.volumeIncrement)
+        check(volumeUp.kind == .consumer, "Volume uses Consumer Control report")
+        check(Array(volumeUp.data) == [0xE9, 0x00], "Consumer usage is little-endian UInt16")
+        check(state.consumerUsage == HIDConsumerUsage.volumeIncrement, "Consumer key remains held until release")
+        let released = state.consumerUp()
+        check(Array(released.data) == [0, 0] && state.consumerUsage == 0, "Consumer release sends the null usage")
+        let brightness = state.consumerDown(HIDConsumerUsage.brightnessIncrement)
+        check(Array(brightness.data) == [0x6F, 0x00], "Brightness usage fits the same Consumer report")
     }
 
     static func notificationBackpressure() {
@@ -93,6 +108,9 @@ struct DirectHIDTests {
         check(!session.isReady, "Wait for mouse too")
         check(!session.subscribe(.mouse, from: second), "Do not combine two hosts' subscriptions")
         check(session.subscribe(.mouse, from: first) && session.isReady, "Both reports ready on selected host")
+        check(session.subscribe(.consumer, from: first) && session.isReady, "Consumer subscription is optional for basic input readiness")
+        session.unsubscribe(.consumer, from: first)
+        check(session.isReady, "Losing Consumer Control does not break keyboard and mouse readiness")
         session.unsubscribe(.bootKeyboard, from: first)
         check(session.isReady, "Unrelated boot subscription does not remove report subscription")
         session.bootProtocol = true
@@ -114,8 +132,8 @@ struct DirectHIDTests {
         check(!session.allows(first), "Closed pairing window rejects new hosts")
         session = HIDHostSession(preferredHost: nil, allowsPairing: true)
         session.knownHosts = [first]
-        check(!session.allows(first), "A saved computer cannot claim the pairing window by reconnecting first")
-        check(session.allows(second), "A new computer is what the pairing window is for")
+        check(!session.allows(first), "A saved device cannot claim the pairing window by reconnecting first")
+        check(session.allows(second), "A new device is what the pairing window is for")
         _ = session.subscribe(.keyboard, from: second)
         check(!session.allows(first), "Pairing stays pinned to the host that claimed it")
     }
@@ -274,7 +292,7 @@ struct DirectHIDTests {
                 if tag == 9 { output[report, default: 0] += size * count }
             }
         }
-        check(input == [1: 64, 2: 40], "Report map must describe eight keyboard and five mouse bytes")
+        check(input == [1: 64, 2: 40, 3: 16], "Report map must describe keyboard, mouse and 16-bit Consumer Control payloads")
         check(output == [1: 8], "Keyboard LED output is one byte")
         let information = [UInt8](RemoteHIDDescriptor.information)
         check(information.count == 4, "HID Information is bcdHID, country code, and flags")

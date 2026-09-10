@@ -5,6 +5,24 @@ import Foundation
 enum HIDReportKind: UInt8 {
     case keyboard = 1
     case mouse = 2
+    case consumer = 3
+}
+
+enum HIDConsumerUsage {
+    static let power: UInt16 = 0x0030
+    static let sleep: UInt16 = 0x0032
+    static let brightnessIncrement: UInt16 = 0x006F
+    static let brightnessDecrement: UInt16 = 0x0070
+    static let fastForward: UInt16 = 0x00B3
+    static let rewind: UInt16 = 0x00B4
+    static let nextTrack: UInt16 = 0x00B5
+    static let previousTrack: UInt16 = 0x00B6
+    static let randomPlay: UInt16 = 0x00B9
+    static let repeatTrack: UInt16 = 0x00BC
+    static let playPause: UInt16 = 0x00CD
+    static let mute: UInt16 = 0x00E2
+    static let volumeIncrement: UInt16 = 0x00E9
+    static let volumeDecrement: UInt16 = 0x00EA
 }
 
 struct HIDInputReport: Equatable {
@@ -18,6 +36,7 @@ struct HIDInputState {
     private(set) var modifiers: UInt8 = 0
     private(set) var keys: [UInt8] = []
     private(set) var buttons: UInt8 = 0
+    private(set) var consumerUsage: UInt16 = 0
 
     /// A deliberate wake attempt sends a Shift press and release, without
     /// typing a character or activating a button on the sleeping computer.
@@ -33,6 +52,13 @@ struct HIDInputState {
         let usages = keys.count > 6 ? [UInt8](repeating: 1, count: 6)
             : keys + [UInt8](repeating: 0, count: 6 - keys.count)
         return HIDInputReport(kind: .keyboard, data: Data([modifiers, 0] + usages))
+    }
+
+    var consumer: HIDInputReport {
+        HIDInputReport(
+            kind: .consumer,
+            data: Data([UInt8(consumerUsage & 0xFF), UInt8((consumerUsage >> 8) & 0xFF)])
+        )
     }
 
     func mouse(dx: Int8 = 0, dy: Int8 = 0, wheel: Int8 = 0, pan: Int8 = 0) -> HIDInputReport {
@@ -67,6 +93,16 @@ struct HIDInputState {
         return reports
     }
 
+    mutating func consumerDown(_ usage: UInt16) -> HIDInputReport {
+        consumerUsage = usage
+        return consumer
+    }
+
+    mutating func consumerUp() -> HIDInputReport {
+        consumerUsage = 0
+        return consumer
+    }
+
     mutating func buttonDown(_ mask: UInt8) -> HIDInputReport {
         buttons |= mask & 7
         return mouse()
@@ -84,7 +120,7 @@ struct HIDInputState {
 
     mutating func releaseAll() -> [HIDInputReport] {
         self = HIDInputState()
-        return [keyboard, mouse()]
+        return [keyboard, mouse(), consumer]
     }
 }
 
@@ -126,7 +162,7 @@ struct HIDReportQueue {
 }
 
 enum HIDInputChannel: Hashable {
-    case keyboard, mouse, bootKeyboard, bootMouse
+    case keyboard, mouse, consumer, bootKeyboard, bootMouse
 }
 
 /// Why the auxiliary central-role link to a computer ended. Cancelling that
@@ -248,7 +284,8 @@ struct HIDHostSession {
 }
 
 /// USB HID 1.11 / HID Usage Tables: 6-key keyboard with LED output (ID 1),
-/// relative three-button mouse with vertical wheel and Consumer AC Pan (ID 2).
+/// relative three-button mouse with vertical wheel and Consumer AC Pan (ID 2),
+/// and a 16-bit Consumer Control usage selector (ID 3).
 enum RemoteHIDDescriptor {
     /// HID Information: bcdHID 1.11, no country code, then the flags byte.
     /// Bit 0 is RemoteWake and bit 1 is NormallyConnectable. Without
@@ -274,6 +311,10 @@ enum RemoteHIDDescriptor {
         0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x09, 0x38,
         0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x03, 0x81, 0x06,
         0x05, 0x0C, 0x0A, 0x38, 0x02,
-        0x75, 0x08, 0x95, 0x01, 0x81, 0x06, 0xC0, 0xC0
+        0x75, 0x08, 0x95, 0x01, 0x81, 0x06, 0xC0, 0xC0,
+        0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x03,
+        0x15, 0x00, 0x26, 0xFF, 0x03,
+        0x19, 0x00, 0x2A, 0xFF, 0x03,
+        0x75, 0x10, 0x95, 0x01, 0x81, 0x00, 0xC0
     ])
 }

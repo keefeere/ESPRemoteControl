@@ -65,6 +65,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         lastSentModifiersMask = 0
         writeV2(releases + [
             V2Frame(command: V2.setModifiers, payload: [0]),
+            V2Frame(command: V2.consumerUp, payload: []),
             V2Frame(command: V2.mouseButtonUp, payload: [7])
         ])
     }
@@ -123,6 +124,8 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         static let mouseClick: UInt8 = 0x12
         static let mouseButtonDown: UInt8 = 0x13
         static let mouseButtonUp: UInt8 = 0x14
+        static let consumerDown: UInt8 = 0x20
+        static let consumerUp: UInt8 = 0x21
     }
 
     private var lastSentModifiersMask: UInt8 = 0
@@ -206,6 +209,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     }
 
     func sendKeyUp(keycode: UInt8) {
+        possiblyHeldKeys.remove(keycode)
         writeV2([V2Frame(command: V2.keyUp, payload: [keycode])])
     }
 
@@ -237,6 +241,16 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
             V2Frame(command: V2.setModifiers, payload: [modifiers]),
             V2Frame(command: V2.setModifiers, payload: [0])
         ])
+    }
+
+    func sendConsumerDown(usage: UInt16) {
+        writeV2([V2Frame(command: V2.consumerDown, payload: [
+            UInt8(usage & 0xFF), UInt8((usage >> 8) & 0xFF)
+        ])])
+    }
+
+    func sendConsumerUp() {
+        writeV2([V2Frame(command: V2.consumerUp, payload: [])])
     }
 
     func sendMouseMove(dx: Int8, dy: Int8) {

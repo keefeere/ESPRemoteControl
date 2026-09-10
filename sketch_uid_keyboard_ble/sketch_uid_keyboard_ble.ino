@@ -8,11 +8,12 @@
 // ---- BLE (Peripheral) via NimBLE ----
 #include <NimBLEDevice.h>
 
-// ---- USB HID Keyboard & Mouse (Arduino-ESP32 core) ----
+// ---- USB HID Keyboard, Mouse & Consumer Control (Arduino-ESP32 core) ----
 #include "USB.h"
 #include "USBHID.h"
 #include "USBHIDKeyboard.h"
 #include "USBHIDMouse.h"
+#include "USBHIDConsumerControl.h"
 
 // =====================
 // UUIDs (MUST MATCH iOS)
@@ -30,7 +31,7 @@ static const uint8_t CMD_MOUSE_MOVE = 0x02;
 static const uint8_t CMD_MOUSE_CLICK = 0x03;
 static const uint8_t CMD_MOUSE_SCROLL = 0x04;
 
-// ---- v2 (future-ready): [0xAA, 0x01] header + TLV frames ----
+// ---- v2: [0xAA, 0x01] header + TLV frames ----
 // Frame format: [cmd][len][payload...]
 static const uint8_t V2_MAGIC = 0xAA;
 static const uint8_t V2_VERSION = 0x01;
@@ -48,11 +49,16 @@ static const uint8_t V2_MOUSE_CLICK = 0x12;   // payload: [button]
 static const uint8_t V2_MOUSE_DOWN = 0x13;    // payload: [button]
 static const uint8_t V2_MOUSE_UP = 0x14;      // payload: [button]
 
+// Consumer Control. Usage is little-endian uint16 from HID Usage Page 0x0C.
+static const uint8_t V2_CONSUMER_DOWN = 0x20; // payload: [usageLo, usageHi]
+static const uint8_t V2_CONSUMER_UP = 0x21;   // payload: []
+
 // =====================
 // USB HID instances
 // =====================
 USBHIDKeyboard Keyboard;
 USBHIDMouse Mouse;
+USBHIDConsumerControl ConsumerControl;
 USBHID HidProbe;
 
 // A warm reboot of some hosts leaves ESP32-S3 TinyUSB mounted but unable to
@@ -241,6 +247,14 @@ static void sendMouseScroll(int8_t dx, int8_t dy) {
   Mouse.move(0, 0, dy, dx);
 }
 
+static void sendConsumerDown(uint16_t usage) {
+  ConsumerControl.press(usage);
+}
+
+static void sendConsumerUp() {
+  ConsumerControl.release();
+}
+
 // =====================
 // BLE GATT server
 // =====================
@@ -302,6 +316,17 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 
           case V2_MOUSE_UP:
             if (len == 1) sendMouseButtonUp(payload[0]);
+            break;
+
+          case V2_CONSUMER_DOWN:
+            if (len == 2) {
+              uint16_t usage = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+              sendConsumerDown(usage);
+            }
+            break;
+
+          case V2_CONSUMER_UP:
+            if (len == 0) sendConsumerUp();
             break;
 
           default:
@@ -386,17 +411,18 @@ static void setupUsbHid() {
   USB.onEvent(usbEventCallback);
   Keyboard.begin();
   Mouse.begin();
+  ConsumerControl.begin();
   HidProbe.begin();
   USB.begin();
 
-  Serial.println("USB HID Keyboard & Mouse started.");
+  Serial.println("USB HID Keyboard, Mouse & Consumer Control started.");
 }
 
 void setup() {
   Serial.begin(115200);
   delay(200);
 
-  Serial.println("Starting ESP32-S3 BLE -> USB HID keyboard & mouse bridge...");
+  Serial.println("Starting ESP32-S3 BLE -> USB HID keyboard, mouse & consumer bridge...");
 
   setupUsbHid();
   setupBle();
