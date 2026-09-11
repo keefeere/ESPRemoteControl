@@ -11,6 +11,8 @@ protocol InputTransport: AnyObject {
     func sendKeyTaps(_ taps: [(modifiers: UInt8, keycode: UInt8)])
     func sendConsumerDown(usage: UInt16)
     func sendConsumerUp()
+    func sendSystemMicrophoneMuteDown()
+    func sendSystemMicrophoneMuteUp()
     func sendMouseMove(dx: Int8, dy: Int8)
     func sendMouseScroll(dx: Int8, dy: Int8)
     func sendMouseClick(button: UInt8)
