@@ -15,9 +15,21 @@
         {
           "type": "bluetooth",
           "usageDescription": "Connects to the ESP32-S3 bridge or directly to a computer as a Bluetooth keyboard and mouse."
+        },
+        {
+          "type": "camera",
+          "usageDescription": "Scans QR and 2D codes so their contents can be typed on the connected computer."
         }
       ],
       "versions": [
+        {
+          "version": "2.2.3",
+          "date": "2026-09-11",
+          "downloadURL": "https://github.com/keefeere/ESPRemoteControl/releases/download/ios-v2.2.3/ESPRemoteControl-unsigned.ipa",
+          "size": 835399,
+          "minOSVersion": "17.0",
+          "localizedDescription": "ESP Remote Control 2.2.3"
+        },
         {
           "version": "2.2.2",
           "date": "2026-09-11",
