@@ -21,9 +21,14 @@ struct RemoteKeyboardView: View {
         UserDefaults.standard.bool(forKey: "keyboardLandscapeLock")
             ? KeyboardOrientationLock.landscape.rawValue
             : KeyboardOrientationLock.unlocked.rawValue
+    @AppStorage("trackpadZoomShortcut") private var trackpadZoomShortcutRawValue = TrackpadZoomShortcut.control.rawValue
 
     private var orientationLock: KeyboardOrientationLock {
         KeyboardOrientationLock(rawValue: orientationLockRawValue) ?? .unlocked
+    }
+
+    private var selectedTrackpadZoomShortcut: TrackpadZoomShortcut {
+        TrackpadZoomShortcut(rawValue: trackpadZoomShortcutRawValue) ?? .control
     }
 
     private var effectiveModifiers: UInt8 { stickyModifiers | momentaryModifiers }
@@ -339,9 +344,15 @@ struct RemoteKeyboardView: View {
         TrackpadView(
             onMove: { ble.sendMouseMove(dx: $0, dy: $1) },
             onTap: { fingers in
-                ble.sendMouseClick(button: fingers >= 2 ? 2 : 1)
+                let button: UInt8 = switch fingers {
+                case 3: 3
+                case 2: 2
+                default: 1
+                }
+                ble.sendMouseClick(button: button)
             },
             onScroll: { ble.sendMouseScroll(dx: $0, dy: $1) },
+            onZoom: { sendTrackpadZoom($0) },
             onDragStart: { ble.sendMouseButtonDown(button: 1) },
             onDragEnd: { ble.sendMouseButtonUp(button: 1) }
         )
@@ -357,7 +368,7 @@ struct RemoteKeyboardView: View {
             VStack(spacing: 3) {
                 Image(systemName: "rectangle.and.hand.point.up.left")
                     .font(.title3)
-                Text("Тачпад · 2 пальці — скрол / правий клік")
+                Text("2 пальці — скрол/правий · pinch — zoom · 3 — середній")
                     .font(.caption2)
             }
             .foregroundStyle(.secondary)
@@ -491,6 +502,20 @@ struct RemoteKeyboardView: View {
         releaseAllInput()
         let next: KeyboardLayout = layout == .englishUS ? .ukrainianEnhanced : .englishUS
         onLayoutChange(next, synchronizeHost)
+    }
+
+    private func sendTrackpadZoom(_ step: Int) {
+        guard step != 0 else { return }
+        usedMomentaryModifiers |= momentaryModifiers
+        let command = selectedTrackpadZoomShortcut.command(for: step)
+        let modifiersToRestore = effectiveModifiers
+        ble.sendKeyTap(
+            modifiers: modifiersToRestore | command.modifiers,
+            hidKeycode: command.keycode
+        )
+        if modifiersToRestore != 0 {
+            ble.setModifiers(modifiersToRestore)
+        }
     }
 
     private func pressKey(_ keycode: UInt8, additionalModifiers: UInt8 = 0) {
