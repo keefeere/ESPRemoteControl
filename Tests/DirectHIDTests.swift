@@ -10,6 +10,7 @@ struct DirectHIDTests {
         keyboardTransitions()
         mouseTransitions()
         consumerTransitions()
+        systemMicrophoneMuteTransitions()
         notificationBackpressure()
         wakeProbe()
         hostSelection()
@@ -18,7 +19,7 @@ struct DirectHIDTests {
         descriptorSizes()
         savedHosts()
         advertisingLifecycle()
-        print("PASS: HID keyboard, mouse and consumer reports, held input, FIFO backpressure, host isolation, disconnect recovery, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
+        print("PASS: HID keyboard, mouse, consumer and system microphone mute reports, held input, FIFO backpressure, host isolation, disconnect recovery, reconnect watchdog, boot mode, descriptor sizes, saved hosts, advertising lifecycle")
     }
 
     static func keyboardTransitions() {
@@ -37,10 +38,11 @@ struct DirectHIDTests {
         _ = state.keyUp(10)
         check(Array(state.keyboard.data.suffix(6)) == [4, 5, 6, 7, 8, 9], "Releasing rollover restores held keys")
         let reset = state.releaseAll()
-        check(reset.count == 3, "Release includes keyboard, mouse and consumer reports")
+        check(reset.count == 4, "Release includes keyboard, mouse, consumer and system microphone mute reports")
         check(reset[0].data == Data(repeating: 0, count: 8), "Release clears keyboard")
         check(reset[1].data == Data(repeating: 0, count: 5), "Release clears mouse")
         check(reset[2].kind == .consumer && reset[2].data == Data([0, 0]), "Release clears consumer control")
+        check(reset[3].kind == .systemMicrophoneMute && reset[3].data == Data([0]), "Release clears system microphone mute")
     }
 
     static func mouseTransitions() {
@@ -64,6 +66,15 @@ struct DirectHIDTests {
         check(Array(released.data) == [0, 0] && state.consumerUsage == 0, "Consumer release sends the null usage")
         let brightness = state.consumerDown(HIDConsumerUsage.brightnessIncrement)
         check(Array(brightness.data) == [0x6F, 0x00], "Brightness usage fits the same Consumer report")
+    }
+
+    static func systemMicrophoneMuteTransitions() {
+        var state = HIDInputState()
+        let down = state.systemMicrophoneMuteDown()
+        check(down.kind == .systemMicrophoneMute, "Microphone mute uses its own System Control report")
+        check(down.data == Data([1]) && state.systemMicrophoneMutePressed, "Microphone mute press sends one asserted bit")
+        let up = state.systemMicrophoneMuteUp()
+        check(up.data == Data([0]) && !state.systemMicrophoneMutePressed, "Microphone mute release clears the asserted bit")
     }
 
     static func notificationBackpressure() {
@@ -109,8 +120,10 @@ struct DirectHIDTests {
         check(!session.subscribe(.mouse, from: second), "Do not combine two hosts' subscriptions")
         check(session.subscribe(.mouse, from: first) && session.isReady, "Both reports ready on selected host")
         check(session.subscribe(.consumer, from: first) && session.isReady, "Consumer subscription is optional for basic input readiness")
+        check(session.subscribe(.systemMicrophoneMute, from: first) && session.isReady, "Microphone mute subscription is optional for basic input readiness")
         session.unsubscribe(.consumer, from: first)
-        check(session.isReady, "Losing Consumer Control does not break keyboard and mouse readiness")
+        session.unsubscribe(.systemMicrophoneMute, from: first)
+        check(session.isReady, "Losing optional function reports does not break keyboard and mouse readiness")
         session.unsubscribe(.bootKeyboard, from: first)
         check(session.isReady, "Unrelated boot subscription does not remove report subscription")
         session.bootProtocol = true
@@ -292,8 +305,8 @@ struct DirectHIDTests {
                 if tag == 9 { output[report, default: 0] += size * count }
             }
         }
-        check(input == [1: 64, 2: 40, 3: 16], "Report map must describe keyboard, mouse and 16-bit Consumer Control payloads")
-        check(output == [1: 8], "Keyboard LED output is one byte")
+        check(input == [1: 64, 2: 40, 3: 16, 4: 8], "Report map must describe keyboard, mouse, Consumer Control and microphone mute payloads")
+        check(output == [1: 8, 4: 8], "Report map must describe keyboard and microphone mute LED output bytes")
         let information = [UInt8](RemoteHIDDescriptor.information)
         check(information.count == 4, "HID Information is bcdHID, country code, and flags")
         check(information[3] & 1 == 1, "Declare remote wake, or the host is told this device cannot wake it")
