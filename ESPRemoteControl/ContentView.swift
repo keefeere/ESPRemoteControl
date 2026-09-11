@@ -114,6 +114,7 @@ struct ContentView: View {
                     systemKeysCard
                     mediaKeysCard
                     audioDisplayKeysCard
+                    numpadCard
                     mouseJigglerCard
                 }
                 .padding(.horizontal)
@@ -428,11 +429,46 @@ struct ContentView: View {
                 consumerToolKey("Volume +", usage: HIDConsumerUsage.volumeIncrement)
                 consumerToolKey("Volume −", usage: HIDConsumerUsage.volumeDecrement)
                 consumerToolKey("Mute", usage: HIDConsumerUsage.mute)
+                systemMicrophoneMuteToolKey("Mute microphone")
                 consumerToolKey("Brightness +", usage: HIDConsumerUsage.brightnessIncrement)
                 consumerToolKey("Brightness −", usage: HIDConsumerUsage.brightnessDecrement)
             }
 
-            Text("Mute microphone поки не тут: стандартний system-wide microphone mute — окремий Generic Desktop usage, не Consumer Control. Додамо його окремо, не підміняючи платформним shortcut.")
+            Text("Mute microphone використовує стандарт USB-IF HUTRR110 System Microphone Mute. Підтримка системного mute залежить від ОС.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var numpadCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Numpad", systemImage: "rectangle.grid.3x2")
+                .font(.headline)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 6) {
+                keyboardToolKey("Num", keycode: HID.keyNumLock)
+                keyboardToolKey("/", keycode: HID.keyKeypadSlash)
+                keyboardToolKey("*", keycode: HID.keyKeypadAsterisk)
+                keyboardToolKey("−", keycode: HID.keyKeypadMinus)
+                keyboardToolKey("7", keycode: HID.keyKeypad7)
+                keyboardToolKey("8", keycode: HID.keyKeypad8)
+                keyboardToolKey("9", keycode: HID.keyKeypad9)
+                keyboardToolKey("+", keycode: HID.keyKeypadPlus)
+                keyboardToolKey("4", keycode: HID.keyKeypad4)
+                keyboardToolKey("5", keycode: HID.keyKeypad5)
+                keyboardToolKey("6", keycode: HID.keyKeypad6)
+                keyboardToolKey("Enter", keycode: HID.keyKeypadEnter)
+                keyboardToolKey("1", keycode: HID.keyKeypad1)
+                keyboardToolKey("2", keycode: HID.keyKeypad2)
+                keyboardToolKey("3", keycode: HID.keyKeypad3)
+                keyboardToolKey(".", keycode: HID.keyKeypadPeriod)
+                keyboardToolKey("0", keycode: HID.keyKeypad0)
+            }
+
+            Text("Це окремі Keyboard/Keypad HID usages, а не цифри верхнього ряду. Num Lock і поведінка десяткової клавіші залежать від ОС та активної розкладки клавіатури.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -505,6 +541,19 @@ struct ContentView: View {
             minHeight: 46,
             onPress: { ble.sendConsumerDown(usage: usage) },
             onRelease: { ble.sendConsumerUp() }
+        )
+        .frame(maxWidth: .infinity)
+        .disabled(!ble.isReady)
+    }
+
+    private func systemMicrophoneMuteToolKey(_ title: String) -> some View {
+        PressableKeyButton(
+            title: title,
+            isCompact: true,
+            fontSize: 13,
+            minHeight: 46,
+            onPress: { ble.sendSystemMicrophoneMuteDown() },
+            onRelease: { ble.sendSystemMicrophoneMuteUp() }
         )
         .frame(maxWidth: .infinity)
         .disabled(!ble.isReady)
