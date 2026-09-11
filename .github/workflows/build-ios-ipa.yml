@@ -51,25 +51,6 @@ jobs:
       - name: Install ldid
         run: brew install ldid
 
-      - name: Install UI test project generator
-        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-        run: brew install xcodegen
-
-      - name: Test short and long button presses on iPhone Simulator
-        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-        run: ./scripts/test-press-actions.sh
-
-      - name: Upload failed button UI test results
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: press-actions-test-results
-          path: |
-            dist/press-actions.xcresult
-            dist/press-actions-tests.log
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: Build unsigned IPA
         run: ./scripts/build-unsigned-ipa.sh
 
@@ -125,3 +106,29 @@ jobs:
           done
           echo "::error::could not publish ${version} to the SideStore source"
           exit 1
+
+  press-ui-test:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install UI test project generator
+        run: brew install xcodegen
+
+      - name: Test short and long button presses on iPhone Simulator
+        run: ./scripts/test-press-actions.sh
+
+      - name: Upload failed button UI test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: press-actions-test-results
+          path: |
+            dist/press-actions.xcresult
+            dist/press-actions-tests.log
+          if-no-files-found: ignore
+          retention-days: 7

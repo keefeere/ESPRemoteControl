@@ -6,6 +6,7 @@ enum HIDReportKind: UInt8 {
     case keyboard = 1
     case mouse = 2
     case consumer = 3
+    case systemMicrophoneMute = 4
 }
 
 enum HIDConsumerUsage {
@@ -37,6 +38,7 @@ struct HIDInputState {
     private(set) var keys: [UInt8] = []
     private(set) var buttons: UInt8 = 0
     private(set) var consumerUsage: UInt16 = 0
+    private(set) var systemMicrophoneMutePressed = false
 
     /// A deliberate wake attempt sends a Shift press and release, without
     /// typing a character or activating a button on the sleeping computer.
@@ -58,6 +60,13 @@ struct HIDInputState {
         HIDInputReport(
             kind: .consumer,
             data: Data([UInt8(consumerUsage & 0xFF), UInt8((consumerUsage >> 8) & 0xFF)])
+        )
+    }
+
+    var systemMicrophoneMute: HIDInputReport {
+        HIDInputReport(
+            kind: .systemMicrophoneMute,
+            data: Data([systemMicrophoneMutePressed ? 1 : 0])
         )
     }
 
@@ -103,6 +112,16 @@ struct HIDInputState {
         return consumer
     }
 
+    mutating func systemMicrophoneMuteDown() -> HIDInputReport {
+        systemMicrophoneMutePressed = true
+        return systemMicrophoneMute
+    }
+
+    mutating func systemMicrophoneMuteUp() -> HIDInputReport {
+        systemMicrophoneMutePressed = false
+        return systemMicrophoneMute
+    }
+
     mutating func buttonDown(_ mask: UInt8) -> HIDInputReport {
         buttons |= mask & 7
         return mouse()
@@ -120,7 +139,7 @@ struct HIDInputState {
 
     mutating func releaseAll() -> [HIDInputReport] {
         self = HIDInputState()
-        return [keyboard, mouse(), consumer]
+        return [keyboard, mouse(), consumer, systemMicrophoneMute]
     }
 }
 
@@ -162,7 +181,7 @@ struct HIDReportQueue {
 }
 
 enum HIDInputChannel: Hashable {
-    case keyboard, mouse, consumer, bootKeyboard, bootMouse
+    case keyboard, mouse, consumer, systemMicrophoneMute, bootKeyboard, bootMouse
 }
 
 /// Why the auxiliary central-role link to a computer ended. Cancelling that
@@ -285,7 +304,8 @@ struct HIDHostSession {
 
 /// USB HID 1.11 / HID Usage Tables: 6-key keyboard with LED output (ID 1),
 /// relative three-button mouse with vertical wheel and Consumer AC Pan (ID 2),
-/// and a 16-bit Consumer Control usage selector (ID 3).
+/// a 16-bit Consumer Control usage selector (ID 3), and HUTRR110 System
+/// Microphone Mute with matching LED output (ID 4).
 enum RemoteHIDDescriptor {
     /// HID Information: bcdHID 1.11, no country code, then the flags byte.
     /// Bit 0 is RemoteWake and bit 1 is NormallyConnectable. Without
@@ -315,6 +335,14 @@ enum RemoteHIDDescriptor {
         0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x03,
         0x15, 0x00, 0x26, 0xFF, 0x03,
         0x19, 0x00, 0x2A, 0xFF, 0x03,
-        0x75, 0x10, 0x95, 0x01, 0x81, 0x00, 0xC0
+        0x75, 0x10, 0x95, 0x01, 0x81, 0x00, 0xC0,
+        // HUTRR110 System Microphone Mute / LED, Report ID 4.
+        0x05, 0x01, 0x09, 0x80, 0xA1, 0x01, 0x85, 0x04,
+        0x09, 0xA9, 0x15, 0x00, 0x25, 0x01,
+        0x95, 0x01, 0x75, 0x01, 0x81, 0x06,
+        0x75, 0x07, 0x81, 0x03,
+        0x05, 0x08, 0x09, 0x57,
+        0x75, 0x01, 0x91, 0x06,
+        0x75, 0x07, 0x91, 0x03, 0xC0
     ])
 }

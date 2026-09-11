@@ -19,13 +19,14 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     let browser = BluetoothHostBrowser()
 
     private enum Attribute {
-        case input(HIDInputChannel), leds, protocolMode, controlPoint
+        case input(HIDInputChannel), leds, microphoneMuteLED, protocolMode, controlPoint
         case reportMap, information, battery, manufacturer, model, pnpID
 
         var label: String {
             switch self {
             case .input(let channel): return "report/\(channel)"
             case .leds: return "leds"
+            case .microphoneMuteLED: return "microphoneMuteLED"
             case .protocolMode: return "protocolMode"
             case .controlPoint: return "controlPoint"
             case .reportMap: return "reportMap"
@@ -61,7 +62,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private var lastKeyboard = HIDInputState().keyboard.data
     private var lastMouse = HIDInputState().mouse().data
     private var lastConsumer = HIDInputState().consumer.data
+    private var lastSystemMicrophoneMute = HIDInputState().systemMicrophoneMute.data
     private var leds: UInt8 = 0
+    private var microphoneMuteLED: UInt8 = 0
     private var sendWork: DispatchWorkItem?
     private var pairingTimer: DispatchWorkItem?
     private var afterDrain: (() -> Void)?
@@ -137,7 +140,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         }
         guard queue.isEmpty, wakeProbeReportsRemaining == 0,
               state.modifiers == 0, state.keys.isEmpty, state.buttons == 0,
-              state.consumerUsage == 0 else {
+              state.consumerUsage == 0, !state.systemMicrophoneMutePressed else {
             record("Wake probe not sent: release held input and wait for the queue to drain")
             return
         }
@@ -335,8 +338,11 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         if subscribed(.consumer) != nil {
             _ = session.subscribe(.consumer, from: id)
         }
+        if subscribed(.systemMicrophoneMute) != nil {
+            _ = session.subscribe(.systemMicrophoneMute, from: id)
+        }
         host = central
-        _ = queue.append([state.keyboard, state.mouse(), state.consumer])
+        _ = queue.append([state.keyboard, state.mouse(), state.consumer, state.systemMicrophoneMute])
         scheduleSend()
         return true
     }
@@ -489,6 +495,18 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         let output = characteristic("2A4D", .leds, properties: [.read, .write, .writeWithoutResponse],
                                     permissions: [.readEncryptionRequired, .writeEncryptionRequired])
         output.descriptors = [CBMutableDescriptor(type: Self.uuid("2908"), value: NSData(data: Data([1, 2])))]
+        let microphoneMuteOutput = characteristic(
+            "2A4D",
+            .microphoneMuteLED,
+            properties: [.read, .write, .writeWithoutResponse],
+            permissions: [.readEncryptionRequired, .writeEncryptionRequired]
+        )
+        microphoneMuteOutput.descriptors = [
+            CBMutableDescriptor(
+                type: Self.uuid("2908"),
+                value: NSData(data: Data([HIDReportKind.systemMicrophoneMute.rawValue, 2]))
+            )
+        ]
         hid.characteristics = [
             characteristic("2A4A", .information, properties: .read, permissions: .readable),
             characteristic("2A4B", .reportMap, properties: .read, permissions: .readEncryptionRequired),
@@ -497,6 +515,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             characteristic("2A4C", .controlPoint, properties: .writeWithoutResponse, permissions: .writeEncryptionRequired),
             report(.keyboard, channel: .keyboard), output,
             report(.mouse, channel: .mouse), report(.consumer, channel: .consumer),
+            report(.systemMicrophoneMute, channel: .systemMicrophoneMute), microphoneMuteOutput,
             characteristic("2A22", .input(.bootKeyboard), properties: [.read, .notifyEncryptionRequired],
                            permissions: .readEncryptionRequired),
             characteristic("2A32", .leds, properties: [.read, .write, .writeWithoutResponse],
@@ -588,6 +607,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         selectedHostID = session.preferredHost
         connectedHostID = ready ? session.host : nil
         if ready {
+            lastError = nil
             isPairing = false
             session.allowsPairing = false
             pairingTimer?.cancel()
@@ -634,6 +654,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         lastKeyboard = state.keyboard.data
         lastMouse = state.mouse().data
         lastConsumer = state.consumer.data
+        lastSystemMicrophoneMute = state.systemMicrophoneMute.data
     }
 
     func releaseAllInput() {
@@ -715,6 +736,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .keyboard: channel = session.keyboardChannel
         case .mouse: channel = session.mouseChannel
         case .consumer: channel = .consumer
+        case .systemMicrophoneMute: channel = .systemMicrophoneMute
         }
         guard session.subscriptions.contains(channel), let characteristic = inputs[channel] else {
             if report.isWakeProbe { cancelWakeProbe() }
@@ -752,6 +774,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             lastMouse = Data([report.data[0], 0, 0, 0, 0])
         case .consumer:
             lastConsumer = report.data
+        case .systemMicrophoneMute:
+            lastSystemMicrophoneMute = report.data
         }
         return true
     }
@@ -821,6 +845,16 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     func sendConsumerUp() {
         guard isReady else { return }
         enqueue([state.consumerUp()])
+    }
+
+    func sendSystemMicrophoneMuteDown() {
+        guard isReady else { return }
+        enqueue([state.systemMicrophoneMuteDown()])
+    }
+
+    func sendSystemMicrophoneMuteUp() {
+        guard isReady else { return }
+        enqueue([state.systemMicrophoneMuteUp()])
     }
 
     func sendMouseMove(dx: Int8, dy: Int8) { enqueue([state.mouse(dx: dx, dy: dy)]) }
@@ -932,7 +966,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         host = central
         cancelWatchdog(rewind: true)
         record("Subscribed: \(channel), host \(peerTag(central.identifier)), \(central.maximumUpdateValueLength) B notifications")
-        _ = queue.append([state.keyboard, state.mouse(), state.consumer])
+        _ = queue.append([state.keyboard, state.mouse(), state.consumer, state.systemMicrophoneMute])
         scheduleSend()
         refreshStatus()
     }
@@ -973,8 +1007,10 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         case .input(.keyboard), .input(.bootKeyboard): value = lastKeyboard
         case .input(.mouse): value = lastMouse
         case .input(.consumer): value = lastConsumer
+        case .input(.systemMicrophoneMute): value = lastSystemMicrophoneMute
         case .input(.bootMouse): value = Data(lastMouse.prefix(3))
         case .leds: value = Data([leds])
+        case .microphoneMuteLED: value = Data([microphoneMuteLED & 1])
         case .protocolMode: value = Data([session.bootProtocol ? 0 : 1])
         case .controlPoint:
             noteATT("read", attribute.label, peer, "readNotPermitted")
@@ -1024,7 +1060,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 peripheral.respond(to: first, withResult: .invalidAttributeValueLength); return
             }
             switch attribute {
-            case .leds: break
+            case .leds, .microphoneMuteLED: break
             case .protocolMode, .controlPoint:
                 guard value[0] <= 1 else {
                     noteATT("write", label, peer, "requestNotSupported", detail: "value \(value[0])")
@@ -1044,6 +1080,9 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             let value = request.value![0]
             switch attributes[ObjectIdentifier(request.characteristic)] {
             case .leds: leds = value & 0x1F
+            case .microphoneMuteLED:
+                microphoneMuteLED = value & 1
+                record("System microphone mute LED: \(microphoneMuteLED != 0 ? "on" : "off")")
             case .protocolMode:
                 session.bootProtocol = value == 0
                 record("Protocol: \(value == 0 ? "boot" : "report"); host \(peerTag(peer))")

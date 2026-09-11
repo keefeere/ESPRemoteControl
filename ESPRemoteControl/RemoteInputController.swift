@@ -121,6 +121,14 @@ final class RemoteInputController: ObservableObject {
         guard isReady else { return }
         active.sendConsumerUp()
     }
+    func sendSystemMicrophoneMuteDown() {
+        guard isReady else { return }
+        active.sendSystemMicrophoneMuteDown()
+    }
+    func sendSystemMicrophoneMuteUp() {
+        guard isReady else { return }
+        active.sendSystemMicrophoneMuteUp()
+    }
     func sendMouseMove(dx: Int8, dy: Int8) {
         guard isReady else { return }
         active.sendMouseMove(dx: dx, dy: dy)

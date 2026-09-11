@@ -66,6 +66,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         writeV2(releases + [
             V2Frame(command: V2.setModifiers, payload: [0]),
             V2Frame(command: V2.consumerUp, payload: []),
+            V2Frame(command: V2.systemMicrophoneMuteUp, payload: []),
             V2Frame(command: V2.mouseButtonUp, payload: [7])
         ])
     }
@@ -126,6 +127,8 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         static let mouseButtonUp: UInt8 = 0x14
         static let consumerDown: UInt8 = 0x20
         static let consumerUp: UInt8 = 0x21
+        static let systemMicrophoneMuteDown: UInt8 = 0x22
+        static let systemMicrophoneMuteUp: UInt8 = 0x23
     }
 
     private var lastSentModifiersMask: UInt8 = 0
@@ -251,6 +254,14 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
 
     func sendConsumerUp() {
         writeV2([V2Frame(command: V2.consumerUp, payload: [])])
+    }
+
+    func sendSystemMicrophoneMuteDown() {
+        writeV2([V2Frame(command: V2.systemMicrophoneMuteDown, payload: [])])
+    }
+
+    func sendSystemMicrophoneMuteUp() {
+        writeV2([V2Frame(command: V2.systemMicrophoneMuteUp, payload: [])])
     }
 
     func sendMouseMove(dx: Int8, dy: Int8) {
