@@ -5,6 +5,12 @@ import json
 from pathlib import Path
 
 
+CAMERA_PERMISSION = {
+    "type": "camera",
+    "usageDescription": "Scans QR and 2D codes so their contents can be typed on the connected computer.",
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepend a release to an AltSource feed")
     parser.add_argument("--source", type=Path, required=True)
@@ -19,7 +25,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     source = json.loads(args.source.read_text(encoding="utf-8"))
-    versions = source["apps"][0]["versions"]
+    app = source["apps"][0]
+    versions = app["versions"]
+
+    permissions = app.setdefault("permissions", [])
+    if not any(entry.get("type") == "camera" for entry in permissions):
+        permissions.append(CAMERA_PERMISSION)
 
     release = {
         "version": args.version,
@@ -31,7 +42,7 @@ def main() -> None:
     if args.description:
         release["localizedDescription"] = args.description
 
-    source["apps"][0]["versions"] = [
+    app["versions"] = [
         release,
         *(entry for entry in versions if entry.get("version") != args.version),
     ]
