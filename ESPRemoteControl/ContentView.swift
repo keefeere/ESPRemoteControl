@@ -178,6 +178,16 @@ struct ContentView: View {
                 .frame(height: 88)
                 .layoutPriority(1)
 
+                CodeScannerButton(
+                    text: $inputText,
+                    isReady: ble.isReady,
+                    onPrepare: { wantsFocus = false },
+                    onImmediateSend: { value in
+                        sendText(value)
+                        showSendStatus("Скановано й надіслано через \(ble.mode.title)")
+                    }
+                )
+
                 Button {
                     sendLayoutShortcut()
                 } label: {
