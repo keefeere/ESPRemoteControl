@@ -5,6 +5,7 @@ import UIKit
 struct CodeScannerButton: View {
     @Binding var text: String
     let isReady: Bool
+    let onPrepare: () -> Void
     let onImmediateSend: (String) -> Void
 
     @AppStorage("scannerAutoSend") private var autoSend = false
@@ -13,6 +14,7 @@ struct CodeScannerButton: View {
 
     var body: some View {
         Button {
+            onPrepare()
             openScanner()
         } label: {
             Image(systemName: "qrcode.viewfinder")
