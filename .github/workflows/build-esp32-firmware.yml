@@ -2,6 +2,10 @@ name: Build ESP32-S3 firmware
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "sketch_uid_keyboard_ble/**"
+      - ".github/workflows/build-esp32-firmware.yml"
   push:
     paths:
       - "sketch_uid_keyboard_ble/**"
