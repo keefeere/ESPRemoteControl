@@ -53,6 +53,10 @@ static const uint8_t V2_MOUSE_UP = 0x14;      // payload: [button]
 static const uint8_t V2_CONSUMER_DOWN = 0x20; // payload: [usageLo, usageHi]
 static const uint8_t V2_CONSUMER_UP = 0x21;   // payload: []
 
+// USB-IF HUTRR110 System Microphone Mute (Generic Desktop usage 0xA9).
+static const uint8_t V2_SYSTEM_MICROPHONE_MUTE_DOWN = 0x22; // payload: []
+static const uint8_t V2_SYSTEM_MICROPHONE_MUTE_UP = 0x23;   // payload: []
+
 // =====================
 // USB HID instances
 // =====================
@@ -60,6 +64,70 @@ USBHIDKeyboard Keyboard;
 USBHIDMouse Mouse;
 USBHIDConsumerControl ConsumerControl;
 USBHID HidProbe;
+
+static const uint8_t kSystemMicrophoneMuteDescriptor[] = {
+  0x05, 0x01,       // Usage Page (Generic Desktop)
+  0x09, 0x80,       // Usage (System Control)
+  0xA1, 0x01,       // Collection (Application)
+  0x85, HID_REPORT_ID_SYSTEM_CONTROL,
+  0x09, 0xA9,       // Usage (System Microphone Mute)
+  0x15, 0x00,       // Logical Minimum (0)
+  0x25, 0x01,       // Logical Maximum (1)
+  0x95, 0x01,       // Report Count (1)
+  0x75, 0x01,       // Report Size (1)
+  0x81, 0x06,       // Input (Data, Variable, Relative)
+  0x75, 0x07,       // Report Size (7)
+  0x81, 0x03,       // Input (Constant, Variable, Absolute)
+  0x05, 0x08,       // Usage Page (LEDs)
+  0x09, 0x57,       // Usage (System Microphone Mute)
+  0x75, 0x01,       // Report Size (1)
+  0x91, 0x06,       // Output (Data, Variable, Relative)
+  0x75, 0x07,       // Report Size (7)
+  0x91, 0x03,       // Output (Constant, Variable, Absolute)
+  0xC0              // End Collection
+};
+
+class USBHIDSystemMicrophoneMute : public USBHIDDevice {
+private:
+  USBHID hid;
+
+  bool send(uint8_t value) {
+    return hid.SendReport(HID_REPORT_ID_SYSTEM_CONTROL, &value, 1);
+  }
+
+public:
+  USBHIDSystemMicrophoneMute() : hid() {
+    static bool initialized = false;
+    if (!initialized) {
+      initialized = true;
+      USBHID::addDevice(this, sizeof(kSystemMicrophoneMuteDescriptor));
+    }
+  }
+
+  void begin() {
+    hid.begin();
+  }
+
+  size_t press() {
+    return send(1) ? 1 : 0;
+  }
+
+  size_t release() {
+    return send(0) ? 1 : 0;
+  }
+
+  uint16_t _onGetDescriptor(uint8_t* buffer) override {
+    memcpy(buffer, kSystemMicrophoneMuteDescriptor, sizeof(kSystemMicrophoneMuteDescriptor));
+    return sizeof(kSystemMicrophoneMuteDescriptor);
+  }
+
+  void _onOutput(uint8_t report_id, const uint8_t* buffer, uint16_t len) override {
+    if (report_id != HID_REPORT_ID_SYSTEM_CONTROL || len == 0) return;
+    Serial.printf("System microphone mute LED: %s\n", (buffer[0] & 0x01) ? "on" : "off");
+  }
+};
+
+USBHIDSystemMicrophoneMute SystemMicrophoneMute;
 
 // A warm reboot of some hosts leaves ESP32-S3 TinyUSB mounted but unable to
 // deliver HID reports in pre-OS screens. A hardware reset recovers it, so do
@@ -255,6 +323,14 @@ static void sendConsumerUp() {
   ConsumerControl.release();
 }
 
+static void sendSystemMicrophoneMuteDown() {
+  SystemMicrophoneMute.press();
+}
+
+static void sendSystemMicrophoneMuteUp() {
+  SystemMicrophoneMute.release();
+}
+
 // =====================
 // BLE GATT server
 // =====================
@@ -327,6 +403,14 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 
           case V2_CONSUMER_UP:
             if (len == 0) sendConsumerUp();
+            break;
+
+          case V2_SYSTEM_MICROPHONE_MUTE_DOWN:
+            if (len == 0) sendSystemMicrophoneMuteDown();
+            break;
+
+          case V2_SYSTEM_MICROPHONE_MUTE_UP:
+            if (len == 0) sendSystemMicrophoneMuteUp();
             break;
 
           default:
@@ -412,17 +496,18 @@ static void setupUsbHid() {
   Keyboard.begin();
   Mouse.begin();
   ConsumerControl.begin();
+  SystemMicrophoneMute.begin();
   HidProbe.begin();
   USB.begin();
 
-  Serial.println("USB HID Keyboard, Mouse & Consumer Control started.");
+  Serial.println("USB HID Keyboard, Mouse, Consumer Control & System Microphone Mute started.");
 }
 
 void setup() {
   Serial.begin(115200);
   delay(200);
 
-  Serial.println("Starting ESP32-S3 BLE -> USB HID keyboard, mouse & consumer bridge...");
+  Serial.println("Starting ESP32-S3 BLE -> USB HID keyboard, mouse, consumer & microphone mute bridge...");
 
   setupUsbHid();
   setupBle();
