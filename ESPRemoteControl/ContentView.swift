@@ -10,6 +10,7 @@ struct ContentView: View {
 
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
     @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.controlSpace.rawValue
+    @AppStorage("trackpadZoomShortcut") private var trackpadZoomShortcutRawValue = TrackpadZoomShortcut.control.rawValue
     @AppStorage("developerMode") private var developerMode = false
 
     @State private var inputText = ""
@@ -331,7 +332,7 @@ struct ContentView: View {
                 Label("Trackpad", systemImage: "rectangle.and.hand.point.up.left")
                     .font(.headline)
                 Spacer()
-                Text("1 палець — клік · 2 — правий")
+                Text("1 — клік · 2 — правий · 3 — середній")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -339,9 +340,15 @@ struct ContentView: View {
             TrackpadView(
                 onMove: { ble.sendMouseMove(dx: $0, dy: $1) },
                 onTap: { fingers in
-                    ble.sendMouseClick(button: fingers >= 2 ? 2 : 1)
+                    let button: UInt8 = switch fingers {
+                    case 3: 3
+                    case 2: 2
+                    default: 1
+                    }
+                    ble.sendMouseClick(button: button)
                 },
                 onScroll: { ble.sendMouseScroll(dx: $0, dy: $1) },
+                onZoom: { sendTrackpadZoom($0) },
                 onDragStart: { ble.sendMouseButtonDown(button: 1) },
                 onDragEnd: { ble.sendMouseButtonUp(button: 1) }
             )
@@ -583,6 +590,17 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Тачпад") {
+                    Picker("Pinch zoom", selection: $trackpadZoomShortcutRawValue) {
+                        ForEach(TrackpadZoomShortcut.allCases) { shortcut in
+                            Text(shortcut.displayName).tag(shortcut.rawValue)
+                        }
+                    }
+                    Text("Pinch надсилає звичайне клавіатурне zoom-скорочення; 2 пальці скролять, 2-finger tap — правий клік, 3-finger tap — середній клік.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Bluetooth") {
                     ConnectionStatusView(input: ble)
                 }
@@ -625,6 +643,10 @@ struct ContentView: View {
         HostLayoutShortcut(rawValue: shortcutRawValue) ?? .controlSpace
     }
 
+    private var selectedTrackpadZoomShortcut: TrackpadZoomShortcut {
+        TrackpadZoomShortcut(rawValue: trackpadZoomShortcutRawValue) ?? .control
+    }
+
     private var appVersion: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
@@ -658,6 +680,12 @@ struct ContentView: View {
 
     private func sendLayoutShortcut() {
         let command = selectedShortcut.command
+        ble.sendKeyTap(modifiers: command.modifiers, hidKeycode: command.keycode)
+    }
+
+    private func sendTrackpadZoom(_ step: Int) {
+        guard step != 0 else { return }
+        let command = selectedTrackpadZoomShortcut.command(for: step)
         ble.sendKeyTap(modifiers: command.modifiers, hidKeycode: command.keycode)
     }
 

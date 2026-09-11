@@ -1,10 +1,41 @@
 import SwiftUI
 import UIKit
 
+enum TrackpadZoomShortcut: String, CaseIterable, Identifiable {
+    case control
+    case command
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .control: "Ctrl + / − (Windows/Linux)"
+        case .command: "Command + / − (macOS)"
+        }
+    }
+
+    func command(for step: Int) -> HIDCommand {
+        let baseModifier: UInt8 = switch self {
+        case .control: HID.modLeftCtrl
+        case .command: HID.modLeftGUI
+        }
+
+        if step > 0 {
+            return HIDCommand(
+                modifiers: baseModifier | HID.modLeftShift,
+                keycode: HID.keyEqual
+            )
+        }
+
+        return HIDCommand(modifiers: baseModifier, keycode: HID.keyMinus)
+    }
+}
+
 struct TrackpadView: UIViewRepresentable {
     var onMove: (Int8, Int8) -> Void
     var onTap: (Int) -> Void
     var onScroll: (Int8, Int8) -> Void
+    var onZoom: (Int) -> Void = { _ in }
     var onDragStart: () -> Void = {}
     var onDragEnd: () -> Void = {}
 
@@ -18,6 +49,7 @@ struct TrackpadView: UIViewRepresentable {
         view.onMove = onMove
         view.onTap = onTap
         view.onScroll = onScroll
+        view.onZoom = onZoom
         view.onDragStart = onDragStart
         view.onDragEnd = onDragEnd
     }
@@ -27,14 +59,17 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     var onMove: ((Int8, Int8) -> Void)?
     var onTap: ((Int) -> Void)?
     var onScroll: ((Int8, Int8) -> Void)?
+    var onZoom: ((Int) -> Void)?
     var onDragStart: (() -> Void)?
     var onDragEnd: (() -> Void)?
 
     private let movementSensitivity: CGFloat = 1.55
     private let scrollSensitivity: CGFloat = 0.34
+    private let pinchStepThreshold: CGFloat = 0.08
     private var lastOneFingerLocation = CGPoint.zero
     private var lastTwoFingerLocation = CGPoint.zero
     private var isDragging = false
+    private var isPinching = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -63,11 +98,20 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         twoFingerTap.delegate = self
         addGestureRecognizer(twoFingerTap)
 
+        let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap(_:)))
+        threeFingerTap.numberOfTouchesRequired = 3
+        threeFingerTap.delegate = self
+        addGestureRecognizer(threeFingerTap)
+
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
         scroll.minimumNumberOfTouches = 2
         scroll.maximumNumberOfTouches = 2
         scroll.delegate = self
         addGestureRecognizer(scroll)
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
 
         // Long-press holds the left mouse button. Movement continues through
         // the normal one-finger pan recognizer, so the cursor reacts instantly.
@@ -101,7 +145,14 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         onTap?(2)
     }
 
+    @objc private func handleThreeFingerTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        onTap?(3)
+    }
+
     @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
+        guard !isPinching else { return }
+
         switch gesture.state {
         case .began:
             lastTwoFingerLocation = gesture.location(in: self)
@@ -113,6 +164,27 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
                 onScroll?(dx, dy)
             }
             lastTwoFingerLocation = location
+        default:
+            break
+        }
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            isPinching = true
+            gesture.scale = 1
+        case .changed:
+            let delta = gesture.scale - 1
+            if delta >= pinchStepThreshold {
+                onZoom?(1)
+                gesture.scale = 1
+            } else if delta <= -pinchStepThreshold {
+                onZoom?(-1)
+                gesture.scale = 1
+            }
+        case .ended, .cancelled, .failed:
+            isPinching = false
         default:
             break
         }
