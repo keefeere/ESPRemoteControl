@@ -11,6 +11,7 @@ struct ContentView: View {
     @AppStorage("targetKeyboardLayout") private var layoutRawValue = KeyboardLayout.englishUS.rawValue
     @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.controlSpace.rawValue
     @AppStorage("trackpadZoomShortcut") private var trackpadZoomShortcutRawValue = TrackpadZoomShortcut.control.rawValue
+    @AppStorage("jigglerIntervalIndex") private var jigglerIntervalIndex = 7
     @AppStorage("developerMode") private var developerMode = false
 
     @State private var inputText = ""
@@ -25,6 +26,8 @@ struct ContentView: View {
     @State private var showsLayoutHelp = false
     @State private var showsPrivacyHelp = false
     @State private var jigglerEnabled = false
+
+    private let jigglerIntervals: [Double] = [0.5, 1, 2, 5, 7, 10, 15, 20]
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -77,7 +80,7 @@ struct ContentView: View {
             receiveSharedTextIfNeeded()
             receiveShortcutTextIfNeeded()
         }
-        .task(id: jigglerEnabled) {
+        .task(id: "\(jigglerEnabled)-\(jigglerIntervalIndex)") {
             await runJiggler()
         }
         .sheet(isPresented: $showsSettings) {
@@ -365,6 +368,10 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08))
             }
+
+            Text("Подвійний тап + утримання другого дотику — drag. Вертикальний рух уздовж правої грані — edge scroll.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
@@ -504,9 +511,38 @@ struct ContentView: View {
                     .labelsHidden()
             }
 
-            Text(jigglerEnabled ? "Активний · рух раз на 20 секунд" : "Вимкнений")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(jigglerEnabled ? Color.accentColor : Color.secondary)
+            Text(
+                jigglerEnabled
+                    ? "Активний · пауза \(jigglerIntervalLabel(jigglerInterval)) с"
+                    : "Вимкнений · пауза \(jigglerIntervalLabel(jigglerInterval)) с"
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(jigglerEnabled ? Color.accentColor : Color.secondary)
+
+            Slider(
+                value: Binding(
+                    get: { Double(safeJigglerIntervalIndex) },
+                    set: { jigglerIntervalIndex = Int($0.rounded()) }
+                ),
+                in: 0...Double(jigglerIntervals.count - 1),
+                step: 1
+            )
+            .accessibilityLabel("Пауза Mouse Jiggler")
+            .accessibilityValue("\(jigglerIntervalLabel(jigglerInterval)) секунд")
+
+            HStack(spacing: 0) {
+                ForEach(Array(jigglerIntervals.enumerated()), id: \.offset) { index, interval in
+                    VStack(spacing: 2) {
+                        Capsule()
+                            .fill(index == safeJigglerIntervalIndex ? Color.accentColor : Color.secondary.opacity(0.35))
+                            .frame(width: 2, height: 6)
+                        Text(jigglerIntervalLabel(interval))
+                            .font(.system(size: 9, weight: index == safeJigglerIntervalIndex ? .semibold : .regular, design: .monospaced))
+                            .foregroundStyle(index == safeJigglerIntervalIndex ? Color.primary : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
 
             Text("Рухається на 1 HID-крок і повертається назад, тому курсор практично не зміщується. Працює лише поки ESP Remote активний на екрані; при переході iOS у background автоматично вимикається.")
                 .font(.caption)
@@ -596,7 +632,7 @@ struct ContentView: View {
                             Text(shortcut.displayName).tag(shortcut.rawValue)
                         }
                     }
-                    Text("Pinch надсилає звичайне клавіатурне zoom-скорочення; 2 пальці скролять, 2-finger tap — правий клік, 3-finger tap — середній клік.")
+                    Text("2 пальці скролять; pinch вмикається лише після помітної зміни відстані між пальцями. Подвійний тап + утримання другого дотику — drag; права грань — однопальцевий edge scroll; 2-finger tap — правий клік, 3-finger tap — середній.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -645,6 +681,18 @@ struct ContentView: View {
 
     private var selectedTrackpadZoomShortcut: TrackpadZoomShortcut {
         TrackpadZoomShortcut(rawValue: trackpadZoomShortcutRawValue) ?? .control
+    }
+
+    private var safeJigglerIntervalIndex: Int {
+        min(max(jigglerIntervalIndex, 0), jigglerIntervals.count - 1)
+    }
+
+    private var jigglerInterval: Double {
+        jigglerIntervals[safeJigglerIntervalIndex]
+    }
+
+    private func jigglerIntervalLabel(_ interval: Double) -> String {
+        interval == 0.5 ? "0.5" : String(Int(interval))
     }
 
     private var appVersion: String {
@@ -808,8 +856,9 @@ struct ContentView: View {
         guard jigglerEnabled else { return }
 
         while !Task.isCancelled, jigglerEnabled {
+            let pauseMilliseconds = Int64(jigglerInterval * 1_000)
             do {
-                try await Task.sleep(for: .seconds(20))
+                try await Task.sleep(for: .milliseconds(pauseMilliseconds))
             } catch {
                 return
             }
