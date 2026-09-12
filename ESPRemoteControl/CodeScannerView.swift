@@ -9,12 +9,15 @@ struct CodeScannerButton: View {
     let onImmediateSend: (String) -> Void
 
     @AppStorage("scannerAutoSend") private var autoSend = false
+    @AppStorage("scannerBatchMode") private var batchMode = false
     @State private var showsScanner = false
     @State private var alertMessage: String?
+    @State private var batchStatus: String?
 
     var body: some View {
         Button {
             onPrepare()
+            batchStatus = nil
             openScanner()
         } label: {
             Image(systemName: "qrcode.viewfinder")
@@ -22,11 +25,12 @@ struct CodeScannerButton: View {
         }
         .buttonStyle(.borderless)
         .padding(.top, 4)
-        .accessibilityLabel("Сканувати QR або 2D код")
-        .help("Сканувати QR, Data Matrix, Aztec або PDF417")
+        .accessibilityLabel("Сканувати QR, 2D або штрихкод")
+        .help("QR, Data Matrix, Aztec, PDF417, EAN/UPC, Code 39/93/128 та ITF")
         .sheet(isPresented: $showsScanner) {
             NavigationStack {
                 CodeScannerView(
+                    continuous: batchMode,
                     onCode: handleCode,
                     onError: { message in
                         alertMessage = message
@@ -44,11 +48,16 @@ struct CodeScannerButton: View {
                 .safeAreaInset(edge: .bottom) {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Одразу надсилати", isOn: $autoSend)
-                        Text(autoSend
-                             ? (isReady
-                                ? "Після сканування код одразу буде набраний на підключеному комп’ютері."
-                                : "HID не готовий: результат залишиться у полі «Ввід».")
-                             : "Після сканування результат буде вставлено у поле «Ввід» без автоматичного надсилання.")
+                            .disabled(batchMode)
+                        Toggle("Batch mode", isOn: $batchMode)
+
+                        if let batchStatus {
+                            Label(batchStatus, systemImage: "barcode.viewfinder")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(isReady ? Color.accentColor : Color.orange)
+                        }
+
+                        Text(scannerModeDescription)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -68,6 +77,22 @@ struct CodeScannerButton: View {
         } message: {
             Text(alertMessage ?? "")
         }
+    }
+
+    private var scannerModeDescription: String {
+        if batchMode {
+            return isReady
+                ? "Batch mode не закриває камеру: кожен код одразу надсилається на комп’ютер, після нього — Enter. Повтор одного коду з того самого кадру приглушується."
+                : "Batch mode потребує готового HID. Сканер залишиться відкритим, але код не буде відправлений, доки підключення не готове."
+        }
+
+        if autoSend {
+            return isReady
+                ? "Після сканування код одразу буде набраний на підключеному комп’ютері."
+                : "HID не готовий: результат залишиться у полі «Ввід»."
+        }
+
+        return "Після сканування результат буде вставлено у поле «Ввід» без автоматичного надсилання."
     }
 
     private func openScanner() {
@@ -93,6 +118,20 @@ struct CodeScannerButton: View {
 
     private func handleCode(_ value: String) {
         text = value
+
+        if batchMode {
+            guard isReady else {
+                batchStatus = "HID не готовий · код збережено у полі «Ввід»"
+                return
+            }
+
+            // TextTypingPlanner maps the trailing newline to HID Enter, so the
+            // whole barcode + submit action stays in the same ordered key queue.
+            onImmediateSend(value + "\n")
+            batchStatus = "Надіслано: \(value)"
+            return
+        }
+
         showsScanner = false
 
         guard autoSend else { return }
@@ -105,25 +144,36 @@ struct CodeScannerButton: View {
 }
 
 struct CodeScannerView: UIViewControllerRepresentable {
+    let continuous: Bool
     let onCode: (String) -> Void
     let onError: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onCode: onCode, onError: onError)
+        Coordinator(continuous: continuous, onCode: onCode, onError: onError)
     }
 
     func makeUIViewController(context: Context) -> ScannerViewController {
         ScannerViewController(delegate: context.coordinator)
     }
 
-    func updateUIViewController(_ uiViewController: ScannerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: ScannerViewController, context: Context) {
+        context.coordinator.continuous = continuous
+    }
 
     final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate, ScannerViewControllerDelegate {
+        var continuous: Bool
         private let onCode: (String) -> Void
         private let onError: (String) -> Void
         private var acceptedCode = false
+        private var lastValue: String?
+        private var lastAcceptedAt: TimeInterval = 0
 
-        init(onCode: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+        init(
+            continuous: Bool,
+            onCode: @escaping (String) -> Void,
+            onError: @escaping (String) -> Void
+        ) {
+            self.continuous = continuous
             self.onCode = onCode
             self.onError = onError
         }
@@ -137,13 +187,26 @@ struct CodeScannerView: UIViewControllerRepresentable {
             didOutput metadataObjects: [AVMetadataObject],
             from connection: AVCaptureConnection
         ) {
-            guard !acceptedCode,
-                  let readable = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+            guard let readable = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
                   let value = readable.stringValue,
                   !value.isEmpty else { return }
 
+            if continuous {
+                let now = ProcessInfo.processInfo.systemUptime
+                if value == lastValue, now - lastAcceptedAt < 0.75 {
+                    return
+                }
+                lastValue = value
+                lastAcceptedAt = now
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                onCode(value)
+                return
+            }
+
+            guard !acceptedCode else { return }
             acceptedCode = true
             output.setMetadataObjectsDelegate(nil, queue: nil)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
             onCode(value)
         }
     }
@@ -201,6 +264,9 @@ final class ScannerViewController: UIViewController {
             return
         }
 
+        configureCamera(camera)
+        session.sessionPreset = .high
+
         do {
             let input = try AVCaptureDeviceInput(device: camera)
             guard session.canAddInput(input) else {
@@ -221,10 +287,24 @@ final class ScannerViewController: UIViewController {
         session.addOutput(output)
         output.setMetadataObjectsDelegate(scannerDelegate, queue: .main)
 
-        let wanted: [AVMetadataObject.ObjectType] = [.qr, .dataMatrix, .aztec, .pdf417]
+        let wanted: [AVMetadataObject.ObjectType] = [
+            .qr,
+            .dataMatrix,
+            .aztec,
+            .pdf417,
+            .ean8,
+            .ean13,
+            .upce,
+            .code39,
+            .code39Mod43,
+            .code93,
+            .code128,
+            .interleaved2of5,
+            .itf14
+        ]
         output.metadataObjectTypes = wanted.filter { output.availableMetadataObjectTypes.contains($0) }
         guard !output.metadataObjectTypes.isEmpty else {
-            scannerDelegate?.scanner(self, didFail: "Цей пристрій не підтримує QR/2D scanning")
+            scannerDelegate?.scanner(self, didFail: "Цей пристрій не підтримує barcode scanning")
             return
         }
 
@@ -243,8 +323,25 @@ final class ScannerViewController: UIViewController {
         NSLayoutConstraint.activate([
             guide.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             guide.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            guide.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.72),
-            guide.heightAnchor.constraint(equalTo: guide.widthAnchor)
+            guide.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.82),
+            guide.heightAnchor.constraint(equalTo: guide.widthAnchor, multiplier: 0.58)
         ])
+    }
+
+    private func configureCamera(_ camera: AVCaptureDevice) {
+        do {
+            try camera.lockForConfiguration()
+            defer { camera.unlockForConfiguration() }
+
+            if camera.isFocusModeSupported(.continuousAutoFocus) {
+                camera.focusMode = .continuousAutoFocus
+            }
+            if camera.isExposureModeSupported(.continuousAutoExposure) {
+                camera.exposureMode = .continuousAutoExposure
+            }
+        } catch {
+            // Defaults still work; scanning should not fail just because an
+            // optional camera tuning setting could not be changed.
+        }
     }
 }
