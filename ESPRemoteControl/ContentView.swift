@@ -12,6 +12,7 @@ struct ContentView: View {
     @AppStorage("hostLayoutShortcut") private var shortcutRawValue = HostLayoutShortcut.controlSpace.rawValue
     @AppStorage("trackpadZoomShortcut") private var trackpadZoomShortcutRawValue = TrackpadZoomShortcut.control.rawValue
     @AppStorage("jigglerIntervalIndex") private var jigglerIntervalIndex = 7
+    @AppStorage("scannerBatchMode") private var scannerBatchMode = false
     @AppStorage("developerMode") private var developerMode = false
 
     @State private var inputText = ""
@@ -97,7 +98,7 @@ struct ContentView: View {
                     mouseButtons
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 14)
+                .padding(.bottom, 14)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(
@@ -633,6 +634,13 @@ struct ContentView: View {
                         }
                     }
                     Text("2 пальці скролять; pinch вмикається лише після помітної зміни відстані між пальцями. Подвійний тап + утримання другого дотику — drag; права грань — однопальцевий edge scroll; 2-finger tap — правий клік, 3-finger tap — середній.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Сканер") {
+                    Toggle("Batch mode", isOn: $scannerBatchMode)
+                    Text("У Batch mode камера не закривається після коду: кожен код одразу надсилається через HID, після нього автоматично надсилається Enter.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
