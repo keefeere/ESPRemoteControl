@@ -64,12 +64,15 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     var onDragEnd: (() -> Void)?
 
     private let movementSensitivity: CGFloat = 1.55
-    private let scrollSensitivity: CGFloat = 0.34
-    private let pinchStepThreshold: CGFloat = 0.08
+    private let scrollSensitivity: CGFloat = 0.40
+    private let edgeScrollSensitivity: CGFloat = 0.40
+    private let pinchActivationThreshold: CGFloat = 0.14
+    private let pinchStepThreshold: CGFloat = 0.12
     private var lastOneFingerLocation = CGPoint.zero
     private var lastTwoFingerLocation = CGPoint.zero
     private var isDragging = false
     private var isPinching = false
+    private var isEdgeScrolling = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -113,23 +116,39 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         pinch.delegate = self
         addGestureRecognizer(pinch)
 
-        // Long-press holds the left mouse button. Movement continues through
-        // the normal one-finger pan recognizer, so the cursor reacts instantly.
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-        longPress.minimumPressDuration = 0.28
-        longPress.allowableMovement = 32
-        longPress.delegate = self
-        addGestureRecognizer(longPress)
+        // One completed tap followed by a held second touch behaves like a
+        // laptop trackpad: the second touch presses the left button and can drag.
+        let tapAndDrag = UILongPressGestureRecognizer(target: self, action: #selector(handleTapAndDrag(_:)))
+        tapAndDrag.numberOfTapsRequired = 1
+        tapAndDrag.numberOfTouchesRequired = 1
+        tapAndDrag.minimumPressDuration = 0.06
+        tapAndDrag.allowableMovement = 56
+        tapAndDrag.delegate = self
+        addGestureRecognizer(tapAndDrag)
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
         case .began:
-            lastOneFingerLocation = gesture.location(in: self)
+            let location = gesture.location(in: self)
+            lastOneFingerLocation = location
+            isEdgeScrolling = location.x >= bounds.maxX - rightEdgeScrollWidth
         case .changed:
             let location = gesture.location(in: self)
-            emitMovement(from: lastOneFingerLocation, to: location)
+            if isDragging {
+                isEdgeScrolling = false
+                emitMovement(from: lastOneFingerLocation, to: location)
+            } else if isEdgeScrolling {
+                let dy = Int8(clamping: Int((lastOneFingerLocation.y - location.y) * edgeScrollSensitivity))
+                if dy != 0 {
+                    onScroll?(0, dy)
+                }
+            } else {
+                emitMovement(from: lastOneFingerLocation, to: location)
+            }
             lastOneFingerLocation = location
+        case .ended, .cancelled, .failed:
+            isEdgeScrolling = false
         default:
             break
         }
@@ -172,10 +191,21 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         switch gesture.state {
         case .began:
-            isPinching = true
+            // Do not claim the two-finger gesture immediately. Small finger
+            // separation changes are common during scroll and should stay scroll.
+            isPinching = false
             gesture.scale = 1
         case .changed:
             let delta = gesture.scale - 1
+
+            if !isPinching {
+                guard abs(delta) >= pinchActivationThreshold else { return }
+                isPinching = true
+                onZoom?(delta > 0 ? 1 : -1)
+                gesture.scale = 1
+                return
+            }
+
             if delta >= pinchStepThreshold {
                 onZoom?(1)
                 gesture.scale = 1
@@ -190,10 +220,11 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+    @objc private func handleTapAndDrag(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
             isDragging = true
+            isEdgeScrolling = false
             onDragStart?()
         case .ended, .cancelled, .failed:
             if isDragging {
@@ -203,6 +234,10 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         default:
             break
         }
+    }
+
+    private var rightEdgeScrollWidth: CGFloat {
+        max(28, min(36, bounds.width * 0.11))
     }
 
     private func emitMovement(from start: CGPoint, to end: CGPoint) {
