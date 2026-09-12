@@ -64,7 +64,7 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     var onDragEnd: (() -> Void)?
 
     private let movementSensitivity: CGFloat = 1.55
-    private let scrollSensitivity: CGFloat = 0.40
+    private let scrollSensitivity: CGFloat = 0.34
     private let edgeScrollSensitivity: CGFloat = 0.40
     private let pinchActivationThreshold: CGFloat = 0.14
     private let pinchStepThreshold: CGFloat = 0.12
@@ -73,6 +73,7 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     private var isDragging = false
     private var isPinching = false
     private var isEdgeScrolling = false
+    private var lastThreeFingerTapTime: TimeInterval = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -105,6 +106,12 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         threeFingerTap.numberOfTouchesRequired = 3
         threeFingerTap.delegate = self
         addGestureRecognizer(threeFingerTap)
+
+        // A lower-finger-count tap waits until the higher-finger-count gesture
+        // has definitely failed. This prevents a 3-finger tap from leaking a
+        // right click (or an extra left click) while fingers lift unevenly.
+        twoFingerTap.require(toFail: threeFingerTap)
+        tap.require(toFail: twoFingerTap)
 
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
         scroll.minimumNumberOfTouches = 2
@@ -160,12 +167,16 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleTwoFingerTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended else { return }
+        guard gesture.state == .ended, !isPinching, !isDragging else { return }
         onTap?(2)
     }
 
     @objc private func handleThreeFingerTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended else { return }
+        guard gesture.state == .ended, !isPinching, !isDragging else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastThreeFingerTapTime > 0.25 else { return }
+        lastThreeFingerTapTime = now
         onTap?(3)
     }
 
@@ -252,7 +263,15 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        gestureRecognizer.view === self && otherGestureRecognizer.view === self
+        guard gestureRecognizer.view === self, otherGestureRecognizer.view === self else { return false }
+
+        // Tap recognizers are intentionally exclusive. Pan + long-press still
+        // recognize together so tap-and-drag can move immediately, and scroll +
+        // pinch can arbitrate using the delayed pinch threshold above.
+        if gestureRecognizer is UITapGestureRecognizer || otherGestureRecognizer is UITapGestureRecognizer {
+            return false
+        }
+        return true
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
