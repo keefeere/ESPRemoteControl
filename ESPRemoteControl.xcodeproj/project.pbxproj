@@ -52,7 +52,7 @@
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = A1200000000000000000A /* ESPRemoteControlShare */;
+			target = A1200000000000000000000A /* ESPRemoteControlShare */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
