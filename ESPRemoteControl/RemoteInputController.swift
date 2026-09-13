@@ -138,15 +138,15 @@ final class RemoteInputController: ObservableObject {
         active.sendMouseScroll(dx: dx, dy: dy)
     }
     func sendMouseClick(button: UInt8) {
-        guard isReady else { return }
-        active.sendMouseClick(button: button)
+        guard isReady, let mask = HIDMouseButton.mask(forOrdinal: button) else { return }
+        active.sendMouseClick(button: mask)
     }
     func sendMouseButtonDown(button: UInt8) {
-        guard isReady else { return }
-        active.sendMouseButtonDown(button: button)
+        guard isReady, let mask = HIDMouseButton.mask(forOrdinal: button) else { return }
+        active.sendMouseButtonDown(button: mask)
     }
     func sendMouseButtonUp(button: UInt8) {
-        guard isReady else { return }
-        active.sendMouseButtonUp(button: button)
+        guard isReady, let mask = HIDMouseButton.mask(forOrdinal: button) else { return }
+        active.sendMouseButtonUp(button: mask)
     }
 }
