@@ -75,6 +75,14 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     private var isEdgeScrolling = false
     private var lastThreeFingerTapTime: TimeInterval = 0
 
+    // UIKit may deliver the fingers of one tap a few milliseconds apart and may
+    // end them unevenly. Remember the maximum concurrent touch count for the
+    // complete touch sequence so a 3-finger tap cannot collapse into 1 + 2.
+    private var activeTouchCount = 0
+    private var maxTouchCountInSequence = 0
+    private var lastCompletedTouchCount = 0
+    private var lastTouchSequenceEndedAt: TimeInterval = 0
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
@@ -86,6 +94,40 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        activeTouchCount += touches.count
+        maxTouchCountInSequence = max(maxTouchCountInSequence, activeTouchCount)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        finishTouches(touches.count)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        finishTouches(touches.count)
+    }
+
+    private func finishTouches(_ count: Int) {
+        activeTouchCount = max(0, activeTouchCount - count)
+        guard activeTouchCount == 0 else { return }
+
+        lastCompletedTouchCount = maxTouchCountInSequence
+        lastTouchSequenceEndedAt = ProcessInfo.processInfo.systemUptime
+        maxTouchCountInSequence = 0
+    }
+
+    private func touchCountForTap() -> Int {
+        if maxTouchCountInSequence > 0 {
+            return maxTouchCountInSequence
+        }
+
+        let age = ProcessInfo.processInfo.systemUptime - lastTouchSequenceEndedAt
+        return age <= 0.35 ? lastCompletedTouchCount : 0
+    }
+
     private func setupGestures() {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
@@ -94,24 +136,21 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.numberOfTouchesRequired = 1
+        tap.cancelsTouchesInView = false
         tap.delegate = self
         addGestureRecognizer(tap)
 
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
         twoFingerTap.numberOfTouchesRequired = 2
+        twoFingerTap.cancelsTouchesInView = false
         twoFingerTap.delegate = self
         addGestureRecognizer(twoFingerTap)
 
         let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap(_:)))
         threeFingerTap.numberOfTouchesRequired = 3
+        threeFingerTap.cancelsTouchesInView = false
         threeFingerTap.delegate = self
         addGestureRecognizer(threeFingerTap)
-
-        // A lower-finger-count tap waits until the higher-finger-count gesture
-        // has definitely failed. This prevents a 3-finger tap from leaking a
-        // right click (or an extra left click) while fingers lift unevenly.
-        twoFingerTap.require(toFail: threeFingerTap)
-        tap.require(toFail: twoFingerTap)
 
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
         scroll.minimumNumberOfTouches = 2
@@ -162,17 +201,25 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended, !isDragging else { return }
+        guard gesture.state == .ended,
+              !isDragging,
+              touchCountForTap() == 1 else { return }
         onTap?(1)
     }
 
     @objc private func handleTwoFingerTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended, !isPinching, !isDragging else { return }
+        guard gesture.state == .ended,
+              !isPinching,
+              !isDragging,
+              touchCountForTap() == 2 else { return }
         onTap?(2)
     }
 
     @objc private func handleThreeFingerTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended, !isPinching, !isDragging else { return }
+        guard gesture.state == .ended,
+              !isPinching,
+              !isDragging,
+              touchCountForTap() == 3 else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastThreeFingerTapTime > 0.25 else { return }
@@ -265,9 +312,13 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     ) -> Bool {
         guard gestureRecognizer.view === self, otherGestureRecognizer.view === self else { return false }
 
-        // Tap recognizers are intentionally exclusive. Pan + long-press still
-        // recognize together so tap-and-drag can move immediately, and scroll +
-        // pinch can arbitrate using the delayed pinch threshold above.
+        // Let all tap recognizers observe the same physical tap; the touch-count
+        // gate above decides which single action is emitted. A tap does not need
+        // to run simultaneously with pan/scroll/pinch/drag recognizers.
+        if gestureRecognizer is UITapGestureRecognizer,
+           otherGestureRecognizer is UITapGestureRecognizer {
+            return true
+        }
         if gestureRecognizer is UITapGestureRecognizer || otherGestureRecognizer is UITapGestureRecognizer {
             return false
         }
