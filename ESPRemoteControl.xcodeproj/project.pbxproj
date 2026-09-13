@@ -52,7 +52,7 @@
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = A1200000000000000000000A /* ESPRemoteControlShare */;
+			target = A1200000000000000000A /* ESPRemoteControlShare */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -186,7 +186,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E85CFC5E2EEEED6000727C31 /* Build configuration list for PBXProject "ESPRemoteControl" */;
+			buildConfigurationList = E85CFC5E2EEEED5F00727C31 /* Build configuration list for PBXProject "ESPRemoteControl" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
