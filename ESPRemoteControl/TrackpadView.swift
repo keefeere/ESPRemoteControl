@@ -73,15 +73,6 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     private var isDragging = false
     private var isPinching = false
     private var isEdgeScrolling = false
-    private var lastThreeFingerTapTime: TimeInterval = 0
-
-    // UIKit may deliver the fingers of one tap a few milliseconds apart and may
-    // end them unevenly. Remember the maximum concurrent touch count for the
-    // complete touch sequence so a 3-finger tap cannot collapse into 1 + 2.
-    private var activeTouchCount = 0
-    private var maxTouchCountInSequence = 0
-    private var lastCompletedTouchCount = 0
-    private var lastTouchSequenceEndedAt: TimeInterval = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -94,63 +85,21 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        super.touchesBegan(touches, with: event)
-        activeTouchCount += touches.count
-        maxTouchCountInSequence = max(maxTouchCountInSequence, activeTouchCount)
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        super.touchesEnded(touches, with: event)
-        finishTouches(touches.count)
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        super.touchesCancelled(touches, with: event)
-        finishTouches(touches.count)
-    }
-
-    private func finishTouches(_ count: Int) {
-        activeTouchCount = max(0, activeTouchCount - count)
-        guard activeTouchCount == 0 else { return }
-
-        lastCompletedTouchCount = maxTouchCountInSequence
-        lastTouchSequenceEndedAt = ProcessInfo.processInfo.systemUptime
-        maxTouchCountInSequence = 0
-    }
-
-    private func touchCountForTap() -> Int {
-        if maxTouchCountInSequence > 0 {
-            return maxTouchCountInSequence
-        }
-
-        let age = ProcessInfo.processInfo.systemUptime - lastTouchSequenceEndedAt
-        return age <= 0.35 ? lastCompletedTouchCount : 0
-    }
-
     private func setupGestures() {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         addGestureRecognizer(pan)
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        tap.numberOfTouchesRequired = 1
+        // One recognizer owns all 1/2/3-finger taps. Native UITapGestureRecognizer
+        // instances with different touch counts can race as fingers land/lift at
+        // slightly different times; that is what made 3-finger taps leak into a
+        // right click. This recognizer waits for the complete touch sequence and
+        // reports the maximum number of simultaneous fingers exactly once.
+        let tap = FingerCountTapGestureRecognizer(target: self, action: #selector(handleFingerCountTap(_:)))
         tap.cancelsTouchesInView = false
         tap.delegate = self
         addGestureRecognizer(tap)
-
-        let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
-        twoFingerTap.numberOfTouchesRequired = 2
-        twoFingerTap.cancelsTouchesInView = false
-        twoFingerTap.delegate = self
-        addGestureRecognizer(twoFingerTap)
-
-        let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap(_:)))
-        threeFingerTap.numberOfTouchesRequired = 3
-        threeFingerTap.cancelsTouchesInView = false
-        threeFingerTap.delegate = self
-        addGestureRecognizer(threeFingerTap)
 
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
         scroll.minimumNumberOfTouches = 2
@@ -200,31 +149,12 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended,
-              !isDragging,
-              touchCountForTap() == 1 else { return }
-        onTap?(1)
-    }
-
-    @objc private func handleTwoFingerTap(_ gesture: UITapGestureRecognizer) {
+    @objc private func handleFingerCountTap(_ gesture: FingerCountTapGestureRecognizer) {
         guard gesture.state == .ended,
               !isPinching,
               !isDragging,
-              touchCountForTap() == 2 else { return }
-        onTap?(2)
-    }
-
-    @objc private func handleThreeFingerTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended,
-              !isPinching,
-              !isDragging,
-              touchCountForTap() == 3 else { return }
-
-        let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastThreeFingerTapTime > 0.25 else { return }
-        lastThreeFingerTapTime = now
-        onTap?(3)
+              (1...3).contains(gesture.recognizedFingerCount) else { return }
+        onTap?(gesture.recognizedFingerCount)
     }
 
     @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
@@ -312,21 +242,100 @@ final class TrackpadUIView: UIView, UIGestureRecognizerDelegate {
     ) -> Bool {
         guard gestureRecognizer.view === self, otherGestureRecognizer.view === self else { return false }
 
-        // Let all tap recognizers observe the same physical tap; the touch-count
-        // gate above decides which single action is emitted. A tap does not need
-        // to run simultaneously with pan/scroll/pinch/drag recognizers.
-        if gestureRecognizer is UITapGestureRecognizer,
-           otherGestureRecognizer is UITapGestureRecognizer {
-            return true
-        }
-        if gestureRecognizer is UITapGestureRecognizer || otherGestureRecognizer is UITapGestureRecognizer {
-            return false
-        }
+        // The discrete tap recognizer stays passive until all fingers are up and
+        // fails as soon as movement exceeds tap tolerance. Pan/scroll/pinch must
+        // therefore be allowed to proceed independently while it is still possible.
         return true
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         bounds.contains(touch.location(in: self))
+    }
+}
+
+private final class FingerCountTapGestureRecognizer: UIGestureRecognizer {
+    private let maximumTapDuration: TimeInterval = 0.35
+    private let maximumMovement: CGFloat = 10
+
+    private var beganAt: TimeInterval = 0
+    private var maximumConcurrentTouches = 0
+    private var initialLocations: [ObjectIdentifier: CGPoint] = [:]
+
+    private(set) var recognizedFingerCount = 0
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+
+        if beganAt == 0 {
+            beganAt = ProcessInfo.processInfo.systemUptime
+        }
+
+        for touch in touches {
+            initialLocations[ObjectIdentifier(touch)] = touch.location(in: view)
+        }
+
+        maximumConcurrentTouches = max(maximumConcurrentTouches, activeTouchCount(in: event))
+        if maximumConcurrentTouches > 3 {
+            state = .failed
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard state == .possible else { return }
+
+        for touch in touches {
+            guard let origin = initialLocations[ObjectIdentifier(touch)] else { continue }
+            let location = touch.location(in: view)
+            if hypot(location.x - origin.x, location.y - origin.y) > maximumMovement {
+                state = .failed
+                return
+            }
+        }
+
+        maximumConcurrentTouches = max(maximumConcurrentTouches, activeTouchCount(in: event))
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        guard state == .possible else { return }
+
+        maximumConcurrentTouches = max(maximumConcurrentTouches, activeTouchCount(in: event))
+        guard activeTouchCount(in: event) == 0 else { return }
+
+        let duration = ProcessInfo.processInfo.systemUptime - beganAt
+        guard duration <= maximumTapDuration,
+              (1...3).contains(maximumConcurrentTouches) else {
+            state = .failed
+            return
+        }
+
+        recognizedFingerCount = maximumConcurrentTouches
+        state = .recognized
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        state = .cancelled
+    }
+
+    override func reset() {
+        super.reset()
+        beganAt = 0
+        maximumConcurrentTouches = 0
+        initialLocations.removeAll(keepingCapacity: true)
+        recognizedFingerCount = 0
+    }
+
+    private func activeTouchCount(in event: UIEvent) -> Int {
+        event.allTouches?.reduce(into: 0) { count, touch in
+            switch touch.phase {
+            case .began, .moved, .stationary:
+                count += 1
+            default:
+                break
+            }
+        } ?? 0
     }
 }
 

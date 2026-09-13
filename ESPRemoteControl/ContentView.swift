@@ -49,7 +49,7 @@ struct ContentView: View {
                 .tag(2)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if selectedTab != 1 {
+            if selectedTab == 2 {
                 connectionHeader
             }
         }
@@ -90,21 +90,32 @@ struct ContentView: View {
     }
 
     private var inputPage: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                typingCard
-                trackpadCard
-                mouseButtons
+        VStack(spacing: 0) {
+            // Keep the connection controls in normal layout flow rather than a
+            // root safeAreaInset. The inset changed the ScrollView's effective
+            // content origin on iPhone and allowed the first card to scroll under
+            // the header, which also made its scanner/layout/privacy buttons
+            // untappable.
+            connectionHeader
+
+            ScrollView {
+                VStack(spacing: 18) {
+                    typingCard
+                    trackpadCard
+                    mouseButtons
+                }
+                .padding(.horizontal)
+                .padding(.top, 14)
+                .padding(.bottom, 14)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 14)
+            .scrollDismissesKeyboard(.interactively)
+            .background(
+                KeyboardDismissTapView {
+                    wantsFocus = false
+                }
+            )
+            .background(Color(.systemGroupedBackground))
         }
-        .scrollDismissesKeyboard(.interactively)
-        .background(
-            KeyboardDismissTapView {
-                wantsFocus = false
-            }
-        )
         .background(Color(.systemGroupedBackground))
     }
 
