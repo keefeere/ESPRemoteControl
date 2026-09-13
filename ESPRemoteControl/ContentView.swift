@@ -90,26 +90,22 @@ struct ContentView: View {
     }
 
     private var inputPage: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    typingCard
-                    trackpadCard
-                    mouseButtons
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 14)
+        ScrollView {
+            VStack(spacing: 18) {
+                typingCard
+                trackpadCard
+                mouseButtons
             }
-            .scrollDismissesKeyboard(.interactively)
-            .background(
-                KeyboardDismissTapView {
-                    wantsFocus = false
-                }
-            )
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("ESP Remote")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(.horizontal)
+            .padding(.bottom, 14)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .background(
+            KeyboardDismissTapView {
+                wantsFocus = false
+            }
+        )
+        .background(Color(.systemGroupedBackground))
     }
 
     private var toolsPage: some View {
@@ -156,32 +152,12 @@ struct ContentView: View {
 
     private var typingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Клавіатура", systemImage: "character.cursor.ibeam")
-                    .font(.headline)
-                Spacer()
+            HStack(spacing: 6) {
                 Text("Авто · \(selectedLayout.shortName)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-            }
 
-            HStack(alignment: .top, spacing: 8) {
-                KeyCaptureTextField(
-                    text: $inputText,
-                    wantsFirstResponder: $wantsFocus,
-                    isSecure: isSecureInput,
-                    onBeginEditing: {
-                        if inputText.isEmpty, pendingShortcutText == nil {
-                            isSecureInput = false
-                        }
-                    },
-                    onTextChange: handleTextChange,
-                    onReturn: handleReturnKey,
-                    onBackspaceWhenEmpty: handleBackspaceWhenEmpty
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: 88)
-                .layoutPriority(1)
+                Spacer(minLength: 8)
 
                 CodeScannerButton(
                     text: $inputText,
@@ -197,13 +173,12 @@ struct ContentView: View {
                     sendLayoutShortcut()
                 } label: {
                     Image(systemName: "globe")
-                        .frame(width: 30, height: 42)
+                        .frame(width: 30, height: 32)
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
                     longPressLabel: "Пояснення кнопки",
                     onLongPress: { showsLayoutHelp = true }
                 ))
-                .padding(.top, 4)
                 .accessibilityLabel("Перемкнути розкладку на комп’ютері")
                 .help("Надіслати скорочення зміни мови на комп’ютер")
                 .popover(isPresented: $showsLayoutHelp) {
@@ -217,13 +192,12 @@ struct ContentView: View {
                     isSecureInput.toggle()
                 } label: {
                     Image(systemName: isSecureInput ? "eye.slash" : "eye")
-                        .frame(width: 34, height: 42)
+                        .frame(width: 32, height: 32)
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
                     longPressLabel: "Пояснення кнопки",
                     onLongPress: { showsPrivacyHelp = true }
                 ))
-                .padding(.top, 4)
                 .accessibilityLabel(isSecureInput ? "Показати текст" : "Приховати текст")
                 .help(isSecureInput ? "Показати текст" : "Приховати текст")
                 .popover(isPresented: $showsPrivacyHelp) {
@@ -233,6 +207,22 @@ struct ContentView: View {
                         .presentationCompactAdaptation(.popover)
                 }
             }
+
+            KeyCaptureTextField(
+                text: $inputText,
+                wantsFirstResponder: $wantsFocus,
+                isSecure: isSecureInput,
+                onBeginEditing: {
+                    if inputText.isEmpty, pendingShortcutText == nil {
+                        isSecureInput = false
+                    }
+                },
+                onTextChange: handleTextChange,
+                onReturn: handleReturnKey,
+                onBackspaceWhenEmpty: handleBackspaceWhenEmpty
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 88)
             .padding(.horizontal, 12)
             .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -640,7 +630,7 @@ struct ContentView: View {
 
                 Section("Сканер") {
                     Toggle("Batch mode", isOn: $scannerBatchMode)
-                    Text("У Batch mode камера не закривається після коду: кожен код одразу надсилається через HID, після нього автоматично надсилається Enter.")
+                    Text("У Batch mode камера не закривається після коду: кожен код одразу надсилається через HID, після нього автоматично надсилається Enter. Режим QR / 2D або Штрихкод перемикається у самому сканері й запам’ятовується.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
