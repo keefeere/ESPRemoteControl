@@ -18,8 +18,11 @@ Unlike software solutions that require network setup or specific operating syste
 - **Layout synchronization** - Configurable Ctrl+Space, Ctrl+Shift, Alt+Shift, Shift+Space, or Win+Space host shortcut
 - **Shortcuts sharing** - Send text or URLs from the iOS Share sheet through a one-time Shortcuts setup; the main app waits for BLE and types it reliably
 - **Clipboard typing** - Send text from the iPhone clipboard in one tap
-- **Precision trackpad** - Multi-touch gestures for cursor control, clicking, and scrolling  
+- **Precision trackpad** - Cursor movement, two-finger scrolling/right click, pinch-to-zoom, tap-drag, edge scrolling, and three-finger middle click
 - **Keyboard trackpad** - Uses the free portrait space below the full keyboard without extra mouse buttons
+- **Hardware control deck** - System, media, audio, microphone-mute, and numpad HID controls
+- **QR and barcode scanner** - Scan into the composer or automatically type codes, including an optional batch mode
+- **Mouse jiggler** - Configurable foreground pointer movement with an automatic stop timer
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
 - **Zero configuration** - No drivers, no network setup, just plug and play
 - **Low latency** - Direct Bluetooth LE connection for responsive input
@@ -30,12 +33,10 @@ Unlike software solutions that require network setup or specific operating syste
 
 ## Experimental v2: direct Bluetooth
 
-The v2 prototype adds a direct BLE HID keyboard/mouse mode. The user confirmed
-keyboard and mouse input on iPhone/macOS: an existing BlueTouch pairing was
-reused, with input starting after Bluetooth was toggled off and on on the Mac.
-On Linux, input works and reconnecting after the computer sleeps and wakes was
-confirmed on 2.1.3 without relaunching the app; switching the selected computer
-between hosts is still under investigation, and Windows remains untested.
+The v2 prototype adds a direct BLE HID keyboard/mouse mode. Keyboard and mouse
+input are stable on macOS. Linux has worked in limited testing, including a
+2.1.3 sleep/wake reconnect without relaunching the app, but still has unresolved
+connection and host-switching problems. Windows remains untested.
 ESP32 mode remains the initial default, and the app remembers the selected mode.
 
 1. In the connection status strip, open **ESP** and choose **Прямий Bluetooth**.
@@ -196,6 +197,10 @@ To build the same unsigned IPA on a Mac locally:
    - **Tap** for left click  
    - **Two-finger tap** for right click
    - **Two-finger drag** to scroll
+   - **Pinch** to zoom
+   - **Three-finger tap** for middle click
+   - **Double-tap and hold the second tap** to drag
+   - **Drag along the right edge** for one-finger scrolling
 
 ## How It Works
 
@@ -269,7 +274,7 @@ This project solves a real problem with a unique hardware approach. Contribution
 
 ## Roadmap
 
-- **v2 (next)** - Direct BLE HID keyboard and mouse without the ESP32 adapter or a host app. Start with a device-tested HOGP prototype, then integrate the existing keyboard/trackpad, pairing, and reconnect. Validate on macOS, Linux, and Windows; retain ESP32 mode for USB HID and pre-OS input.
+- **Direct BLE HID stabilization (current priority)** - macOS is stable. Diagnose and fix the remaining Linux connection/reconnect and host-switching problems, then validate pairing, input, reconnect, and sleep/wake behavior on Windows. Retain ESP32 mode for USB HID and pre-OS input.
 - **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
 
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
@@ -278,19 +283,19 @@ the CoreBluetooth approach, evidence, and remaining device checks, and
 connection, and reconnect on a BlueZ desktop. Direct mode
 is experimental and needs physical-device validation before becoming the default.
 
-### Keyboard and input improvements (unscheduled)
+### Completed in iOS 2.2
 
-- **Keyboard function area**:
-  - System controls: Print Screen, Power, Sleep, Lock PC, brightness up/down, and the context menu key.
-  - Media controls: play/pause, fast forward, rewind, next/previous track, shuffle (random), and repeat track (cycle).
-  - Audio controls: volume up/down, mute output, and mute microphone.
-  - Optional numpad, if space permits.
+- **Hardware controls** - System, media, audio, microphone-mute, and numpad keys are available on the Tools tab.
+- **QR and barcode scanner** - Separate QR/2D and barcode modes can fill the composer or type automatically, with optional batch scanning.
+- **Mouse Jiggler** - Configurable pointer movement runs while the app is in the foreground and stops after the selected interval.
+- **Multi-touch trackpads** - Both input screens support two-finger scrolling/right click, pinch-to-zoom, tap-drag, edge scrolling, and three-finger middle click. The layout, scanner button, and middle-click behavior were confirmed on-device in 2.2.9 (53).
+
+### Deferred until Direct BLE HID is stable
+
 - **Russian characters in the Ukrainian layout** - Add alternate combinations for Russian letters without switching layouts, such as `Alt+і → ы` and similar mappings.
 - **Two layouts on each key** - Optionally display both EN and UA legends and highlight the active layout; this can be limited to landscape orientation if needed.
-- **QR and 2D barcode scanner** - Scan codes with an optional automatic mode that immediately types the decoded content on the connected computer.
-- **Mouse Jiggler** - Add automatic pointer movement; investigate whether it can keep working while the app is in the background.
 - **Voice typing on the input tab («Ввід»)** - Support dictation through the built-in iOS keyboard.
-- **Multi-touch trackpad on both input and keyboard screens** - Provide consistent two-finger scrolling, add pinch-to-zoom, and investigate three-finger gestures where supported.
+- **Background Mouse Jiggler** - Investigate whether pointer movement can continue while the app is in the background within iOS restrictions.
 
 ## Artwork
 
