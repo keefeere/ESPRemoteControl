@@ -292,6 +292,7 @@ This project solves a real problem with a unique hardware approach. Contribution
 
 - **Direct BLE HID validation (current priority)** - macOS is stable and current Linux testing is successful; continue monitoring both while validating pairing, input, reconnect, and sleep/wake behavior on Windows. Retain ESP32 mode for USB HID and pre-OS input.
 - **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
+- **Adaptive layouts for iPhone Duo and iPad (wishlist)** - Once the iPhone Duo simulator is available, verify the app in full-screen and half-screen configurations. Also test representative iPad sizes and multitasking widths (Split View and Stage Manager), then consider layouts that make better use of the additional space.
 
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
 the CoreBluetooth approach, evidence, and remaining device checks, and
