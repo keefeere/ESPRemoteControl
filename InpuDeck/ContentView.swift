@@ -184,16 +184,21 @@ struct ContentView: View {
             .onEnded { value in
                 let horizontalDistance = value.translation.width
                 let verticalDistance = value.translation.height
+                let edgeWidth = CGFloat(28)
+                let screenWidth = UIScreen.main.bounds.width
+                let startedAtLeftEdge = value.startLocation.x <= edgeWidth
+                let startedAtRightEdge = value.startLocation.x >= screenWidth - edgeWidth
 
-                guard abs(horizontalDistance) >= 120,
+                guard startedAtLeftEdge || startedAtRightEdge,
+                      abs(horizontalDistance) >= 120,
                       abs(horizontalDistance) > abs(verticalDistance) * 1.25 else {
                     return
                 }
 
                 withAnimation(.easeOut(duration: 0.2)) {
-                    if horizontalDistance < 0, selectedTab < 2 {
+                    if startedAtRightEdge, horizontalDistance < 0, selectedTab < 2 {
                         selectedTab += 1
-                    } else if horizontalDistance > 0, selectedTab > 0 {
+                    } else if startedAtLeftEdge, horizontalDistance > 0, selectedTab > 0 {
                         selectedTab -= 1
                     }
                 }
