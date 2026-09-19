@@ -40,7 +40,7 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
         if Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").contains(character) {
             return .englishUS
         }
-        if Set("абвгґдеєжзиіїйклмнопрстуфхцчшщьюяАБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ")
+        if Set("абвгґдеєжзиіїйклмнопрстуфхцчшщьюяёъыэАБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯЁЪЫЭ")
             .contains(character) {
             return .ukrainianEnhanced
         }
@@ -196,6 +196,25 @@ enum HID {
         }
     }
 
+    /// Maps the Ukrainian key legends used for Russian-only letters in
+    /// extended Ukrainian host layouts. The UI exposes these as Alt+key, but
+    /// the HID report must use AltGr (right Alt) so it does not trigger an
+    /// application menu shortcut.
+    static func russianAlternateForUkrainianKey(
+        _ character: Character,
+        uppercase: Bool
+    ) -> HIDCommand? {
+        let alternate: Character? = switch Character(String(character).lowercased()) {
+        case "і": uppercase ? "Ы" : "ы"
+        case "є": uppercase ? "Э" : "э"
+        case "'", "’": uppercase ? "Ё" : "ё"
+        case "ї": uppercase ? "Ъ" : "ъ"
+        default: nil
+        }
+        guard let alternate else { return nil }
+        return ukrainianEnhancedMap[alternate]
+    }
+
     private static func makeEnglishUSMap() -> [Character: HIDCommand] {
         var map: [Character: HIDCommand] = [:]
 
@@ -240,6 +259,18 @@ enum HID {
             map[character] = HIDCommand(modifiers: 0, keycode: keycode)
             let uppercase = Character(String(character).uppercased())
             map[uppercase] = HIDCommand(modifiers: modLeftShift, keycode: keycode)
+        }
+
+        let russianAlternates: [(Character, UInt8)] = [
+            ("ы", keyS), ("э", keyQuote), ("ё", keyGrave), ("ъ", keyRightBracket)
+        ]
+        for (character, keycode) in russianAlternates {
+            map[character] = HIDCommand(modifiers: modRightAlt, keycode: keycode)
+            let uppercase = Character(String(character).uppercased())
+            map[uppercase] = HIDCommand(
+                modifiers: modRightAlt | modLeftShift,
+                keycode: keycode
+            )
         }
 
         addNumberRow(to: &map)

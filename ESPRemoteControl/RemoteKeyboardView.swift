@@ -404,7 +404,17 @@ struct RemoteKeyboardView: View {
             minHeight: height,
             onPress: {
                 guard let command else { return }
-                pressKey(command.keycode, additionalModifiers: command.modifiers)
+                if layout == .ukrainianEnhanced,
+                   effectiveModifiers & HID.modLeftAlt != 0,
+                   let alternate = HID.russianAlternateForUkrainianKey(
+                       transmittedCharacter,
+                       uppercase: uppercaseLetters
+                   ) {
+                    let modifiers = (effectiveModifiers & ~HID.modLeftAlt) | alternate.modifiers
+                    pressKey(alternate.keycode, exactModifiers: modifiers)
+                } else {
+                    pressKey(command.keycode, additionalModifiers: command.modifiers)
+                }
             },
             onRelease: {
                 guard let command else { return }
@@ -518,12 +528,16 @@ struct RemoteKeyboardView: View {
         }
     }
 
-    private func pressKey(_ keycode: UInt8, additionalModifiers: UInt8 = 0) {
+    private func pressKey(
+        _ keycode: UInt8,
+        additionalModifiers: UInt8 = 0,
+        exactModifiers: UInt8? = nil
+    ) {
         guard !pressedKeycodes.contains(keycode) else { return }
         pressedKeycodes.insert(keycode)
         usedMomentaryModifiers |= momentaryModifiers
         ble.sendKeyDown(
-            modifiersMask: effectiveModifiers | additionalModifiers,
+            modifiersMask: exactModifiers ?? (effectiveModifiers | additionalModifiers),
             keycode: keycode
         )
     }
