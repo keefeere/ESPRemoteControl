@@ -305,15 +305,12 @@ is experimental and needs physical-device validation before becoming the default
 
 - **Hardware controls** - System, media, audio, microphone-mute, and numpad keys are available on the Tools tab.
 - **QR and barcode scanner** - Separate QR/2D and barcode modes can fill the composer or type automatically, with optional batch scanning.
-- **Mouse Jiggler** - Configurable pointer movement runs while the app is in the foreground and stops after the selected interval.
+- **Mouse Jiggler** - Configurable foreground pointer movement prevents display sleep while active, warns about battery use, stops after the selected interval, and disables itself when the app enters the background.
 - **Multi-touch trackpads** - Both input screens support two-finger scrolling/right click, pinch-to-zoom, tap-drag, edge scrolling, and three-finger middle click. The layout, scanner button, and middle-click behavior were confirmed on-device in 2.2.9 (53).
-- **Russian characters from the Ukrainian keyboard** - `Alt+і/є/'/ї` sends AltGr combinations for `ы/э/ё/ъ`; Shift produces uppercase. Automatic text typing recognizes the same letters. The host's Ukrainian layout must provide these AltGr levels.
-- **Dual keyboard legends** - Character keys show both EN and UA legends; the active layout is centered and prominent, while the alternate layout remains visible in the lower-right corner.
-- **Native iOS dictation** - The input composer accepts voice typing from the microphone on the system iOS keyboard and forwards committed text and dictation corrections to the connected host.
-
-### Deferred until Direct BLE HID is stable
-
-- **Background Mouse Jiggler** - Investigate whether pointer movement can continue while the app is in the background within iOS restrictions.
+- **Russian characters from the Ukrainian keyboard** - `Alt+і/є/'/ї` sends AltGr combinations for `ы/э/ё/ъ`, updates the visible legends while Alt is active, and uses Shift for uppercase. Automatic text typing recognizes the same letters. Confirmed on-device in 2.2.14 (58); the host's Ukrainian layout must provide these AltGr levels.
+- **Dual keyboard legends** - Character keys show both EN and UA legends, with settings for visibility, portrait-only hiding, and scale. Confirmed on-device in 2.2.14 (58).
+- **Native iOS dictation** - The input composer accepts voice typing from the system iOS keyboard and correctly forwards committed text and later dictation corrections. Confirmed on-device in 2.2.14 (58).
+- **Background Jiggler investigation** - Continuous timer-driven movement is not reliable in the background on iOS 17–25. The supported foreground implementation keeps the screen awake and was confirmed on-device in 2.2.14 (58); see [the feasibility notes](docs/background-mouse-jiggler.md).
 
 ## Artwork
 
