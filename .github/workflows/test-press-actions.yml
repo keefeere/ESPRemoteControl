@@ -1,0 +1,41 @@
+name: Test button presses
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # The test app copies this production style; other app/Linux code is not
+    # part of its build. Include the harness and workflow so test changes run.
+    paths:
+      - "ESPRemoteControl/ShortAndLongPressButtonStyle.swift"
+      - "Tests/PressActions/**"
+      - "scripts/test-press-actions.sh"
+      - ".github/workflows/test-press-actions.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  press-ui-test:
+    runs-on: macos-26
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install UI test project generator
+        run: brew install xcodegen
+
+      - name: Test short and long button presses on iPhone Simulator
+        run: ./scripts/test-press-actions.sh
+
+      - name: Upload failed button UI test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: press-actions-test-results
+          path: |
+            dist/press-actions.xcresult
+            dist/press-actions-tests.log
+          if-no-files-found: ignore
+          retention-days: 7
