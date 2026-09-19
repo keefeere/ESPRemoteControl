@@ -24,7 +24,7 @@ bridge presents itself as a physical USB keyboard and mouse.
 - **Keyboard trackpad** - Uses the free portrait space below the full keyboard without extra mouse buttons
 - **Hardware control deck** - System, media, audio, microphone-mute, and numpad HID controls
 - **QR and barcode scanner** - Scan into the composer or automatically type codes, including an optional batch mode
-- **Mouse jiggler** - Configurable foreground pointer movement with an automatic stop timer
+- **Mouse jiggler** - Configurable foreground pointer movement with a selectable movement interval
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
 - **Zero configuration** - No drivers, no network setup, just plug and play
 - **Low latency** - Direct Bluetooth LE connection for responsive input
@@ -333,7 +333,7 @@ physical-device validation.
 
 - **Hardware controls** - System, media, audio, microphone-mute, and numpad keys are available on the Tools tab.
 - **QR and barcode scanner** - Separate QR/2D and barcode modes can fill the composer or type automatically, with optional batch scanning.
-- **Mouse Jiggler** - Configurable foreground pointer movement prevents display sleep while active, warns about battery use, stops after the selected interval, and disables itself when the app enters the background.
+- **Mouse Jiggler** - Configurable foreground pointer movement runs at the selected interval, prevents display sleep while active, warns about battery use, and disables itself when the app enters the background.
 - **Multi-touch trackpads** - Both input screens support two-finger scrolling/right click, pinch-to-zoom, tap-drag, edge scrolling, and three-finger middle click. The layout, scanner button, and middle-click behavior were confirmed on-device in 2.2.9 (53).
 - **Russian characters from the Ukrainian keyboard** - `Alt+і/є/'/ї` sends AltGr combinations for `ы/э/ё/ъ`, updates the visible legends while Alt is active, and uses Shift for uppercase. Automatic text typing recognizes the same letters. Confirmed on-device in 2.2.14 (58); the host's Ukrainian layout must provide these AltGr levels.
 - **Dual keyboard legends** - Character keys show both EN and UA legends, with settings for visibility, portrait-only hiding, and scale. Confirmed on-device in 2.2.14 (58).
