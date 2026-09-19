@@ -81,6 +81,15 @@ building the app. Version 2.0.0 (16) passed these tests and the Xcode 26.6 iOS
 build on 2026-09-04 ([Actions run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
 Broader pairing and reconnect tests remain pending; see the macOS result above.
 
+CI uses [path filters](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore)
+to avoid unrelated runs. **Test button presses** runs on PRs changing
+`ShortAndLongPressButtonStyle.swift`, `Tests/PressActions/`, its runner script,
+or its workflow; it can also be started manually. iOS builds watch app/extension
+code, the Xcode project, and their own tests/scripts. Linux helper changes run
+the separate Linux checks. PR filters consider the whole PR diff against its
+base, so a PR that already changes the button style still runs its UI test on
+subsequent updates.
+
 ## Hardware Requirements
 
 - **ESP32-S3** development board (must have native USB support)
