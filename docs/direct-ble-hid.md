@@ -41,7 +41,7 @@ The journal distinguishes:
 
 ## Developer mode — 2.1.15 (43)
 
-Settings now includes **Режим розробника**, off by default and persisted across
+Settings now includes **Developer mode**, off by default and persisted across
 launches. Normal mode shows computer names without UUID labels. Developer mode
 reveals UUIDs and their copy actions, scan signal strength, technical pairing
 instructions, the wake probe, and the connection journal/export. The build
@@ -221,7 +221,7 @@ system Bluetooth link owned by the computer or another app.
 
 Names are used only when CoreBluetooth resolves them for the same identifier.
 A `CBCentral` does not provide a friendly name, so incoming hosts can appear as
-“Комп’ютер · <short ID>” until named by the user or discovered by the browser.
+“Computer · <short ID>” until named by the user or discovered by the browser.
 “Forget in app” removes saved selection and automatic reconnect data. Forgetting
 the selected host closes pairing, including after relaunch; stale subscriptions
 cannot immediately add it back. Explicitly opening pairing can add it again.
@@ -435,7 +435,7 @@ advertisement after 10 s, republish the HID services after another 20 s, then
 rebuild both CoreBluetooth managers after another 40 s, staged exactly like a
 relaunch. Each rung runs once; a report-map read or a report subscription
 rewinds the ladder; an exhausted ladder keeps advertising and reports
-"Немає відповіді" rather than restarting Bluetooth in a loop. An open pairing
+"No response" rather than restarting Bluetooth in a loop. An open pairing
 window with no selected host only repairs visibility, because rebuilding the
 stack there would close the window with nothing to reconnect to. The ladder is a
 pure value type with checks in `Tests/DirectHIDTests.swift`; the wiring itself
@@ -459,7 +459,7 @@ Neither reported Linux behaviour is a defect in this app, and both now have
 documented handling in [direct Bluetooth HID on Linux](linux-direct-hid.md):
 
 - A BlueZ desktop is a GATT client and does not advertise over Bluetooth LE, so
-  the phone cannot discover it and **Знайти комп'ютер** cannot list it. The
+  the phone cannot discover it and **Find computer** cannot list it. The
   computer initiates every connection; the phone's part is to stay advertising,
   which the ladder above now maintains. The pairing sheet says this explicitly
   instead of presenting phone-initiated discovery as a general path.
@@ -489,7 +489,7 @@ Device acceptance checks for this update:
 
 Device testing of 2.1.3 confirmed that reconnect after a Linux host slept and
 woke now works without relaunching the app. Switching the selected computer to a
-Mac did not: the app stayed on "Очікуємо клавіатуру й мишу" indefinitely.
+Mac did not: the app stayed on "Waiting for keyboard and mouse" indefinitely.
 
 The cause is in 2.1.3's own wiring. `didReceiveRead` treats a Report Map read as
 evidence of progress and rewinds the recovery ladder, but that delegate method
@@ -501,9 +501,9 @@ discovery without attaching HID — put the transport back into the exact state
 
 The status line hid this too. `browser.requestedHost` stays set because the
 outgoing connect request is deliberately never cancelled, so the branch reporting
-"Очікуємо клавіатуру й мишу" ran ahead of the exhausted-ladder branch and an
+"Waiting for keyboard and mouse" ran ahead of the exhausted-ladder branch and an
 abandoned reconnect still read as progress. Both waiting branches now share one
-helper that reports "Немає відповіді" once the ladder is spent.
+helper that reports "No response" once the ladder is spent.
 
 Neither fix is reachable from `Tests/DirectHIDTests.swift`: the defect is in the
 CoreBluetooth delegate wiring, not in `HIDReconnectWatchdog`, whose value-type
@@ -548,7 +548,7 @@ central-role link to the selected host is connected at that moment. Repeated
 read refusals are no longer logged individually; they filled the 60-line journal
 without adding anything.
 
-Until that evidence arrives, the workaround is «Дозволити нове сполучення»,
+Until that evidence arrives, the workaround is “Allow new pairing”,
 which routes through `prepareHost(nil)` and clears the selected host, so
 `allows` falls through to the pairing window and accepts the peer. It is saved
 as a separate computer and can be renamed; the stale entry can be forgotten.
@@ -565,7 +565,7 @@ session down.
 
 Switching **back** to the Linux host does not. Its link connects, but it never
 reads the report map and never subscribes; nothing arrives from it at all. The
-recovery ladder ran in full and reported "Немає відповіді", which is the honest
+recovery ladder ran in full and reported "No response", which is the honest
 answer: recovery can make the phone reachable, but it cannot make a host
 subscribe. The refusals interleaved through that journal are the Mac
 reconnecting on its own and being correctly refused while another host is
@@ -676,7 +676,7 @@ journal and no "Service registered" lines.
 
 ## Suspend must not stop input (2.1.7)
 
-Recovering a Mac from sleep left 2.1.6 stuck on "Комп'ютер призупинив ввід" until
+Recovering a Mac from sleep left 2.1.6 stuck on "Computer suspended input" until
 the refresh button was pressed. The journal shows why:
 
 ```
@@ -703,7 +703,7 @@ clears held input locally rather than transmitting releases, and
 `releaseAllInput` does nothing but clear while suspended, so backgrounding the
 app cannot light up a sleeping computer. Only deliberate input earns a wake.
 
-The status line says "комп'ютер спить" beside "HID готовий" rather than blaming
+The status line says "computer asleep" beside "HID ready" rather than blaming
 the host for stopping input, and the recovery ladder no longer arms during
 suspend, since it was only running because readiness was false.
 
@@ -751,7 +751,7 @@ and only cancels one pointing somewhere else.
 
 ### The status line described the transport, not the situation
 
-"Очікуємо клавіатуру й мишу · <host>" was the internal state read aloud: the
+"Waiting for keyboard and mouse · <host>" was the internal state read aloud: the
 host has not yet subscribed to the keyboard and mouse report characteristics.
 To the person holding the phone it says the app is waiting for a keyboard and a
 mouse — which the app itself is. It also said "waiting" while the recovery
@@ -759,16 +759,16 @@ ladder was actively advertising and retrying, so it read as passive when it was
 not.
 
 The status now names the computer as the actor and says what is happening:
-"Під'єднуємось до <host>…" while recovery still has rungs, and
-"<host> не відповідає. Підключи iPhone на комп'ютері." once it has given up,
+"Connecting to <host>…" while recovery still has rungs, and
+"<host> is not responding. Connect the iPhone from the computer." once it has given up,
 which is the only point where the next move really is the user's. The
 distinction between having a link and not having one went with it: it was a
 distinction in the transport, not in anything a user can act on.
 
-The other strings got the same treatment — "Підготовка Bluetooth" became
-"Готуємо Bluetooth", "Відновлення HID" became "Відновлюємо зв'язок з <host>",
-and the pairing state now says where to look: "Готові до сполучення · знайди
-«ESP Remote» на комп'ютері". Together with "Комп'ютер призупинив ввід" above,
+The other strings got the same treatment — "Preparing Bluetooth" became
+"Preparing Bluetooth…", "Restoring HID" became "Restoring connection to <host>",
+and the pairing state now says where to look: "Ready to pair · find
+“ESP Remote” on the computer". Together with "Computer suspended input" above,
 this was the third status in a row that reported a protocol fact as if it were
 the user's problem.
 
@@ -1126,7 +1126,7 @@ Physical acceptance checks:
    retry and then HID subscriptions; there should be no routine GATT rebuild.
 2. With Mac selected and HID ready, put it to sleep using Apple menu → Sleep,
    initially with its lid open. Keep ESP Remote visible on the iPhone.
-3. Press «Спробувати пробудити» once, wait several seconds, then export the
+3. Press “Try to wake” once, wait several seconds, then export the
    journal. If it stays asleep, wake it manually and record that observation.
 4. Distinguish no HID session, a queued report blocked by iOS, and two locally
    accepted reports without wake. The last case requires a Mac-side Bluetooth

@@ -40,15 +40,15 @@ See the [Linux validation report](docs/linux-direct-hid-validation.md).
 Windows remains untested. ESP32 mode remains the initial default, and the app
 remembers the selected mode.
 
-1. In the connection status strip, open **ESP** and choose **Прямий Bluetooth**.
+1. In the connection status strip, open **ESP** and choose **Direct Bluetooth**.
 2. Open the pairing button beside the status. To connect from the computer,
    enable pairing in the app and select **ESP Remote** (or the iPhone name) in
    the computer's Bluetooth settings. Confirm any system pairing prompt.
 3. To initiate the connection from the iPhone, open Bluetooth settings on the
-   computer, choose **Знайти комп’ютер** in the app, then select the computer.
+   computer, choose **Find computer** in the app, then select the computer.
    This path needs the host to advertise over BLE. A BLE link alone is not an
    HID connection; wait until the app reports keyboard and mouse connected.
-4. Use the existing keyboard and trackpad. Return to **ESP-адаптер** to use the
+4. Use the existing keyboard and trackpad. Return to **ESP adapter** to use the
    USB bridge. Switching releases held input and cancels queued text.
 5. On Linux, start the connection from the computer using explicit LE; see
    [the Linux guide](docs/linux-direct-hid.md) and
@@ -59,10 +59,10 @@ remembers the selected mode.
    Audio prevention for a single phone remains unresolved.
    To disable reception from **all phones** while retaining headphones, the
    optional `python3 scripts/linux-audio-receiver.py install` adds a KDE menu
-   switch, **Приймання Bluetooth-аудіо**. See the guide for activation and rollback.
+   switch, **Bluetooth audio receiver**. See the guide for activation and rollback.
    A typical BlueZ desktop does not advertise over BLE by default, so step 3
    may not find it. Its generic "Connect" can also bring up phone audio profiles.
-6. If input does not become ready, use **Поділитися журналом** in the pairing
+6. If input does not become ready, use **Share log** in the pairing
    panel. The log includes connection stages, not typed text. During prototype
    updates a host may retain old GATT services. Start with the Linux guide's
    diagnostics; a missing cached HID service alone is not a reason to re-pair.

@@ -1,6 +1,6 @@
 # Direct Bluetooth HID on Linux
 
-This guide is for **Прямий Bluetooth** in ESP Remote. The ESP32 USB adapter does
+This guide is for **Direct Bluetooth** in ESP Remote. The ESP32 USB adapter does
 not need this Linux setup.
 
 Keyboard and mouse input have been verified on Bazzite, but recovery after
@@ -126,7 +126,7 @@ your shell profile. Use the full path if `~/.local/bin` is not on `PATH`.
 
 Keep an existing working bond. If this computer is not paired yet:
 
-1. In ESP Remote choose **Прямий Bluetooth**, then **Дозволити нове сполучення**.
+1. In ESP Remote choose **Direct Bluetooth**, then **Allow new pairing**.
 2. On Linux run `bluetoothctl`, then `scan le` and find the phone/ESP Remote.
 3. Run `pair AA:BB:CC:DD:EE:FF`, then `trust AA:BB:CC:DD:EE:FF` and `scan off`.
 4. Leave ESP Remote open with this computer selected, and run:
@@ -222,13 +222,13 @@ python3 scripts/linux-audio-receiver.py install
 ~/.local/bin/esp-remote-audio-receiver gui
 ```
 
-Search the application menu for **Приймання Bluetooth-аудіо** (English:
-**Bluetooth Audio Reception**). To keep it beside the Bluetooth tray, right-click
+Search the application menu for **Bluetooth Audio Reception**. To keep it beside
+the Bluetooth tray, right-click
 the menu entry, choose **Add to Panel (Widget)**, and position it in panel edit
 mode. This uses Plasma's existing application launcher widget, without patching
 BlueDevil or adding an idle background process. It is a separate button; the
 Bluetooth device list and System Settings page are unchanged. The dialog shows
-the configured state and offers **Увімкнути / Вимкнути**; cancelling does nothing.
+the configured state and offers **Enable / Disable**; cancelling does nothing.
 
 The switch changes receiving roles for **all Bluetooth peers in this user's
 audio session**, including already paired phones. It leaves the host's headphone
@@ -326,7 +326,7 @@ receiver switch restricts roles for the user session, not one phone's permission
 
 - Linux acts as the LE central/GATT client; the phone publishes HID as a peripheral.
   A typical BlueZ desktop does not advertise over LE by default, so the app's
-  **Знайти комп'ютер** may not list it. Classic discoverability alone is not an LE
+  **Find computer** may not list it. Classic discoverability alone is not an LE
   advertisement. The verified path here starts from the computer.
 - Advertising may use a rotating private address. BlueZ can expose the bonded
   identity in `Address` while retaining an earlier address in its D-Bus object
@@ -357,7 +357,7 @@ it can also check whether bond key sections exist; it does not print their value
 No single check establishes that every layer can reconnect.
 
 For a controlled reproduction, capture `sudo btmon -w /tmp/esp-force-le.btsnoop`
-and export the app's **Поділитися журналом** around the same attempt. Keep the
+and export the app's **Share log** around the same attempt. Keep the
 watcher stopped while attributing a disconnect. Note when the app was merely
 backgrounded, when the host slept, and when a deliberate reset was requested.
 Stop btmon after the test. Capture files can contain Bluetooth traffic from other
