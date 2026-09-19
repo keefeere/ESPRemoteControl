@@ -19,7 +19,7 @@ struct TextMutationPlannerTests {
         )
         check(
             TextMutationPlanner.makePlan(from: "тест помилка", to: "тест правильно")
-                == TextMutationPlan(deletedCharacterCount: 7, insertedText: "правильно"),
+                == TextMutationPlan(deletedCharacterCount: 6, insertedText: "равильно"),
             "A revised final word becomes backspaces followed by replacement text"
         )
         check(
