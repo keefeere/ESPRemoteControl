@@ -2,9 +2,6 @@
 
 Turn your iPhone into a wireless keyboard and mouse for any computer using an ESP32-S3 microcontroller.
 
-[![Demo](https://img.youtube.com/vi/NFtp6ubC3DU/maxresdefault.jpg)](https://youtu.be/NFtp6ubC3DU)
-
-
 ## Why This Exists
 
 Ever tried typing a password on your Smart TV using the remote? Or needed to control a computer from across the room? This project creates a true wireless input bridge - your iPhone becomes a fully functional keyboard and trackpad that works with any device via USB.
@@ -111,7 +108,8 @@ Popular ESP32-S3 boards that work:
    ```
    https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
    ```
-3. Install the NimBLE library: `Tools > Manage Libraries > Search "NimBLE-Arduino"`
+3. Install [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino):
+   `Tools > Manage Libraries > Search "NimBLE-Arduino"`
 4. Open `sketch_uid_keyboard_ble/sketch_uid_keyboard_ble.ino`
 5. Select your ESP32-S3 board and set `Tools > USB Mode > USB-OTG (TinyUSB)`
 6. Upload the sketch
@@ -312,15 +310,29 @@ is experimental and needs physical-device validation before becoming the default
 - **Native iOS dictation** - The input composer accepts voice typing from the system iOS keyboard and correctly forwards committed text and later dictation corrections. Confirmed on-device in 2.2.14 (58).
 - **Background Jiggler investigation** - Continuous timer-driven movement is not reliable in the background on iOS 17–25. The supported foreground implementation keeps the screen awake and was confirmed on-device in 2.2.14 (58); see [the feasibility notes](docs/background-mouse-jiggler.md).
 
-## Artwork
+## Origins and acknowledgements
+
+This repository is based on
+[ESPRemoteControl](https://github.com/KoStard/ESPRemoteControl) by
+[Ruben Kostandyan](https://github.com/KoStard). It has since evolved with
+direct Bluetooth HID, multiple-host support, expanded keyboard and trackpad
+controls, and an optional ESP32 USB bridge.
+
+The ESP32 firmware uses
+[NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino), distributed under
+the Apache License 2.0.
 
 The app icon incorporates the MIT-licensed `keyboard` outline from
 [Tabler Icons](https://github.com/tabler/tabler-icons). See
-[`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) for details.
+[the attribution notices](ATTRIBUTIONS.md) for details about the original
+project and third-party components.
 
 ## License
 
-MIT License - see LICENSE file for details.
+The original repository describes the project as MIT-licensed but does not
+currently include the referenced license file. See
+[the attribution notices](ATTRIBUTIONS.md) for provenance and licensing
+details that could be verified.
 
 ---
 
