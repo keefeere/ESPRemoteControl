@@ -17,6 +17,7 @@ struct RemoteKeyboardView: View {
     @ObservedObject var ble: RemoteInputController
     @Binding var layout: KeyboardLayout
     let onLayoutChange: (KeyboardLayout, Bool) -> Void
+    let onShowSettings: () -> Void
 
     @State private var capsLock = false
     @State private var stickyModifiers: UInt8 = 0
@@ -154,6 +155,7 @@ struct RemoteKeyboardView: View {
         HStack(spacing: 8) {
             ConnectionStatusView(input: ble, compact: true)
             orientationLockButton
+            settingsButton
         }
         .padding(.horizontal, 4)
     }
@@ -192,6 +194,15 @@ struct RemoteKeyboardView: View {
                 : orientationLock.isPortrait ? localized("Вертикально") : localized("Горизонтально")
         )
         .accessibilityHint("Довге натискання вмикає горизонтальну орієнтацію")
+    }
+
+    private var settingsButton: some View {
+        Button(action: onShowSettings) {
+            Image(systemName: "gearshape")
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Налаштування")
     }
 
     private func functionRow(labels: [String], keycodes: [UInt8], height: CGFloat) -> some View {

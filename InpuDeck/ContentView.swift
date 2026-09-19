@@ -43,7 +43,8 @@ struct ContentView: View {
             RemoteKeyboardView(
                 ble: ble,
                 layout: layoutBinding,
-                onLayoutChange: selectLayout
+                onLayoutChange: selectLayout,
+                onShowSettings: showSettings
             )
             .tabItem { Label("Клавіатура", systemImage: "keyboard.fill") }
             .tag(1)
@@ -52,6 +53,7 @@ struct ContentView: View {
                 .tabItem { Label("Інструменти", systemImage: "switch.2") }
                 .tag(2)
         }
+        .simultaneousGesture(tabSwipeGesture)
         .safeAreaInset(edge: .top, spacing: 0) {
             if selectedTab == 2 {
                 connectionHeader
@@ -163,8 +165,7 @@ struct ContentView: View {
                 .frame(height: 20)
 
             Button {
-                wantsFocus = false
-                showsSettings = true
+                showSettings()
             } label: {
                 Image(systemName: "gearshape")
                     .frame(width: 28, height: 32)
@@ -176,6 +177,32 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var tabSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .global)
+            .onEnded { value in
+                let horizontalDistance = value.translation.width
+                let verticalDistance = value.translation.height
+
+                guard abs(horizontalDistance) >= 120,
+                      abs(horizontalDistance) > abs(verticalDistance) * 1.25 else {
+                    return
+                }
+
+                withAnimation(.easeOut(duration: 0.2)) {
+                    if horizontalDistance < 0, selectedTab < 2 {
+                        selectedTab += 1
+                    } else if horizontalDistance > 0, selectedTab > 0 {
+                        selectedTab -= 1
+                    }
+                }
+            }
+    }
+
+    private func showSettings() {
+        wantsFocus = false
+        showsSettings = true
     }
 
     private var typingCard: some View {
