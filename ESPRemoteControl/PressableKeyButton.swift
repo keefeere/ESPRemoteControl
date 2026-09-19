@@ -3,6 +3,7 @@ import UIKit
 
 struct PressableKeyButton: UIViewRepresentable {
     let title: String
+    var secondaryTitle: String? = nil
     var isActive: Bool = false
     var isProminent: Bool = false
     var isCompact: Bool = false
@@ -21,6 +22,7 @@ struct PressableKeyButton: UIViewRepresentable {
         button.addTarget(context.coordinator, action: #selector(Coordinator.touchUp), for: .touchDragExit)
 
         button.baseTitle = title
+        button.secondaryTitle = secondaryTitle
         button.isActive = isActive
         button.isProminent = isProminent
         button.isCompact = isCompact
@@ -33,6 +35,7 @@ struct PressableKeyButton: UIViewRepresentable {
 
     func updateUIView(_ uiView: KeyUIButton, context: Context) {
         uiView.baseTitle = title
+        uiView.secondaryTitle = secondaryTitle
         uiView.isActive = isActive
         uiView.isProminent = isProminent
         uiView.isCompact = isCompact
@@ -79,6 +82,13 @@ final class KeyUIButton: UIButton {
     var baseTitle: String = "" {
         didSet {
             if baseTitle != oldValue {
+                applyConfiguration()
+            }
+        }
+    }
+    var secondaryTitle: String? {
+        didSet {
+            if secondaryTitle != oldValue {
                 applyConfiguration()
             }
         }
@@ -141,6 +151,8 @@ final class KeyUIButton: UIButton {
         titleLabel?.adjustsFontSizeToFitWidth = true
         titleLabel?.minimumScaleFactor = 0.65
         titleLabel?.lineBreakMode = .byClipping
+        titleLabel?.numberOfLines = 2
+        titleLabel?.textAlignment = .center
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
         clipsToBounds = true
@@ -156,9 +168,6 @@ final class KeyUIButton: UIButton {
 
     func applyConfiguration() {
         UIView.performWithoutAnimation {
-            if currentTitle != baseTitle {
-                setTitle(baseTitle, for: .normal)
-            }
             titleLabel?.font = UIFont.monospacedSystemFont(
                 ofSize: fontSize ?? (isCompact ? 10 : 16),
                 weight: .semibold
@@ -189,7 +198,49 @@ final class KeyUIButton: UIButton {
         }
 
         backgroundColor = bg
-        setTitleColor(foreground, for: .normal)
-        setTitleColor(foreground, for: .highlighted)
+        updateTitle(foreground: foreground)
+    }
+
+    private func updateTitle(foreground: UIColor) {
+        guard let secondaryTitle, !secondaryTitle.isEmpty else {
+            setAttributedTitle(nil, for: .normal)
+            setAttributedTitle(nil, for: .highlighted)
+            setTitle(baseTitle, for: .normal)
+            setTitleColor(foreground, for: .normal)
+            setTitleColor(foreground, for: .highlighted)
+            accessibilityLabel = baseTitle
+            accessibilityValue = nil
+            return
+        }
+
+        setTitle(nil, for: .normal)
+        let mainSize = fontSize ?? (isCompact ? 10 : 16)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.minimumLineHeight = mainSize * 0.78
+        paragraph.maximumLineHeight = mainSize * 0.9
+        let text = NSMutableAttributedString(
+            string: "\(baseTitle)\n",
+            attributes: [
+                .font: UIFont.monospacedSystemFont(ofSize: mainSize, weight: .bold),
+                .foregroundColor: foreground,
+                .paragraphStyle: paragraph
+            ]
+        )
+        text.append(NSAttributedString(
+            string: secondaryTitle,
+            attributes: [
+                .font: UIFont.monospacedSystemFont(
+                    ofSize: max(7, mainSize * 0.58),
+                    weight: .medium
+                ),
+                .foregroundColor: foreground.withAlphaComponent(0.48),
+                .paragraphStyle: paragraph
+            ]
+        ))
+        setAttributedTitle(text, for: .normal)
+        setAttributedTitle(text, for: .highlighted)
+        accessibilityLabel = baseTitle
+        accessibilityValue = "Друга розкладка: \(secondaryTitle)"
     }
 }

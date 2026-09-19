@@ -4,6 +4,13 @@ import SwiftUI
 private struct TypingKey {
     let character: Character
     let usesCase: Bool
+    let secondaryCharacter: Character
+    let secondaryUsesCase: Bool
+}
+
+private struct KeyLegend {
+    let character: Character
+    let usesCase: Bool
 }
 
 struct RemoteKeyboardView: View {
@@ -226,6 +233,8 @@ struct RemoteKeyboardView: View {
                 characterKey(
                     key.character,
                     usesCase: key.usesCase,
+                    secondary: key.secondaryCharacter,
+                    secondaryUsesCase: key.secondaryUsesCase,
                     width: widths[index + 1],
                     height: height
                 )
@@ -254,6 +263,8 @@ struct RemoteKeyboardView: View {
                 characterKey(
                     key.character,
                     usesCase: key.usesCase,
+                    secondary: key.secondaryCharacter,
+                    secondaryUsesCase: key.secondaryUsesCase,
                     width: widths[index + 1],
                     height: height
                 )
@@ -294,6 +305,8 @@ struct RemoteKeyboardView: View {
                     characterKey(
                         key.character,
                         usesCase: key.usesCase,
+                        secondary: key.secondaryCharacter,
+                        secondaryUsesCase: key.secondaryUsesCase,
                         width: typingWidths[index + 1],
                         height: height
                     )
@@ -384,6 +397,8 @@ struct RemoteKeyboardView: View {
     private func characterKey(
         _ base: Character,
         usesCase: Bool = true,
+        secondary: Character? = nil,
+        secondaryUsesCase: Bool = true,
         width: CGFloat? = nil,
         height: CGFloat
     ) -> some View {
@@ -396,9 +411,15 @@ struct RemoteKeyboardView: View {
 
         let transmittedCharacter = usesCase ? base : character
         let command = HID.mapCharacterToHID(transmittedCharacter, layout: layout)
+        let secondaryCharacter: Character? = secondary.map {
+            secondaryUsesCase && uppercaseLetters
+                ? Character(String($0).uppercased())
+                : $0
+        }
 
         return PressableKeyButton(
             title: String(character),
+            secondaryTitle: secondaryCharacter.map(String.init),
             isCompact: true,
             fontSize: height < 34 ? 14 : 17,
             minHeight: height,
@@ -581,44 +602,53 @@ struct RemoteKeyboardView: View {
     }
 
     private var topTypingKeys: [TypingKey] {
-        var keys = layout.letterRows[0].map {
-            TypingKey(character: $0, usesCase: true)
-        }
-        switch layout {
-        case .englishUS:
-            let punctuation = shiftIsActive ? Array("{}|") : Array("[]\\")
-            keys += punctuation.map { TypingKey(character: $0, usesCase: false) }
-        case .ukrainianEnhanced:
-            keys.append(TypingKey(character: "ґ", usesCase: true))
-        }
-        return keys
+        pairedTypingKeys(
+            english: letterLegends("qwertyuiop")
+                + symbolLegends(shiftIsActive ? "{}|" : "[]\\"),
+            ukrainian: letterLegends("йцукенгшщзхїґ")
+        )
     }
 
     private var homeTypingKeys: [TypingKey] {
-        var keys = layout.letterRows[1].map {
-            TypingKey(character: $0, usesCase: true)
-        }
-        if layout == .englishUS {
-            let punctuation = shiftIsActive ? Array(":\"") : Array(";'")
-            keys += punctuation.map { TypingKey(character: $0, usesCase: false) }
-        }
-        return keys
+        pairedTypingKeys(
+            english: letterLegends("asdfghjkl")
+                + symbolLegends(shiftIsActive ? ":\"" : ";'"),
+            ukrainian: letterLegends("фівапролджє")
+        )
     }
 
     private var bottomTypingKeys: [TypingKey] {
-        var keys = layout.letterRows[2].map {
-            TypingKey(character: $0, usesCase: true)
-        }
-        switch layout {
-        case .englishUS:
-            let punctuation = shiftIsActive ? Array("<>?") : Array(",./")
-            keys += punctuation.map { TypingKey(character: $0, usesCase: false) }
-        case .ukrainianEnhanced:
-            keys.append(
-                TypingKey(character: shiftIsActive ? "," : ".", usesCase: false)
+        pairedTypingKeys(
+            english: letterLegends("zxcvbnm")
+                + symbolLegends(shiftIsActive ? "<>?" : ",./"),
+            ukrainian: letterLegends("ячсмитьбю")
+                + symbolLegends(shiftIsActive ? "," : ".")
+        )
+    }
+
+    private func pairedTypingKeys(
+        english: [KeyLegend],
+        ukrainian: [KeyLegend]
+    ) -> [TypingKey] {
+        precondition(english.count == ukrainian.count)
+        return zip(english, ukrainian).map { englishKey, ukrainianKey in
+            let primary = layout == .englishUS ? englishKey : ukrainianKey
+            let secondary = layout == .englishUS ? ukrainianKey : englishKey
+            return TypingKey(
+                character: primary.character,
+                usesCase: primary.usesCase,
+                secondaryCharacter: secondary.character,
+                secondaryUsesCase: secondary.usesCase
             )
         }
-        return keys
+    }
+
+    private func letterLegends(_ characters: String) -> [KeyLegend] {
+        characters.map { KeyLegend(character: $0, usesCase: true) }
+    }
+
+    private func symbolLegends(_ characters: String) -> [KeyLegend] {
+        characters.map { KeyLegend(character: $0, usesCase: false) }
     }
 
     private func numberRowCharacters(includesTrailingSymbols: Bool) -> [Character] {

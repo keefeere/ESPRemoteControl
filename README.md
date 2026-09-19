@@ -308,10 +308,10 @@ is experimental and needs physical-device validation before becoming the default
 - **Mouse Jiggler** - Configurable pointer movement runs while the app is in the foreground and stops after the selected interval.
 - **Multi-touch trackpads** - Both input screens support two-finger scrolling/right click, pinch-to-zoom, tap-drag, edge scrolling, and three-finger middle click. The layout, scanner button, and middle-click behavior were confirmed on-device in 2.2.9 (53).
 - **Russian characters from the Ukrainian keyboard** - `Alt+і/є/'/ї` sends AltGr combinations for `ы/э/ё/ъ`; Shift produces uppercase. Automatic text typing recognizes the same letters. The host's Ukrainian layout must provide these AltGr levels.
+- **Dual keyboard legends** - Character keys show both EN and UA legends; the active layout is larger and the alternate layout remains visible underneath.
 
 ### Deferred until Direct BLE HID is stable
 
-- **Two layouts on each key** - Optionally display both EN and UA legends and highlight the active layout; this can be limited to landscape orientation if needed.
 - **Voice typing on the input tab («Ввід»)** - Support dictation through the built-in iOS keyboard.
 - **Background Mouse Jiggler** - Investigate whether pointer movement can continue while the app is in the background within iOS restrictions.
 
