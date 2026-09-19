@@ -1,361 +1,410 @@
 # Direct Bluetooth HID on Linux
 
-Written for the direct Bluetooth mode of the iOS app (**Прямий Bluetooth**), not
-the ESP32 USB adapter. It covers the two behaviours reported from a BlueZ
-desktop: the connection can only be started from the computer, and starting it
-there also moves iPhone audio to the computer.
+This guide is for **Прямий Bluetooth** in ESP Remote. The ESP32 USB adapter does
+not need this Linux setup.
 
-## Which side starts the connection
+Keyboard and mouse input have been verified on Bazzite, but recovery after
+logout/reboot remains unreliable. The tested kernel also contains an LE address
+type bug; enabling the API or installing a helper does not repair it. See the
+[validation report](linux-direct-hid-validation.md) for evidence and remaining limits.
 
-The iPhone publishes HID over GATT as a **BLE peripheral**. The computer is the
-**central**: it scans, connects, and subscribes to the input reports. A BlueZ
-desktop does not advertise over Bluetooth LE, so the phone cannot see it and
-**Знайти комп'ютер** in the app will not list it. This is not a defect in the
-app or in BlueZ; it is the shape of the profile.
+## Why there is a helper
 
-What this means in practice:
+An iPhone is a dual-mode Bluetooth device: the same pairing can expose Classic
+phone/audio services and the app's **HID over LE** service. A desktop Bluetooth
+panel generally calls BlueZ [`Device1.Connect`][BlueZ Device API]. BlueZ chooses a transport and
+connects eligible profiles, which can take the phone's audio without attaching
+its BLE keyboard. `Connected: yes` alone therefore does not mean HID is ready.
 
-- The computer always initiates the first connection and every reconnect.
-- The phone's job is to stay advertising and connectable. The app now repairs a
-  stalled advertisement by itself (see [Automatic recovery](#automatic-recovery)).
-- **Знайти комп'ютер** stays useful for macOS, which does advertise over LE.
+Passing the HID UUID to `bluetoothctl connect` is not a reliable LE selector.
+In [BlueZ 5.87's ConnectProfile implementation][connect-source], that method
+explicitly uses `BDADDR_BREDR`. Our previous guide recommended it incorrectly.
 
-### "But the computer is discoverable"
+The helper calls **[`org.bluez.Bearer.LE1.Connect`][BlueZ LE bearer implementation]**
+for the selected paired phone.
+It finds the actual D-Bus object by its `Address` and `Adapter` properties, checks
+that the LE API is available, and waits for both the LE link and the phone's
+kernel HID device. It does not fall back to a Classic connection. BlueZ and the
+kernel then handle the input reports normally; the helper does not relay keys,
+create a network server, or need to stay running for input to work.
 
-Turning on visibility in a Linux Bluetooth panel does not contradict the above,
-because the two sides are talking about different radios:
+**Start with the on-demand helper.** BlueZ may reconnect by itself; that worked
+in an initial test, but a later logout/login failed. An always-running watcher
+is optional and has not been demonstrated to fix this failure: repeated requests
+cannot necessarily clear an already pending or stale ATT session.
 
-- **Discoverable on BlueZ** primarily enables the **BR/EDR (Classic) inquiry
-  scan** — the old "answer when someone asks who is here" mode. BlueZ starts
-  advertising over LE only once an advertising instance is registered through
-  `LEAdvertisingManager1`, which `bluetoothctl advertise on` does.
-  `discoverable on` by itself does not.
-- **The app scans through CoreBluetooth**, whose public API sees Bluetooth LE
-  advertisements only. It cannot see a Classic device under any setting.
+BlueZ's [HoG profile][BlueZ HoG] already requests native automatic connection.
+An extra watcher is not inherently required for a BLE keyboard. Profile discovery
+and a functioning LE transport are prerequisites; repeated user-space requests
+cannot repair an invalid controller connection command.
 
-So a discoverable BlueZ machine that is not advertising over LE is invisible to
-the app by construction. Three ways to confirm which case you are in:
+The phone's `UUIDs` property is cached discovery information. After an app stop
+or host reboot it may lack `1812` even while the bond is intact. An explicit
+`--device <MAC>` therefore allows LE discovery without a cached HID UUID, while
+still requiring a paired, unblocked peer and the LE API. Automatic target
+selection remains conservative and requires cached HID. `--status` reports the
+missing attachment instead of refusing diagnostics. Success still requires both
+the LE connection and the matching kernel HID device.
 
-1. Compare two lists on the phone. If the computer appears in **Settings →
-   Bluetooth** on the iPhone but not in **Знайти комп'ютер** in the app, it is
-   visible over Classic only — iOS system settings show both radios, the app
-   sees only LE.
-2. On the computer, `bluetoothctl show`: check `Discoverable` and the
-   **Advertising Features** block, which reports the active advertising
-   instances.
-3. `sudo btmgmt info`: look for `advertising` in the `current settings:` line.
-   If it is absent, the adapter is silent over LE.
+## Minimum host changes
 
-This applies to any BlueZ host, handheld gaming images such as Bazzite
-included; it was first reported there on an ASUS ROG Xbox Ally X.
+| Component | Default setup | Scope / rollback |
+| --- | --- | --- |
+| BlueZ userspace API | One systemd drop-in adds `--experimental` | Host-wide API exposure; `linux-le-setup.py disable` removes our drop-in |
+| On-demand helper | Two files under `~/.local/libexec/esp-remote-control` and a launcher `~/.local/bin/esp-remote-hid` | Per user; `esp-remote-hid --uninstall` |
+| Reconnect service | Not installed | Optional `--install-service`; remove with `--uninstall-service` |
+| Audio configuration | Not changed | Audio restrictions need separate configuration; see limitations below |
+| Audio receiver switch | Separate optional installation | User menu/panel launcher; persistent receiving-role override only while off; `on` or `uninstall` restores underlying roles |
+| Pairing / trust | Preserved | Pair or `--trust` only when explicitly requested |
+| Transport preference | Preserved by installation | Optional per-phone `--preferred-bearer le`; restore the previous value with the same option |
+| Kernel / drivers / privacy / discoverability | Not changed | Existing host settings continue to apply |
 
-If you want to experiment with the phone-initiated direction anyway,
-`bluetoothctl advertise on` registers an advertising instance (add
-`menu advertise` → `name on`, or the computer shows up in the app as
-"Без назви · <id>", since the default advertisement carries no local name).
-**This is untested.** Even if the computer then appears in the app's list and
-the phone opens the link, HOGP still requires the *host* to act as the GATT
-client and subscribe to the input reports; whether BlueZ does that over a link
-the phone initiated has not been verified here. Connecting from the computer
-with the HID profile only remains the supported path.
+The BlueZ experimental switch exposes userspace APIs for the whole daemon; it
+cannot be scoped to just this phone. The helper's connect/disconnect requests
+are scoped to one phone on one adapter. This does **not** enable
+`KernelExperimental`, disable Classic globally, or alter headphone support.
 
-## Pairing
+The setup supports the standard Fedora/Bazzite and Debian `bluetoothd` service
+paths. It refuses custom daemon arguments or locally modified files at its own
+paths instead of overwriting them. Because the drop-in overrides `ExecStart`,
+review it if a distribution later changes its daemon command or path.
 
-1. In the app, open the Bluetooth panel and select **Прямий Bluetooth**.
-2. Tap **Дозволити нове сполучення**. The pairing window stays open for two
-   minutes.
-3. On the computer:
+## Setup once, safely repeat later
 
-   ```bash
-   bluetoothctl
-   [bluetooth]# scan on
-   # wait for "ESP Remote" or the iPhone name to appear
-   [bluetooth]# pair AA:BB:CC:DD:EE:FF
-   [bluetooth]# trust AA:BB:CC:DD:EE:FF
-   [bluetooth]# scan off
-   ```
-
-   `trust` matters: it lets BlueZ accept later reconnects without a desktop
-   prompt, which is what makes unattended reconnect work.
-
-4. Do **not** press `connect` yet — see the next section.
-
-The HID characteristics require encryption, so pairing creates a bond with the
-physical iPhone rather than with a keyboard accessory.
-
-## Why a generic "Connect" also takes your audio
-
-BlueZ's `Connect()` method connects **every eligible profile** of a bonded
-device. That is what the desktop Bluetooth applet's "Connect" button calls. A
-dual-mode pairing can derive a BR/EDR key from the LE key
-([cross-transport key derivation]), so one pairing action authorises both
-transports, and the iPhone's A2DP and hands-free profiles become eligible. The
-app publishes only the HID, battery, and device-information services; it never
-requests audio.
-
-The fix is to connect one profile instead of all of them. BlueZ exposes
-`ConnectProfile()` for exactly this ([BlueZ Device API]):
+Run these commands from the repository. Python 3, `python3-dbus`, BlueZ, and
+systemd are required. First check dependencies:
 
 ```bash
-bluetoothctl connect AA:BB:CC:DD:EE:FF 00001812-0000-1000-8000-00805f9b34fb
+python3 -c 'import dbus'
+bluetoothctl --version
 ```
 
-The UUID argument needs BlueZ 5.65 or newer. On older builds call the method
-directly:
+On Bazzite/Fedora Atomic, if `python3-dbus` is missing and there are no conflicting
+pending deployments, this additive userspace package is suitable for
+`sudo rpm-ostree install -yA python3-dbus`. No installation is needed if the import
+already succeeds. If live apply is unavailable, activate the pending deployment
+with a reboot; a kernel/driver change is not part of this setup.
+
+Preview and save the persistent API setting:
 
 ```bash
-busctl call org.bluez /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF \
-  org.bluez.Device1 ConnectProfile s 00001812-0000-1000-8000-00805f9b34fb
+python3 scripts/linux-le-setup.py enable --dry-run
+sudo python3 scripts/linux-le-setup.py enable
+python3 scripts/linux-le-setup.py status
 ```
 
-## The helper script
+`enable` adds `/etc/systemd/system/bluetooth.service.d/90-esp-remote-le.conf`
+and runs `daemon-reload` only if files changed. Repeating it is a no-op. It
+promotes our earlier temporary test override from `/run` without stopping a
+working connection. It does not modify `/etc/bluetooth/main.conf`.
 
-[`scripts/linux-hid-connect.sh`](../scripts/linux-hid-connect.sh) wraps the
-above, picks the right mechanism for the installed BlueZ, and waits until the
-kernel has actually attached a HID device rather than reporting success on the
-bare link.
+Saving the setting does **not** restart Bluetooth. If the running daemon already
+has `--experimental` (as after our temporary test), it keeps working. Otherwise
+activate at the next reboot, or explicitly restart Bluetooth at a convenient time:
 
 ```bash
-# one-off: connect only the keyboard/mouse profile and trust the phone
-./scripts/linux-hid-connect.sh --trust
-
-# keep the HID profile connected
-./scripts/linux-hid-connect.sh --watch
-
-# only to recover audio a desktop applet already captured; see the audio
-# section below, since by then the phone has lost audio focus
-./scripts/linux-hid-connect.sh --drop-audio
-
-# what is up right now
-./scripts/linux-hid-connect.sh --status
+sudo python3 scripts/linux-le-setup.py enable --restart
 ```
 
-For the seamless setup, install the per-user reconnect service and audio rule
-in one command after pairing:
+A restart briefly disconnects **all** local Bluetooth devices. It is never
+implicit in the default setup command. For a temporary test instead, use
+`enable --temporary --restart`; its `/run` override disappears at reboot.
+
+Install the on-demand command as your desktop user, **without sudo**:
 
 ```bash
 ./scripts/linux-hid-connect.sh --install
+~/.local/bin/esp-remote-hid --help
 ```
 
-The installer copies the helper into `~/.local/libexec`, marks the selected
-phone trusted, enables `esp-remote-hid.service`, and writes a device-specific
-WirePlumber rule. The service continuously restores only HOGP after login,
-adapter restarts, sleep, and wake; the WirePlumber rule keeps the same phone out
-of Linux audio routing without disabling its kernel HID device. Remove both
-pieces with `./scripts/linux-hid-connect.sh --uninstall`.
+Repeat `--install` after updating the repository; it updates only these helper
+files. It does not start a service, trust a phone, modify audio routing, or edit
+your shell profile. Use the full path if `~/.local/bin` is not on `PATH`.
+`--prefix /absolute/path` allows a different user installation directory.
 
-With no `--device`, the script picks the paired device to use. A computer that
-already has Bluetooth keyboards and mice paired has several devices offering
-HID, so it narrows to the one that also carries phone profiles — audio,
-phonebook, messages — which a keyboard or a mouse does not. When that is still
-ambiguous it lists the candidates, marking which look like a phone, and expects
-`--device AA:BB:CC:DD:EE:FF` or `--name iPhone`. `--watch` polls every five seconds by default and reconnects the profile
-whenever it drops, which covers a computer waking from sleep.
+## Pairing and normal connection
 
-`ConnectProfile` alone is not always enough. BlueZ answers it with "already
-connected" while holding a link whose HoG attachment is gone, which is the state
-left behind when the phone moves its HID session to another computer and back.
-When the profile does not attach within ten seconds, the script drops the whole
-link and reconnects, because only that makes BlueZ redo the reconnection and
-reattach the profile.
+Keep an existing working bond. If this computer is not paired yet:
 
-If the phone reports HID ready while the computer disagrees, `--debug` prints
-the paired devices with what each one offers, the target's `bluetoothctl info`,
-and every HID device the kernel exposes with its `HID_NAME`, `HID_PHYS` and
-`HID_UNIQ`. It reports even when the target is ambiguous, since refusing to say
-anything is the opposite of what debugging needs:
+1. In ESP Remote choose **Прямий Bluetooth**, then **Дозволити нове сполучення**.
+2. On Linux run `bluetoothctl`, then `scan le` and find the phone/ESP Remote.
+3. Run `pair AA:BB:CC:DD:EE:FF`, then `trust AA:BB:CC:DD:EE:FF` and `scan off`.
+4. Leave ESP Remote open with this computer selected, and run:
 
 ```bash
-./scripts/linux-hid-connect.sh --debug
+~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF
+~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --status
 ```
 
-The script decides the profile is attached by finding the peer address anywhere
-in a HID device's `uevent`, or failing that by matching `HID_NAME` against the
-device's BlueZ name or the app's advertised name. Both are needed: which key
-carries the address varies between kernel and BlueZ versions, and iOS advertises
-with a rotating private address, so the address BlueZ stored at bonding and the
-one the kernel recorded need not be the same string. If `--debug` lists the
-phone under a shape that matches neither, that output is what to report.
+The optional `--trust` flag sets trust explicitly. Otherwise connecting does not
+change it. The helper can infer a single paired HID phone when `--device` is
+omitted; ambiguity requires an explicit address or `--name`. Use `--adapter hci1`
+if the bond belongs to another adapter.
 
-To run it in the background for a desktop session manually (the `--install`
-command above automates this):
+A successful result requires `Bearer.LE1.Connected` plus a Bluetooth HID device
+whose `HID_UNIQ` is the peer address and `HID_PHYS` is the local adapter.
+A retained UHID object alone can outlive a lost link. `ServicesResolved` is printed
+separately: BlueZ 5.87 resets this shared flag on a Classic disconnection even
+when LE remains connected, so it cannot gate HID status.
+These host checks still do not prove that input reaches the selected host. A USB
+bridge with the same name does not count. If metadata differs on another kernel,
+collect `--debug` output rather than assuming a name match proves readiness.
+
+Several saved computers may stay connected to the phone; ESP Remote routes input
+to the selected computer. There is no need to delete the second computer's bond.
+The iOS host UUID shown by the app is **not** its Bluetooth MAC address.
+
+## Optional background reconnect
+
+No watcher is needed for input once HID is attached. The existing optional
+watcher can issue LE requests while waiting for a phone, but it has not been
+shown to fix the recorded failures and cannot fix the kernel defect. Install it
+only if this polling behavior is wanted:
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/esp-remote-hid.service <<'UNIT'
-[Unit]
-Description=Keep the ESP Remote HID profile connected
-After=bluetooth.target
+# Foreground watcher; Ctrl+C stops only this helper
+~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --watch
 
-[Service]
-ExecStart=%h/ESPRemoteControl/scripts/linux-hid-connect.sh --watch
-Restart=always
-RestartSec=10
+# Optional per-user service, enabled at user login
+~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --install-service
+journalctl --user -u esp-remote-hid.service -f
 
-[Install]
-WantedBy=default.target
-UNIT
-systemctl --user enable --now esp-remote-hid.service
+# Remove only the service, retain the on-demand command
+~/.local/bin/esp-remote-hid --uninstall-service
 ```
 
-Adjust `ExecStart` to wherever the repository is checked out.
+The watcher polls every five seconds by default, requesting LE when HID is
+missing. It does not forcibly drop connections after a timeout. Errors remain
+visible in its log. Repeating service installation reuses the same unit;
+unchanged configuration does not restart the watcher. The service runs as the
+user, not root; it is not a system-wide pre-login or pre-OS keyboard solution.
 
-## Keeping audio on the phone
+## Explicit recovery and transport preference
 
-Prevent the capture; do not undo it. `--drop-audio` disconnects the audio
-profiles after they have already connected, and by then the phone has lost audio
-focus — playback stops or pauses, and pushing it back does not undo that. Use it
-only to recover from a capture that already happened.
+For a deliberate reset of this phone's LE channel, use `--reset-le`. It calls
+`Bearer.LE1.Disconnect` before trying again. It preserves the bond and does not
+reset the adapter, but it will briefly interrupt input to this computer.
 
-Two things prevent it. Never press the desktop applet's **Connect** for the
-phone: that is the generic `Connect()` which brings up every profile. And tell
-the audio stack to ignore the device entirely, so it cannot be routed to even if
-something connects the profile. With PipeWire/WirePlumber:
+If LE is disconnected but a request remains pending, `Bearer.LE1.Disconnect`
+may return `NotConnected` without cancelling that request. The separate explicit
+`--reset-device` uses `Device1.Disconnect` to cancel pending connection requests
+and disconnect **both** transports of this phone, then attempts LE again. It
+keeps the bond, but also interrupts this phone's audio/tethering connections.
+Neither the default helper nor watcher invokes this recovery automatically.
 
-```lua
--- ~/.config/wireplumber/wireplumber.conf.d/51-esp-remote.conf
-monitor.bluez.rules = [
-  {
-    matches = [ { device.name = "~bluez_card.AA_BB_CC_DD_EE_FF" } ]
-    actions = { update-props = { device.disabled = true } }
-  }
-]
-```
-
-Restart WirePlumber (`systemctl --user restart wireplumber`) afterwards. This
-leaves HID untouched — it only removes the phone as an audio device.
-
-## Who dials whom
-
-A Bluetooth mouse is ready the moment you switch it on, and the reason is a
-division of labour, not speed. The mouse advertises the whole time it has
-nothing to talk to. The computer keeps a connect request pending for it and
-scans in the background. Neither side "searches" when you switch it on: the
-first advertisement the computer hears completes a request it made minutes or
-days ago. The device's whole job is to be findable; the computer's whole job is
-to keep asking.
-
-The app now does exactly the device's half and nothing more:
-
-- it advertises the entire time direct mode is on — not only when a computer is
-  selected, and not only when it is idle, so any paired computer can pick it up
-  at any moment;
-- a failed `startAdvertising` retries itself with a backoff, because nothing
-  else can recover from it: no computer can produce an event about a phone it
-  cannot see;
-- the attribute table never changes while the app runs, so the copy your
-  computer cached at pairing time stays valid and reconnecting is a re-encrypt
-  and a re-subscribe rather than a rediscovery.
-
-The computer's half is the half this project cannot reach from the phone, and
-it is the half that usually breaks. `--why` checks all of it:
+BlueZ may also expose a saved, per-device transport preference:
 
 ```bash
-sudo ./scripts/linux-hid-connect.sh --why
+~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --preferred-bearer le
+# Restore the original default when appropriate:
+~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --preferred-bearer last-used
 ```
 
-It reports, in the order these tend to fail:
+This configuration command does not reconnect. It influences later ordinary
+connection requests; it does not prohibit incoming Classic/audio connections or
+repair existing GATT state. In BlueZ 5.87, a generic `Connect` while LE is already
+connected explicitly tries Classic, even with this preference. Continue using the
+LE helper for connection requests. BlueZ stores the preference for this phone on
+this adapter.
 
-| Check | Why it stops the reconnect |
+## Optional audio isolation
+
+### Reversible GUI switch for receiving audio
+
+For a host that only occasionally needs to play a phone's Bluetooth audio,
+`scripts/linux-audio-receiver.py` provides a separate KDE menu switch:
+
+```bash
+# Run as the desktop user, without sudo. Installation alone changes no roles.
+python3 scripts/linux-audio-receiver.py install
+~/.local/bin/esp-remote-audio-receiver off
+# Open the menu entry, or launch the dialog directly:
+~/.local/bin/esp-remote-audio-receiver gui
+```
+
+Search the application menu for **Приймання Bluetooth-аудіо** (English:
+**Bluetooth Audio Reception**). To keep it beside the Bluetooth tray, right-click
+the menu entry, choose **Add to Panel (Widget)**, and position it in panel edit
+mode. This uses Plasma's existing application launcher widget, without patching
+BlueDevil or adding an idle background process. It is a separate button; the
+Bluetooth device list and System Settings page are unchanged. The dialog shows
+the configured state and offers **Увімкнути / Вимкнути**; cancelling does nothing.
+
+The switch changes receiving roles for **all Bluetooth peers in this user's
+audio session**, including already paired phones. It leaves the host's headphone
+output and headset microphone gateway roles enabled. On the tested Bazzite host:
+
+| Setting | WirePlumber roles |
 | --- | --- |
-| adapter powered | nothing scans, so nothing is ever heard |
-| paired / not blocked | BlueZ will not connect a device it has no bond for |
-| **trusted** | otherwise BlueZ asks a human before accepting the link, and on a locked or headless session nobody answers |
-| offers the HID service | the phone is not in direct mode, or the bond predates it |
-| **IdentityResolvingKey in the bond** | iOS advertises with a rotating private address; without the IRK this computer cannot tell that any of those addresses is your phone, so its pending request never matches a phone that is right there advertising |
-| LE long-term key in the bond | a classic-only bond cannot carry a BLE reconnect |
-| link up but HID not attached | the ACL came back without the HoG profile — run the script with no options |
+| On (underlying distribution settings) | `a2dp_sink a2dp_source hfp_ag` |
+| Off | `a2dp_source hfp_ag` |
 
-The two things the computer cannot answer are printed with the commands that
-settle them: whether the phone is advertising at all (`bluetoothctl --timeout 12
-scan le | grep -i 'ESP Remote'`), and whether BlueZ still has a pending connect.
+Off writes one owned fragment,
+`~/.config/wireplumber/wireplumber.conf.d/90-esp-remote-audio-receiver.conf`, using
+`override.bluez5.roles` so the array replaces the earlier setting. It persists
+across login/reboot. On removes only that fragment, restoring the underlying
+configuration. Both changes restart **WirePlumber only**, briefly interrupting
+computer audio; pairing and the Bluetooth daemon are untouched. Selecting the
+current state is a no-op. This prevents this session from exposing the disabled
+audio receiving roles; it does not block Classic Bluetooth or other services.
+Other users and the login screen have separate audio sessions.
 
-That last one is worth internalising, because it is not a bug and it catches
-everyone: **BlueZ stops trying after an explicit disconnect and does not resume
-until the next `Connect()`**. `bluetoothctl disconnect`, the applet's Disconnect
-button, and this script's own drop-and-retry all leave it idle by design. A
-trusted, bonded device is re-armed at boot and when the adapter is powered back
-on — but never after a manual disconnect. Run the script, or
-`bluetoothctl connect <MAC>`, to put the request back.
-
-## Automatic recovery
-
-Version 2.1.3 of the app replaces the manual "force-quit and reopen" repair with
-an escalating ladder that runs whenever a computer is selected but no keyboard
-and mouse session exists. Since 2.1.7 it has two rungs, because nothing useful
-sits between them:
-
-| After | Step | What it fixes |
-| --- | --- | --- |
-| 5 s | reissue the advertisement | a failed or stopped `startAdvertising`, which left the phone invisible |
-| 35 s | rebuild both CoreBluetooth managers | the state that previously only a relaunch cleared |
-
-Any evidence of progress — a report-map read, a report subscription, the radio
-coming back — rewinds the ladder. Once it is exhausted the app keeps advertising
-and says the computer is not answering, which means the next move belongs to the
-computer: run `--why` on it.
-
-The middle rung used to republish the GATT database, and four other paths did
-the same: closing a pairing window, a peer disconnecting, an unsubscribe, and
-returning to the foreground. Each of those invalidated the cached copy on
-**every** paired computer at once, so the reconnect that followed was a full
-rediscovery instead of the second it should take. The foreground one was the
-worst: glancing at another app for three seconds cost every computer its cache,
-and the delay that followed looked like the computer being slow.
-
-Now the table is built once per CoreBluetooth manager and nothing else touches
-it. Switching computers changes which central gets notified and nothing else; a
-computer still subscribed is adopted directly, which is immediate. Only the last
-rung rebuilds, which is exactly why it is last.
-
-## Collecting a log when it still fails
-
-From the app: Bluetooth panel → **Поділитися журналом**. It records connection
-stages, shortened peer identifiers, and error domains — never typed text.
-
-From the computer, capture both sides of the same attempt:
+Requirements: Python 3, PyGObject with WirePlumber 0.5 introspection, `kdialog`,
+and the user's `wireplumber.service`; all were already installed on this host.
+The helper reads the effective configuration with WirePlumber's own parser,
+validates headphone roles, refuses unknown/LE Audio role configurations, and
+preserves unrelated or manually edited files. Failed activation restores the
+previous fragment and attempts to restart the previous audio configuration.
+Configuration validation failure alone does not restart audio.
 
 ```bash
-# terminal 1
-sudo btmon -w /tmp/esp-remote.btsnoop
-# terminal 2
-journalctl -fu bluetooth
-# terminal 3
-./scripts/linux-hid-connect.sh --status
-./scripts/linux-hid-connect.sh
+~/.local/bin/esp-remote-audio-receiver status
+~/.local/bin/esp-remote-audio-receiver on         # allow phone audio again
+~/.local/bin/esp-remote-audio-receiver uninstall # restore roles and remove files
 ```
 
-Useful things to look for:
+Remove a pinned panel button through Plasma's panel edit mode when uninstalling.
+Existing per-device audio profile rules are not automatically changed by this
+installer: an old `device.profile = "off"` rule may need reviewing if reception
+is enabled but playback remains unavailable. On KeeFRogBz, the known obsolete
+`51-iphone-no-audio.conf` was backed up under
+`~/.local/state/esp-remote-control/diagnostics/2026-09-19/` and removed from active
+configuration when installing the switch. That migration is separate from the
+portable helper and can be reversed by restoring the backup.
 
-- `bluetoothd: ... Connection refused` or `Operation already in progress` while
-  the app says it is advertising: the phone and the host disagree about who owns
-  the link. Restart the profile with the helper script.
-- No advertising reports from the iPhone address at all: the phone is not
-  advertising. Open the app, and check the journal in the Bluetooth panel for
-  `Advertising failed`.
-- Subscriptions in the app's log followed immediately by unsubscriptions:
-  something on the host dropped the link; compare with KDE Connect or a desktop
-  Bluetooth applet running, since both can also hold a link to the phone.
-- `bluetoothctl info` reporting `Connected: yes` while
-  `linux-hid-connect.sh --status` reports `keyboard down`: the ACL link is up but
-  the HoG profile is not attached — the case `ConnectProfile` is for.
+### Earlier per-phone workarounds and limitations
 
-## Known limits
+LE-only connection does not request Classic audio. Another application or the
+Bluetooth panel may still initiate a generic connection. `--drop-audio` can
+release phone audio profiles already connected; it may not resume paused media.
 
-- Direct Bluetooth mode has no pre-OS input. A BIOS or bootloader will not talk
-  to a BLE HID peripheral; use the ESP32 USB adapter for that.
-- Reconnect timing after the computer resumes from suspend belongs to BlueZ's
-  auto-connect policy, not to the app. `trust` plus the `--watch` helper is the
-  reliable combination.
-- The app declares the `bluetooth-peripheral` background mode, so the phone stays
-  advertising and connectable with the app in the background or the screen
-  locked. iOS drops the advertised local name there, which is why the computer
-  should reconnect by address — one more reason to pair and `trust` once rather
-  than searching for "ESP Remote" each time. The recovery ladder above uses
-  ordinary timers, so it runs while the app is in the foreground; returning to
-  the app also triggers a full recovery pass.
-- The app pins input to one selected computer at a time. Switching hosts
-  releases held keys first and discards queued text.
+The earlier per-phone `device.disabled = true` recipe was withdrawn: the installed
+WirePlumber 0.5.12 Bluetooth monitor does not check that property when creating
+devices. `device.profile = "off"` is also not a ban on incoming audio; profile
+policy can change it. The host already had such an `off` rule when the maintainer
+reported audio capture after login.
 
-[cross-transport key derivation]: https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core_v6.3/out/en/host/security-manager-specification.html
-[BlueZ Device API]: https://bluez.readthedocs.io/en/latest/device-api/
+A reactive audio guard was tested and removed because connecting and then
+disconnecting audio can still interrupt headphone playback. It is not included
+in the helper. The receiver switch prevents this session from exposing the
+receiving roles in the first place.
+
+One likely trigger is desktop restoration: [KDE BlueDevil's device monitor][KDE restore]
+saves connected devices and calls ordinary `Connect` when restoring them after
+login/resume. On BlueZ 5.87 that can add Classic to an already connected LE phone,
+regardless of `PreferredBearer=le`. The tested host's saved list included the
+iPhone. This is a source-backed explanation consistent with the observed resume
+and audio reconnection; the actual original D-Bus caller was not captured.
+
+[WirePlumber's `bluez5.roles`][WirePlumber Bluetooth] controls which Bluetooth audio
+roles the user session exposes. Removing the receiving role can prevent Linux
+from acting as a phone's Bluetooth speaker, while retaining output/headset roles.
+This setting applies to **all peers in that audio session**, not just one phone;
+it is a separate choice, not part of installing the HID helper. Its activation
+restarts WirePlumber and briefly interrupts the audio session. Existing manual
+audio rules remain untouched by helper installation/removal.
+
+### Preventing an audio connection before it starts
+
+The installed BlueZ 5.87 has no standard per-device service denylist in its
+Device/Bearer APIs. Its [administrative service allowlist][BlueZ Admin policy]
+rejects incoming and outgoing services at adapter scope; it cannot select one
+phone. A device's UUID list is discovered information, not a writable list of
+permissions. Removing cached audio UUIDs or pairing via LE is not an enduring
+prohibition on Classic/audio discovery and connection.
+
+An authorization agent is not a complete replacement: BlueZ [automatically
+authorizes trusted devices][BlueZ authorization], and a service authorization
+callback does not govern every locally initiated profile connection. Removing
+trust alone does not implement a per-phone audio denylist.
+
+A per-phone service policy would require changes beyond these helpers. No
+BlueZ replacement, bond edit or administrative allowlist has been applied. The
+receiver switch restricts roles for the user session, not one phone's permissions.
+
+## Linux connection details and diagnostics
+
+- Linux acts as the LE central/GATT client; the phone publishes HID as a peripheral.
+  A typical BlueZ desktop does not advertise over LE by default, so the app's
+  **Знайти комп'ютер** may not list it. Classic discoverability alone is not an LE
+  advertisement. The verified path here starts from the computer.
+- Advertising may use a rotating private address. BlueZ can expose the bonded
+  identity in `Address` while retaining an earlier address in its D-Bus object
+  path. The helper enumerates objects instead of constructing a path from MAC.
+- `Public`/`Random` are address types and do not by themselves identify Classic
+  versus LE. Likewise, a name changing between “iPhone” and “ESP Remote” is not
+  proof of which transport is connected.
+- `Connected: yes` can describe Classic alone. `--debug` prints separate
+  `LEConnected` and `BREDRConnected` states. `unknown` means the bearer property is
+  unavailable, not proof that the radio is disconnected.
+- An empty name-filtered scan is not proof the phone is absent: iOS may omit the
+  local name in background. Use the paired identity and HCI evidence.
+- If `Bearer.LE1.Connect` is missing, check setup/activation and the installed
+  BlueZ capabilities. The helper fails visibly instead of using Classic as a
+  fallback. Do not replace a working pairing merely because this API is disabled.
+
+Start with read-only diagnostics:
+
+```bash
+~/.local/bin/esp-remote-hid --debug
+~/.local/bin/esp-remote-hid --why
+python3 scripts/linux-le-setup.py status
+journalctl -u bluetooth --since '5 minutes ago'
+```
+
+`--why` checks adapter, pairing, trust, cached HID and API availability. With sudo
+it can also check whether bond key sections exist; it does not print their values.
+No single check establishes that every layer can reconnect.
+
+For a controlled reproduction, capture `sudo btmon -w /tmp/esp-force-le.btsnoop`
+and export the app's **Поділитися журналом** around the same attempt. Keep the
+watcher stopped while attributing a disconnect. Note when the app was merely
+backgrounded, when the host slept, and when a deliberate reset was requested.
+Stop btmon after the test. Capture files can contain Bluetooth traffic from other
+devices; share selected diagnostic excerpts when possible.
+
+## Rollback
+
+```bash
+# User files and optional service; does not remove the phone's pairing
+~/.local/bin/esp-remote-hid --uninstall
+
+# Preview/remove only our BlueZ overrides
+python3 scripts/linux-le-setup.py disable --dry-run
+sudo python3 scripts/linux-le-setup.py disable
+```
+
+Removing the drop-in applies at Bluetooth's next start/reboot. Add `--restart`
+only when ready to interrupt Bluetooth immediately. `disable --temporary` removes
+only our `/run` overrides. Repeated removal is harmless; unrelated overrides,
+main.conf settings, packages and manually created audio rules remain in place.
+If experimental APIs were independently enabled elsewhere, removing our drop-in
+does not disable that separate configuration.
+
+## Validation
+
+The [hardware validation report](linux-direct-hid-validation.md) separates
+working input, manual recovery, the captured kernel defect, and behavior still
+requiring device testing.
+
+Run regression checks without Bluetooth hardware or root:
+
+```bash
+python3 -B -m unittest discover -s Tests -p 'test_linux_*.py'
+bash -n scripts/linux-hid-connect.sh scripts/linux-le-api-test.sh
+```
+
+These cover transport selection, adapter/object identity, HID matching,
+idempotent installation, configuration rollback, and the audio switch. The
+WirePlumber parser integration check runs when its introspection library is
+available. CI runs the offline suite; it does not establish physical pairing,
+input delivery, or wake behavior.
+
+[connect-source]: https://github.com/bluez/bluez/blob/5.87/src/device.c#L2879
+[BlueZ Device API]: https://github.com/bluez/bluez/blob/5.87/doc/org.bluez.Device.rst
+[BlueZ LE bearer implementation]: https://github.com/bluez/bluez/blob/5.87/src/bearer.c
+[WirePlumber Bluetooth]: https://pipewire.pages.freedesktop.org/wireplumber/daemon/configuration/bluetooth.html
+[BlueZ HoG]: https://github.com/bluez/bluez/blob/5.87/profiles/input/hog.c#L204
+[KDE restore]: https://github.com/KDE/bluedevil/blob/master/src/kded/devicemonitor.cpp
+[BlueZ Admin policy]: https://github.com/bluez/bluez/blob/5.87/doc/org.bluez.AdminPolicySet.rst
+[BlueZ authorization]: https://github.com/bluez/bluez/blob/5.87/src/adapter.c#L7759

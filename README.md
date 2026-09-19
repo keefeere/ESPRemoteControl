@@ -34,10 +34,14 @@ Unlike software solutions that require network setup or specific operating syste
 ## Experimental v2: direct Bluetooth
 
 The v2 prototype adds a direct BLE HID keyboard/mouse mode. Keyboard and mouse
-input are stable on macOS. Linux has worked in limited testing, including a
-2.1.3 sleep/wake reconnect without relaunching the app, but still has unresolved
-connection and host-switching problems. Windows remains untested.
-ESP32 mode remains the initial default, and the app remembers the selected mode.
+input have worked on macOS and Linux, but reconnect remains unreliable across
+host/app lifecycle transitions. Bazzite testing of **2.2.9 (53)** confirmed input
+and repeated app background/foreground cycles, followed by failures after
+logout and reboot. A captured Linux LE connection failure matches an upstream
+kernel fix missing from the tested host; a helper alone cannot fix that defect.
+See the [Linux validation report](docs/linux-direct-hid-validation.md).
+Windows remains untested. ESP32 mode remains the initial default, and the app
+remembers the selected mode.
 
 1. In the connection status strip, open **ESP** and choose **Прямий Bluetooth**.
 2. Open the pairing button beside the status. To connect from the computer,
@@ -49,17 +53,22 @@ ESP32 mode remains the initial default, and the app remembers the selected mode.
    HID connection; wait until the app reports keyboard and mouse connected.
 4. Use the existing keyboard and trackpad. Return to **ESP-адаптер** to use the
    USB bridge. Switching releases held input and cancels queued text.
-5. On Linux, start the connection from the computer and connect only the HID
-   service; see [the Linux guide](docs/linux-direct-hid.md) and
-   `./scripts/linux-hid-connect.sh`. Run the helper with `--install` once for
-   automatic HID-only reconnect after sleep and a persistent WirePlumber audio
-   isolation rule. A BlueZ desktop does not advertise over
-   BLE, so step 3 cannot find it, and its generic "Connect" also brings up the
-   iPhone's audio profiles.
+5. On Linux, start the connection from the computer using explicit LE; see
+   [the Linux guide](docs/linux-direct-hid.md) and
+   `./scripts/linux-hid-connect.sh`. The helper requires `python3-dbus` and the
+   experimental BlueZ LE bearer API described in the guide. After testing it,
+   `--install` adds the on-demand command; a background service is optional
+   (`--install-service`). Installation leaves audio settings unchanged.
+   Audio prevention for a single phone remains unresolved.
+   To disable reception from **all phones** while retaining headphones, the
+   optional `python3 scripts/linux-audio-receiver.py install` adds a KDE menu
+   switch, **Приймання Bluetooth-аудіо**. See the guide for activation and rollback.
+   A typical BlueZ desktop does not advertise over BLE by default, so step 3
+   may not find it. Its generic "Connect" can also bring up phone audio profiles.
 6. If input does not become ready, use **Поділитися журналом** in the pairing
    panel. The log includes connection stages, not typed text. During prototype
-   updates a host may retain old GATT services; remove only this app/iPhone
-   pairing on the test host and pair again if necessary.
+   updates a host may retain old GATT services. Start with the Linux guide's
+   diagnostics; a missing cached HID service alone is not a reason to re-pair.
 
 Pairing is open for two minutes. Once connected, input is pinned to that host;
 use the pairing panel to select a different computer. The app clears held and
@@ -274,7 +283,7 @@ This project solves a real problem with a unique hardware approach. Contribution
 
 ## Roadmap
 
-- **Direct BLE HID stabilization (current priority)** - macOS is stable. Diagnose and fix the remaining Linux connection/reconnect and host-switching problems, then validate pairing, input, reconnect, and sleep/wake behavior on Windows. Retain ESP32 mode for USB HID and pre-OS input.
+- **Direct BLE HID stabilization (current priority)** - Diagnose and fix connection/reconnect and host-switching failures on Linux and macOS, including missing subscriptions after host login or app startup. Then validate pairing, input, reconnect, and sleep/wake behavior on Windows. Retain ESP32 mode for USB HID and pre-OS input.
 - **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
 
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
