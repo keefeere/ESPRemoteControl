@@ -119,6 +119,12 @@ Popular ESP32-S3 boards that work:
 
 ### 1. Flash the optional ESP32 bridge
 
+<p align="center">
+  <img src="docs/images/inpudeck-bridge.jpg" width="42%" alt="Waveshare ESP32-S3-Zero running the optional InpuDeck Bridge">
+  <br>
+  <sub>Waveshare ESP32-S3-Zero running the optional InpuDeck Bridge.</sub>
+</p>
+
 1. Install [Arduino IDE](https://www.arduino.cc/en/software)
 2. Add ESP32 board support: `File > Preferences > Additional Board Manager URLs`
    ```
