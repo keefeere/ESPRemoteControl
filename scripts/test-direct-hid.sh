@@ -23,3 +23,9 @@ swiftc -swift-version 5 \
   "$repo_root/Tests/HIDMappingTests.swift" \
   -o "$build_dir/hid-mapping-tests"
 "$build_dir/hid-mapping-tests"
+
+swiftc -swift-version 5 \
+  "$repo_root/Shared/TextMutationPlanner.swift" \
+  "$repo_root/Tests/TextMutationPlannerTests.swift" \
+  -o "$build_dir/text-mutation-planner-tests"
+"$build_dir/text-mutation-planner-tests"

@@ -321,7 +321,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else {
-                Text("Скорочення зміни мови на комп’ютері — кнопка праворуч. Мова тексту визначається автоматично за літерами.")
+                Text("Мова визначається автоматично. Для голосового введення натисніть мікрофон на системній клавіатурі iOS.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -755,25 +755,23 @@ struct ContentView: View {
     }
 
     private func handleTextChange(oldText: String, newText: String) {
-        let commonPrefixLength = zip(oldText, newText).prefix { $0 == $1 }.count
-        let deletedCount = oldText.count - commonPrefixLength
-        let insertedCharacters = newText.dropFirst(commonPrefixLength)
+        let mutation = TextMutationPlanner.makePlan(from: oldText, to: newText)
         var taps: [(modifiers: UInt8, keycode: UInt8)] = []
 
         taps.append(contentsOf: repeatElement(
             (modifiers: UInt8(0), keycode: HID.keyBackspace),
-            count: max(0, deletedCount)
+            count: mutation.deletedCharacterCount
         ))
 
         if !taps.isEmpty {
             ble.sendKeyTaps(taps)
         }
 
-        if insertedCharacters.isEmpty {
+        if mutation.insertedText.isEmpty {
             inputWarning = nil
         }
 
-        sendText(String(insertedCharacters))
+        sendText(mutation.insertedText)
     }
 
     private func pasteClipboard() {

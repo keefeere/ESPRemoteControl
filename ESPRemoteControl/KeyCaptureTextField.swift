@@ -6,7 +6,7 @@ final class BackspaceDetectingTextView: UITextView {
 
     private let placeholderLabel: UILabel = {
         let label = UILabel()
-        label.text = "Введіть або вставте текст…"
+        label.text = "Введіть, вставте або продиктуйте текст…"
         label.font = UIFont.systemFont(ofSize: 17)
         label.textColor = .placeholderText
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -106,6 +106,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
         textView.textContentType = .none
         textView.autocapitalizationType = .sentences
         textView.returnKeyType = .send
+        textView.accessibilityHint = "Для голосового введення скористайтеся мікрофоном на системній клавіатурі iOS"
         textView.isScrollEnabled = true
         textView.alwaysBounceVertical = false
         textView.showsVerticalScrollIndicator = true

@@ -309,10 +309,10 @@ is experimental and needs physical-device validation before becoming the default
 - **Multi-touch trackpads** - Both input screens support two-finger scrolling/right click, pinch-to-zoom, tap-drag, edge scrolling, and three-finger middle click. The layout, scanner button, and middle-click behavior were confirmed on-device in 2.2.9 (53).
 - **Russian characters from the Ukrainian keyboard** - `Alt+і/є/'/ї` sends AltGr combinations for `ы/э/ё/ъ`; Shift produces uppercase. Automatic text typing recognizes the same letters. The host's Ukrainian layout must provide these AltGr levels.
 - **Dual keyboard legends** - Character keys show both EN and UA legends; the active layout is centered and prominent, while the alternate layout remains visible in the lower-right corner.
+- **Native iOS dictation** - The input composer accepts voice typing from the microphone on the system iOS keyboard and forwards committed text and dictation corrections to the connected host.
 
 ### Deferred until Direct BLE HID is stable
 
-- **Voice typing on the input tab («Ввід»)** - Support dictation through the built-in iOS keyboard.
 - **Background Mouse Jiggler** - Investigate whether pointer movement can continue while the app is in the background within iOS restrictions.
 
 ## Artwork
