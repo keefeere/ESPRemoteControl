@@ -21,7 +21,16 @@
           "usageDescription": "Scans QR and 2D codes so their contents can be typed on the connected computer."
         }
       ],
-      "versions": []
+      "versions": [
+        {
+          "version": "3.0.0",
+          "date": "2026-09-19",
+          "downloadURL": "https://github.com/keefeere/InpuDeck/releases/download/ios-v3.0.0/InpuDeck-unsigned.ipa",
+          "size": 910158,
+          "minOSVersion": "17.0",
+          "localizedDescription": "InpuDeck 3.0.0"
+        }
+      ]
     }
   ]
 }
