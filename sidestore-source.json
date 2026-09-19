@@ -11,6 +11,23 @@
       "localizedDescription": "Use your iPhone as an additional keyboard, trackpad, and control deck for multiple computers over direct Bluetooth or an optional ESP32-S3 BLE-to-USB HID bridge. Includes English and Ukrainian input, Shortcuts for text and URLs, a full-screen keyboard, clipboard typing, hardware controls, code scanning, and multiple-host selection.",
       "iconURL": "https://raw.githubusercontent.com/keefeere/InpuDeck/main/InpuDeck/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#445BE7",
+      "screenshots": [
+        {
+          "imageURL": "https://raw.githubusercontent.com/keefeere/InpuDeck/main/docs/images/input-portrait.png",
+          "width": 669,
+          "height": 1422
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/keefeere/InpuDeck/main/docs/images/keyboard-portrait.png",
+          "width": 669,
+          "height": 1422
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/keefeere/InpuDeck/main/docs/images/keyboard-landscape.png",
+          "width": 1422,
+          "height": 669
+        }
+      ],
       "permissions": [
         {
           "type": "bluetooth",
