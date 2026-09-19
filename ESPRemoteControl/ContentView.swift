@@ -14,6 +14,9 @@ struct ContentView: View {
     @AppStorage("jigglerIntervalIndex") private var jigglerIntervalIndex = 7
     @AppStorage("scannerBatchMode") private var scannerBatchMode = false
     @AppStorage("developerMode") private var developerMode = false
+    @AppStorage("showAlternateKeyLegends") private var showAlternateKeyLegends = true
+    @AppStorage("hideAlternateKeyLegendsInPortrait") private var hideAlternateKeyLegendsInPortrait = false
+    @AppStorage("alternateKeyLegendScalePercent") private var alternateKeyLegendScalePercent = 72.0
 
     @State private var inputText = ""
     @State private var wantsFocus = false
@@ -27,6 +30,7 @@ struct ContentView: View {
     @State private var showsLayoutHelp = false
     @State private var showsPrivacyHelp = false
     @State private var jigglerEnabled = false
+    @State private var showsJigglerNotice = false
 
     private let jigglerIntervals: [Double] = [0.5, 1, 2, 5, 7, 10, 15, 20]
 
@@ -72,6 +76,10 @@ struct ContentView: View {
                 jigglerEnabled = false
                 ble.enteredBackground()
             }
+            updateIdleTimer()
+        }
+        .onChange(of: jigglerEnabled) { _, _ in
+            updateIdleTimer()
         }
         .onChange(of: shortcutInbox.pendingText) { _, _ in
             receiveShortcutTextIfNeeded()
@@ -80,12 +88,21 @@ struct ContentView: View {
             ble.start()
             receiveSharedTextIfNeeded()
             receiveShortcutTextIfNeeded()
+            updateIdleTimer()
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
         .task(id: "\(jigglerEnabled)-\(jigglerIntervalIndex)") {
             await runJiggler()
         }
         .sheet(isPresented: $showsSettings) {
             settingsView
+        }
+        .alert("Mouse Jiggler активний", isPresented: $showsJigglerNotice) {
+            Button("Зрозуміло", role: .cancel) {}
+        } message: {
+            Text("Поки Jiggler увімкнений, iPhone не гаситиме екран. Це збільшує витрату батареї; при згортанні застосунку Jiggler автоматично вимкнеться.")
         }
     }
 
@@ -248,6 +265,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Button {
+                    wantsFocus = false
                     inputText = ""
                     inputWarning = nil
                 } label: {
@@ -509,7 +527,13 @@ struct ContentView: View {
                 Label("Mouse Jiggler", systemImage: "cursorarrow.motionlines")
                     .font(.headline)
                 Spacer()
-                Toggle("", isOn: $jigglerEnabled)
+                Toggle("", isOn: Binding(
+                    get: { jigglerEnabled },
+                    set: { enabled in
+                        jigglerEnabled = enabled
+                        if enabled { showsJigglerNotice = true }
+                    }
+                ))
                     .labelsHidden()
             }
 
@@ -546,7 +570,7 @@ struct ContentView: View {
                 }
             }
 
-            Text("Рухається на 1 HID-крок і повертається назад, тому курсор практично не зміщується. Працює лише поки ESP Remote активний на екрані; при переході iOS у background автоматично вимикається.")
+            Text("Рухається на 1 HID-крок і повертається назад, тому курсор практично не зміщується. Поки Jiggler активний, екран не гасне; при переході iOS у background він автоматично вимикається.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -628,6 +652,32 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Позначення клавіш") {
+                    Toggle("Показувати другу розкладку", isOn: $showAlternateKeyLegends)
+                    Toggle(
+                        "Ховати у портретній орієнтації",
+                        isOn: $hideAlternateKeyLegendsInPortrait
+                    )
+                    .disabled(!showAlternateKeyLegends)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent(
+                            "Розмір додаткових символів",
+                            value: "\(Int(alternateKeyLegendScalePercent.rounded()))%"
+                        )
+                        Slider(
+                            value: $alternateKeyLegendScalePercent,
+                            in: 40...100,
+                            step: 5
+                        )
+                    }
+                    .disabled(!showAlternateKeyLegends)
+
+                    Text("Активна розкладка показується по центру. Друга — у нижньому правому куті; відсоток задає її розмір відносно основного символу.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Тачпад") {
                     Picker("Pinch zoom", selection: $trackpadZoomShortcutRawValue) {
                         ForEach(TrackpadZoomShortcut.allCases) { shortcut in
@@ -702,6 +752,10 @@ struct ContentView: View {
 
     private func jigglerIntervalLabel(_ interval: Double) -> String {
         interval == 0.5 ? "0.5" : String(Int(interval))
+    }
+
+    private func updateIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = jigglerEnabled && scenePhase == .active
     }
 
     private var appVersion: String {

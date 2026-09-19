@@ -153,6 +153,24 @@ struct KeyCaptureTextField: UIViewRepresentable {
         init(parent: KeyCaptureTextField) {
             self.parent = parent
             self.lastCommittedText = parent.text
+            super.init()
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(keyboardWillHide),
+                name: UIResponder.keyboardWillHideNotification,
+                object: nil
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func keyboardWillHide() {
+            guard parent.wantsFirstResponder else { return }
+            DispatchQueue.main.async {
+                self.parent.wantsFirstResponder = false
+            }
         }
 
         func textView(

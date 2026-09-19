@@ -29,6 +29,9 @@ struct RemoteKeyboardView: View {
             ? KeyboardOrientationLock.landscape.rawValue
             : KeyboardOrientationLock.unlocked.rawValue
     @AppStorage("trackpadZoomShortcut") private var trackpadZoomShortcutRawValue = TrackpadZoomShortcut.control.rawValue
+    @AppStorage("showAlternateKeyLegends") private var showAlternateKeyLegends = true
+    @AppStorage("hideAlternateKeyLegendsInPortrait") private var hideAlternateKeyLegendsInPortrait = false
+    @AppStorage("alternateKeyLegendScalePercent") private var alternateKeyLegendScalePercent = 72.0
 
     private var orientationLock: KeyboardOrientationLock {
         KeyboardOrientationLock(rawValue: orientationLockRawValue) ?? .unlocked
@@ -48,6 +51,8 @@ struct RemoteKeyboardView: View {
         GeometryReader { geometry in
             let usesWideLayout = geometry.size.width >= 600
             let showsTrackpad = geometry.size.height > geometry.size.width
+            let showsAlternateLegends = showAlternateKeyLegends
+                && !(hideAlternateKeyLegendsInPortrait && showsTrackpad)
             let keyboardRowCount = usesWideLayout ? 6 : 7
             let spacing = geometry.size.height < 600 ? CGFloat(3) : CGFloat(5)
             let statusHeight = usesWideLayout ? CGFloat(32) : CGFloat(38)
@@ -99,9 +104,21 @@ struct RemoteKeyboardView: View {
                     availableWidth: availableWidth,
                     includesOuterSymbols: usesWideLayout
                 )
-                tabRow(height: keyHeight, availableWidth: availableWidth)
-                homeRow(height: keyHeight, availableWidth: availableWidth)
-                shiftRow(height: keyHeight, availableWidth: availableWidth)
+                tabRow(
+                    height: keyHeight,
+                    availableWidth: availableWidth,
+                    showsAlternateLegends: showsAlternateLegends
+                )
+                homeRow(
+                    height: keyHeight,
+                    availableWidth: availableWidth,
+                    showsAlternateLegends: showsAlternateLegends
+                )
+                shiftRow(
+                    height: keyHeight,
+                    availableWidth: availableWidth,
+                    showsAlternateLegends: showsAlternateLegends
+                )
                 commandRow(height: keyHeight, availableWidth: availableWidth)
 
                 if showsTrackpad {
@@ -222,7 +239,11 @@ struct RemoteKeyboardView: View {
         }
     }
 
-    private func tabRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+    private func tabRow(
+        height: CGFloat,
+        availableWidth: CGFloat,
+        showsAlternateLegends: Bool
+    ) -> some View {
         let keys = topTypingKeys
         let weights = [CGFloat(1.35)] + Array(repeating: CGFloat(1), count: keys.count)
         let widths = resolvedWidths(weights: weights, availableWidth: availableWidth)
@@ -233,7 +254,7 @@ struct RemoteKeyboardView: View {
                 characterKey(
                     key.character,
                     usesCase: key.usesCase,
-                    secondary: key.secondaryCharacter,
+                    secondary: showsAlternateLegends ? key.secondaryCharacter : nil,
                     secondaryUsesCase: key.secondaryUsesCase,
                     width: widths[index + 1],
                     height: height
@@ -242,7 +263,11 @@ struct RemoteKeyboardView: View {
         }
     }
 
-    private func homeRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+    private func homeRow(
+        height: CGFloat,
+        availableWidth: CGFloat,
+        showsAlternateLegends: Bool
+    ) -> some View {
         let keys = homeTypingKeys
         let weights = [CGFloat(1.45)]
             + Array(repeating: CGFloat(1), count: keys.count)
@@ -263,7 +288,7 @@ struct RemoteKeyboardView: View {
                 characterKey(
                     key.character,
                     usesCase: key.usesCase,
-                    secondary: key.secondaryCharacter,
+                    secondary: showsAlternateLegends ? key.secondaryCharacter : nil,
                     secondaryUsesCase: key.secondaryUsesCase,
                     width: widths[index + 1],
                     height: height
@@ -279,7 +304,11 @@ struct RemoteKeyboardView: View {
         }
     }
 
-    private func shiftRow(height: CGFloat, availableWidth: CGFloat) -> some View {
+    private func shiftRow(
+        height: CGFloat,
+        availableWidth: CGFloat,
+        showsAlternateLegends: Bool
+    ) -> some View {
         let keys = bottomTypingKeys
         let commandWidths = commandRowWidths(availableWidth: availableWidth)
         let arrowWidths = Array(commandWidths.suffix(3))
@@ -305,7 +334,7 @@ struct RemoteKeyboardView: View {
                     characterKey(
                         key.character,
                         usesCase: key.usesCase,
-                        secondary: key.secondaryCharacter,
+                        secondary: showsAlternateLegends ? key.secondaryCharacter : nil,
                         secondaryUsesCase: key.secondaryUsesCase,
                         width: typingWidths[index + 1],
                         height: height
@@ -411,6 +440,15 @@ struct RemoteKeyboardView: View {
 
         let transmittedCharacter = usesCase ? base : character
         let command = HID.mapCharacterToHID(transmittedCharacter, layout: layout)
+        let russianAlternateCharacter: Character?
+        if layout == .ukrainianEnhanced, effectiveModifiers & HID.modLeftAlt != 0 {
+            russianAlternateCharacter = HID.russianAlternateCharacterForUkrainianKey(
+                transmittedCharacter,
+                uppercase: uppercaseLetters
+            )
+        } else {
+            russianAlternateCharacter = nil
+        }
         let secondaryCharacter: Character? = secondary.map {
             secondaryUsesCase && uppercaseLetters
                 ? Character(String($0).uppercased())
@@ -418,8 +456,9 @@ struct RemoteKeyboardView: View {
         }
 
         return PressableKeyButton(
-            title: String(character),
+            title: String(russianAlternateCharacter ?? character),
             secondaryTitle: secondaryCharacter.map(String.init),
+            secondaryTitleScale: CGFloat(alternateKeyLegendScalePercent / 100),
             isCompact: true,
             fontSize: height < 34 ? 14 : 17,
             minHeight: height,
