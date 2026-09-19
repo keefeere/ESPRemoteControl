@@ -1,7 +1,7 @@
 # Localization
 
-ESP Remote supports English (`en`) and Ukrainian (`uk`). iOS exposes these
-localizations under Settings → Apps → ESP Remote → Language, so the app language
+InpuDeck supports English (`en`) and Ukrainian (`uk`). iOS exposes these
+localizations under Settings → Apps → InpuDeck → Language, so the app language
 can be tested without changing the device language.
 
 Ukrainian is the Xcode development language because most existing source keys
@@ -17,11 +17,11 @@ are Ukrainian. English is maintained as a complete translation.
   substitutions and positional format specifiers where translators may reorder
   arguments.
 - The existing Ukrainian source text is the key for existing UI. Add the
-  English value to `ESPRemoteControl/en.lproj/Localizable.strings`. English
+  English value to `InpuDeck/en.lproj/Localizable.strings`. English
   source keys need an explicit Ukrainian value in
-  `ESPRemoteControl/uk.lproj/Localizable.strings`.
+  `InpuDeck/uk.lproj/Localizable.strings`.
 - The Share Extension has its own localization files under
-  `ESPRemoteControlShare/{en,uk}.lproj` because it is a separate bundle.
+  `InpuDeckShare/{en,uk}.lproj` because it is a separate bundle.
 - Privacy permission descriptions belong in each target's
   `InfoPlist.strings`, not in `Localizable.strings`.
 

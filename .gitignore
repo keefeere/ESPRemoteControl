@@ -8,4 +8,4 @@ dist/
 xcuserdata/
 
 # Arduino build output
-sketch_uid_keyboard_ble/build/
+inpudeck_bridge/build/

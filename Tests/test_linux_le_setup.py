@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 SPEC = importlib.util.spec_from_file_location(
-    "linux_le_setup", Path(__file__).resolve().parents[1] / "scripts/linux-le-setup.py")
+    "linux_le_setup", Path(__file__).resolve().parents[1] / "scripts/inpudeck-le-setup.py")
 setup = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(setup)
 DAEMON = setup.DAEMONS[0]
@@ -49,6 +49,19 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(self.manager.persistent.exists())
         self.assertFalse(self.manager.legacy.exists())
         self.assertNotIn(("systemctl", "restart", setup.UNIT), self.calls)
+
+    def test_migrates_owned_esp_remote_persistent_dropin(self):
+        old = setup.content(DAEMON).replace(setup.MARKER, setup.OLD_MARKER, 1)
+        setup.write_file(self.manager.old_persistent, old)
+        self.enable()
+        self.assertFalse(self.manager.old_persistent.exists())
+        self.assertEqual(self.manager.persistent.read_text(), setup.content(DAEMON))
+
+    def test_refuses_modified_esp_remote_dropin(self):
+        setup.write_file(self.manager.old_persistent, setup.OLD_MARKER + "# customized\n")
+        with self.assertRaisesRegex(RuntimeError, "local changes"):
+            self.manager.plan("enable", False)
+        self.assertTrue(self.manager.old_persistent.exists())
 
     def test_disable_twice_keeps_unrelated_settings(self):
         self.enable()

@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Check shell syntax
-        run: bash -n scripts/linux-hid-connect.sh scripts/linux-le-api-test.sh
+        run: bash -n scripts/inpudeck-hid.sh scripts/inpudeck-le-api-test.sh
 
       - name: Run offline helper tests
         run: python3 -B -m unittest discover -s Tests -p 'test_linux_*.py' -v

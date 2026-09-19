@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/linux-audio-receiver.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/inpudeck-audio-receiver.py"
 spec = importlib.util.spec_from_file_location("audio_receiver", SCRIPT)
 audio = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audio)
@@ -121,32 +121,62 @@ class ReceiverTests(unittest.TestCase):
         self.assertIn("--passivepopup", dialog.call_args.args[0])
 
     def test_install_is_idempotent_and_uninstall_restores_audio(self):
-        prefix, data = self.root / "prefix with spaces", self.root / "data"
-        audio.install(prefix, data)
+        prefix, data, config = self.root / "prefix with spaces", self.root / "data", self.root / "config"
+        audio.install(prefix, data, config)
         files = [p for p in self.root.rglob("*") if p.is_file()]
         self.assertEqual(len(files), 3)
         before = {p: p.stat().st_mtime_ns for p in files}
-        audio.install(prefix, data)
+        audio.install(prefix, data, config)
         self.assertEqual(before, {p: p.stat().st_mtime_ns for p in files})
-        desktop = data / "applications/esp-remote-audio-receiver.desktop"
+        desktop = data / "applications/inpudeck-audio-receiver.desktop"
         if shutil.which("desktop-file-validate"):
             result = subprocess.run(["desktop-file-validate", str(desktop)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.receiver.set_enabled(False)
-        audio.uninstall(prefix, data, self.receiver)
+        audio.uninstall(prefix, data, config, self.receiver)
         self.assertTrue(self.receiver.enabled())
         self.assertTrue(all(not p.exists() for p in files))
 
     def test_install_preserves_unrelated_file_before_writing_anything(self):
-        prefix, data = self.root / "prefix", self.root / "data"
-        launcher = prefix / "bin/esp-remote-audio-receiver"
+        prefix, data, config = self.root / "prefix", self.root / "data", self.root / "config"
+        launcher = prefix / "bin/inpudeck-audio-receiver"
         launcher.parent.mkdir(parents=True)
         launcher.write_text("personal command")
         with self.assertRaises(RuntimeError):
-            audio.install(prefix, data)
+            audio.install(prefix, data, config)
         self.assertEqual(launcher.read_text(), "personal command")
         self.assertFalse(data.exists())
         self.assertFalse((prefix / "libexec").exists())
+
+    def test_install_migrates_owned_esp_remote_files_and_configuration(self):
+        prefix, data, config = self.root / "prefix", self.root / "data", self.root / "config"
+        legacy_paths = (
+            prefix / "libexec/esp-remote-control/linux-audio-receiver.py",
+            prefix / "bin/esp-remote-audio-receiver",
+            data / "applications/esp-remote-audio-receiver.desktop",
+        )
+        for path in legacy_paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(audio.LEGACY_MARKER + "legacy\n")
+        legacy_config = config / "wireplumber/wireplumber.conf.d" / audio.LEGACY_NAME
+        legacy_config.parent.mkdir(parents=True)
+        legacy_config.write_text(audio.fragment(self.base).replace(audio.MARKER, audio.LEGACY_MARKER, 1))
+
+        audio.install(prefix, data, config)
+
+        self.assertTrue(self.receiver.path.exists())
+        self.assertTrue(self.receiver.path.read_text().startswith(audio.MARKER))
+        self.assertFalse(legacy_config.exists())
+        self.assertTrue(all(not path.exists() for path in legacy_paths))
+
+    def test_install_refuses_unowned_legacy_file(self):
+        prefix, data, config = self.root / "prefix", self.root / "data", self.root / "config"
+        legacy = prefix / "bin/esp-remote-audio-receiver"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("personal command\n")
+        with self.assertRaisesRegex(RuntimeError, "unrelated"):
+            audio.install(prefix, data, config)
+        self.assertEqual(legacy.read_text(), "personal command\n")
 
 
 @unittest.skipUnless(Path("/usr/share/wireplumber/wireplumber.conf").exists(), "WirePlumber not installed")

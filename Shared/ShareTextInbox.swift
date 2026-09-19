@@ -4,7 +4,7 @@ import UIKit
 /// because SideStore signs both with the same Apple team. It avoids an App
 /// Group entitlement, which a free signing profile cannot provision.
 enum ShareTextInbox {
-    private static let pasteboardName = UIPasteboard.Name("com.keefeere.ESPRemoteControl.shared-text")
+    private static let pasteboardName = UIPasteboard.Name("com.keefeere.InpuDeck.shared-text")
 
     static func enqueue(_ text: String) -> Bool {
         guard !text.isEmpty, let pasteboard = UIPasteboard(name: pasteboardName, create: true) else {

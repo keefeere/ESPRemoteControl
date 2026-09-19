@@ -1,4 +1,4 @@
-# ESP Remote development workflow
+# InpuDeck development workflow
 
 ## iOS releases for device testing
 
@@ -8,7 +8,7 @@ to the SideStore source; a merged PR or a CI artifact alone is not the delivery.
 
 - Increment `MARKETING_VERSION` (normally the patch version) and
   `CURRENT_PROJECT_VERSION` in every app and extension build configuration in
-  `ESPRemoteControl.xcodeproj/project.pbxproj`.
+  `InpuDeck.xcodeproj/project.pbxproj`.
 - Include `release-tag-<version>` in the release PR title or the release commit
   message on `main`. The existing `auto-release-tag.yml` workflow creates
   `ios-v<version>` and dispatches `build-ios-ipa.yml` for that tag.

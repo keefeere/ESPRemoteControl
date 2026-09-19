@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 SPEC = importlib.util.spec_from_file_location(
-    "linux_bluez_le", Path(__file__).resolve().parents[1] / "scripts/linux-bluez-le.py")
+    "linux_bluez_le", Path(__file__).resolve().parents[1] / "scripts/inpudeck-bluez-le.py")
 le = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(le)
 
@@ -217,7 +217,7 @@ class TransportTests(unittest.TestCase):
                     ("0005", MAC, "AA:BB:CC:DD:EE:FF", False),
                     ("0005", MAC.lower(), LOCAL.lower(), True)):
                 uevent.write_text(f"HID_ID={bus}:00000000:00000000\n"
-                                  f"HID_NAME=ESP Remote\nHID_UNIQ={peer}\nHID_PHYS={adapter}\n")
+                                  f"HID_NAME=InpuDeck\nHID_UNIQ={peer}\nHID_PHYS={adapter}\n")
                 self.assertEqual(le.hid_attached(MAC, LOCAL, root), expected)
             uevent.unlink()
             self.assertFalse(le.hid_attached(MAC, LOCAL, root))

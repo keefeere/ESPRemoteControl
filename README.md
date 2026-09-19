@@ -1,12 +1,17 @@
-# ESP Remote Control
+# InpuDeck
 
-Turn your iPhone into a wireless keyboard and mouse for any computer using an ESP32-S3 microcontroller.
+Turn your iPhone into an additional keyboard, trackpad, and control deck for
+multiple computers over direct Bluetooth or an optional ESP32-S3 USB bridge.
 
 ## Why This Exists
 
-Ever tried typing a password on your Smart TV using the remote? Or needed to control a computer from across the room? This project creates a true wireless input bridge - your iPhone becomes a fully functional keyboard and trackpad that works with any device via USB.
+Ever tried typing a password on a computer or Smart TV without a convenient
+keyboard nearby? InpuDeck turns the iPhone already in your hand into a
+full-featured keyboard, trackpad, scanner, and hardware control surface.
 
-Unlike software solutions that require network setup or specific operating systems, this works at the hardware level. The computer sees it as a real USB keyboard and mouse.
+Direct Bluetooth HID needs no companion app or network connection on the
+computer. When USB HID or pre-OS input is required, the optional ESP32-S3
+bridge presents itself as a physical USB keyboard and mouse.
 
 ## Features
 
@@ -23,26 +28,26 @@ Unlike software solutions that require network setup or specific operating syste
 - **Universal compatibility** - Works with any device that accepts USB HID devices (Smart TVs, computers, streaming boxes, embedded systems)
 - **Zero configuration** - No drivers, no network setup, just plug and play
 - **Low latency** - Direct Bluetooth LE connection for responsive input
-- **Reliable reconnect** - Remembers the last ESP32 and reconnects with backoff
+- **Multiple hosts** - Remembers paired computers and lets you select the active destination
+- **Optional hardware bridge** - Uses an ESP32-S3 for USB HID and pre-OS input when needed
 - **Warm-reboot recovery** - Recovers a stalled USB HID endpoint when a host reboots without removing USB power
 - **Optional privacy mask** - Keep the typing composer visible or mask it when entering passwords
 - **Hardware key hold** - Every on-screen key sends real HID key-down/key-up events, including multi-finger chords; modifiers can also be tapped to latch
 
-## Experimental v2: direct Bluetooth
+## Direct Bluetooth
 
-The v2 prototype adds a direct BLE HID keyboard/mouse mode. Keyboard and mouse
+Direct BLE HID is the default on a new installation. Keyboard and mouse
 input have worked on macOS and Linux, but reconnect remains unreliable across
 host/app lifecycle transitions. Bazzite testing of **2.2.9 (53)** confirmed input
 and repeated app background/foreground cycles, followed by failures after
 logout and reboot. A captured Linux LE connection failure matches an upstream
 kernel fix missing from the tested host; a helper alone cannot fix that defect.
 See the [Linux validation report](docs/linux-direct-hid-validation.md).
-Windows remains untested. ESP32 mode remains the initial default, and the app
-remembers the selected mode.
+Windows remains untested. The app remembers the selected mode and host.
 
 1. In the connection status strip, open **ESP** and choose **Direct Bluetooth**.
 2. Open the pairing button beside the status. To connect from the computer,
-   enable pairing in the app and select **ESP Remote** (or the iPhone name) in
+   enable pairing in the app and select **InpuDeck** (or the iPhone name) in
    the computer's Bluetooth settings. Confirm any system pairing prompt.
 3. To initiate the connection from the iPhone, open Bluetooth settings on the
    computer, choose **Find computer** in the app, then select the computer.
@@ -52,13 +57,13 @@ remembers the selected mode.
    USB bridge. Switching releases held input and cancels queued text.
 5. On Linux, start the connection from the computer using explicit LE; see
    [the Linux guide](docs/linux-direct-hid.md) and
-   `./scripts/linux-hid-connect.sh`. The helper requires `python3-dbus` and the
+   `./scripts/inpudeck-hid.sh`. The helper requires `python3-dbus` and the
    experimental BlueZ LE bearer API described in the guide. After testing it,
    `--install` adds the on-demand command; a background service is optional
    (`--install-service`). Installation leaves audio settings unchanged.
    Audio prevention for a single phone remains unresolved.
    To disable reception from **all phones** while retaining headphones, the
-   optional `python3 scripts/linux-audio-receiver.py install` adds a KDE menu
+   optional `python3 scripts/inpudeck-audio-receiver.py install` adds a KDE menu
    switch, **Bluetooth audio receiver**. See the guide for activation and rollback.
    A typical BlueZ desktop does not advertise over BLE by default, so step 3
    may not find it. Its generic "Connect" can also bring up phone audio profiles.
@@ -87,11 +92,13 @@ the separate Linux checks. PR filters consider the whole PR diff against its
 base, so a PR that already changes the button style still runs its UI test on
 subsequent updates.
 
-## Hardware Requirements
+## Requirements
 
-- **ESP32-S3** development board (must have native USB support)
 - **iPhone** running iOS 17+
-- USB-C cable to connect ESP32 to target computer
+- A computer with Bluetooth LE HID support
+
+The optional USB bridge additionally requires an **ESP32-S3** development board
+with native USB support and a data-capable USB-C cable.
 
 Popular ESP32-S3 boards that work:
 - Waveshare ESP32-S3-Zero
@@ -101,7 +108,7 @@ Popular ESP32-S3 boards that work:
 
 ## Quick Start
 
-### 1. Flash the ESP32
+### 1. Flash the optional ESP32 bridge
 
 1. Install [Arduino IDE](https://www.arduino.cc/en/software)
 2. Add ESP32 board support: `File > Preferences > Additional Board Manager URLs`
@@ -110,7 +117,7 @@ Popular ESP32-S3 boards that work:
    ```
 3. Install [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino):
    `Tools > Manage Libraries > Search "NimBLE-Arduino"`
-4. Open `sketch_uid_keyboard_ble/sketch_uid_keyboard_ble.ino`
+4. Open `inpudeck_bridge/inpudeck_bridge.ino`
 5. Select your ESP32-S3 board and set `Tools > USB Mode > USB-OTG (TinyUSB)`
 6. Upload the sketch
 
@@ -124,7 +131,7 @@ esptool \
   --port /dev/ttyACM0 \
   --before no-reset \
   --after no-reset \
-  write-flash 0x0 ESPRemoteControl-ESP32-S3-Zero.bin
+  write-flash 0x0 InpuDeck-ESP32-S3-Zero.bin
 ```
 
 Press RESET after flashing. The serial device number can change after USB
@@ -132,14 +139,14 @@ re-enumeration, so verify the port before writing.
 
 ### 2. Install the iOS App
 
-1. Open `ESPRemoteControl.xcodeproj` in Xcode
+1. Open `InpuDeck.xcodeproj` in Xcode
 2. Connect your iPhone and build/install the app
 3. Grant Bluetooth permissions when prompted
 
 #### SideStore without a permanent Mac
 
 The `Build unsigned iOS IPA` GitHub Actions workflow builds an unsigned
-`ESPRemoteControl-unsigned.ipa` on a `macos-26` runner. Run the workflow from
+`InpuDeck-unsigned.ipa` on a `macos-26` runner. Run the workflow from
 the repository's Actions tab, download the artifact, and install the IPA with
 SideStore. SideStore can then refresh the app's development signature without
 rebuilding it.
@@ -147,7 +154,7 @@ rebuilding it.
 Tagged builds named `ios-v*` are also attached to a GitHub Release:
 
 ```text
-ios-v1.0.0
+ios-v3.0.0
 ```
 
 #### Automatic SideStore updates
@@ -155,18 +162,29 @@ ios-v1.0.0
 Add the repository's AltSource to SideStore once:
 
 ```text
-https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/sidestore-source.json
+https://raw.githubusercontent.com/keefeere/InpuDeck/main/sidestore-source.json
 ```
 
 Or open this one-tap URL on the iPhone:
 
 ```text
-sidestore://source?url=https://raw.githubusercontent.com/keefeere/ESPRemoteControl/main/sidestore-source.json
+sidestore://source?url=https://raw.githubusercontent.com/keefeere/InpuDeck/main/sidestore-source.json
 ```
 
 Every tagged build updates this source after its IPA is attached to the GitHub
 Release. SideStore will then detect the new version; enable LocalDevVPN and
 confirm the update to sign and install it.
+
+#### Migrating from ESP Remote Control
+
+InpuDeck intentionally uses a new app identity and a new SideStore source.
+Remove ESP Remote Control and its old source, add the InpuDeck source above,
+then install and pair InpuDeck as a new app. Existing 2.x releases remain in
+the repository history but are not copied into the new feed.
+
+On Linux, installing either InpuDeck helper removes the corresponding files
+managed by ESP Remote Control before writing the new command and service.
+Unrelated files without the old ownership marker are refused and left intact.
 
 #### Cutting a release
 
@@ -194,21 +212,22 @@ To build the same unsigned IPA on a Mac locally:
 
 ### 3. Connect and Use
 
-1. Plug the ESP32 into your target computer or Smart TV via USB
-2. Open the iOS app - it will automatically scan and connect to the ESP32
-3. Choose the target computer's layout shortcut in Settings
-4. Type with the native iOS keyboard or use the dedicated keyboard tab:
+1. Open InpuDeck and pair the computer from **Direct Bluetooth**. To use the
+   optional bridge instead, flash the firmware above, connect the ESP32-S3 to
+   the target over USB, and select **ESP adapter** in the connection strip.
+2. Choose the target computer's layout shortcut in Settings.
+3. Type with the native iOS keyboard or use the dedicated keyboard tab:
    - tap `EN`/`UA` to switch both the phone and target computer
    - hold `EN`/`UA` (or `UA/EN` on the full keyboard) for 0.5 seconds to change
      only the on-screen layout, without sending the host shortcut
    - on the full keyboard, tap the orientation lock to freeze the current
      orientation or unlock it; hold it for 0.5 seconds to force landscape
    - use the globe beside the text field to resend only the host shortcut
-5. In **Settings → Shortcuts**, open the app’s shortcut page, then create a new shortcut with **Send to ESP**:
+4. In **Settings → Shortcuts**, open the app’s shortcut page, then create a new shortcut with **Send to InpuDeck**:
    - tap its `Text` field → **Select Variable** → **Shortcut Input**
    - in the shortcut’s Details, enable **Show in Share Sheet** and allow **Text** and **URLs**
-6. From another iOS app, choose `Share` → the shortcut. ESP Remote opens, waits for the bridge if needed, then types the input.
-7. Use the trackpad area for mouse control:
+5. From another iOS app, choose `Share` → the shortcut. InpuDeck opens, waits for the selected output if needed, then types the input.
+6. Use the trackpad area for mouse control:
    - **Drag** to move cursor
    - **Tap** for left click  
    - **Two-finger tap** for right click
@@ -220,9 +239,16 @@ To build the same unsigned IPA on a Mac locally:
 
 ## How It Works
 
-The system uses a custom Bluetooth LE protocol to send HID commands from iPhone to ESP32:
+In direct mode, the computer sees the iPhone as a standard Bluetooth LE HID
+keyboard and mouse:
 
+```text
+iPhone App (SwiftUI) → Bluetooth LE HID → Target Computer
 ```
+
+The optional bridge adds a BLE-to-USB path:
+
+```text
 iPhone App (SwiftUI) 
     ↓ Bluetooth LE
 ESP32-S3 Firmware 
@@ -230,7 +256,9 @@ ESP32-S3 Firmware
 Target Computer
 ```
 
-The ESP32 acts as both a Bluetooth peripheral (receiving from iPhone) and USB HID device (sending to computer). It translates touch input and keystrokes into standard HID keyboard/mouse commands.
+The ESP32 acts as both a Bluetooth peripheral (receiving from iPhone) and USB
+HID device (sending to the computer). It translates touch input and keystrokes
+into standard HID keyboard/mouse commands.
 
 ## Technical Details
 
@@ -242,13 +270,13 @@ The ESP32 acts as both a Bluetooth peripheral (receiving from iPhone) and USB HI
 ## Project Structure
 
 ```
-ESPRemoteControl/
-├── ESPRemoteControl/           # Main iOS SwiftUI app
+InpuDeck/
+├── InpuDeck/           # Main iOS SwiftUI app
 │   ├── ContentView.swift       # Main UI with keyboard and trackpad
 │   └── BLEKeyboardBridge.swift # Bluetooth LE communication
 ├── Shared/                     # HID mapping and typing plan
-└── sketch_uid_keyboard_ble/    # ESP32-S3 Arduino firmware
-    └── sketch_uid_keyboard_ble.ino
+└── inpudeck_bridge/    # ESP32-S3 Arduino firmware
+    └── inpudeck_bridge.ino
 ```
 
 ## Use Cases
@@ -297,8 +325,9 @@ This project solves a real problem with a unique hardware approach. Contribution
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
 the CoreBluetooth approach, evidence, and remaining device checks, and
 [direct Bluetooth HID on Linux](docs/linux-direct-hid.md) for pairing, HID-only
-connection, and reconnect on a BlueZ desktop. Direct mode
-is experimental and needs physical-device validation before becoming the default.
+connection, and reconnect on a BlueZ desktop. Direct mode is the default for a
+new installation, but Windows and additional sleep/wake scenarios still need
+physical-device validation.
 
 ### Completed in iOS 2.2
 

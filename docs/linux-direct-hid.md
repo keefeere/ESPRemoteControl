@@ -1,6 +1,6 @@
 # Direct Bluetooth HID on Linux
 
-This guide is for **Direct Bluetooth** in ESP Remote. The ESP32 USB adapter does
+This guide is for **Direct Bluetooth** in InpuDeck. The ESP32 USB adapter does
 not need this Linux setup.
 
 Keyboard and mouse input have been verified on Bazzite, but recovery after
@@ -50,8 +50,8 @@ the LE connection and the matching kernel HID device.
 
 | Component | Default setup | Scope / rollback |
 | --- | --- | --- |
-| BlueZ userspace API | One systemd drop-in adds `--experimental` | Host-wide API exposure; `linux-le-setup.py disable` removes our drop-in |
-| On-demand helper | Two files under `~/.local/libexec/esp-remote-control` and a launcher `~/.local/bin/esp-remote-hid` | Per user; `esp-remote-hid --uninstall` |
+| BlueZ userspace API | One systemd drop-in adds `--experimental` | Host-wide API exposure; `inpudeck-le-setup.py disable` removes our drop-in |
+| On-demand helper | Two files under `~/.local/libexec/inpudeck` and a launcher `~/.local/bin/inpudeck-hid` | Per user; `inpudeck-hid --uninstall` |
 | Reconnect service | Not installed | Optional `--install-service`; remove with `--uninstall-service` |
 | Audio configuration | Not changed | Audio restrictions need separate configuration; see limitations below |
 | Audio receiver switch | Separate optional installation | User menu/panel launcher; persistent receiving-role override only while off; `on` or `uninstall` restores underlying roles |
@@ -88,12 +88,12 @@ with a reboot; a kernel/driver change is not part of this setup.
 Preview and save the persistent API setting:
 
 ```bash
-python3 scripts/linux-le-setup.py enable --dry-run
-sudo python3 scripts/linux-le-setup.py enable
-python3 scripts/linux-le-setup.py status
+python3 scripts/inpudeck-le-setup.py enable --dry-run
+sudo python3 scripts/inpudeck-le-setup.py enable
+python3 scripts/inpudeck-le-setup.py status
 ```
 
-`enable` adds `/etc/systemd/system/bluetooth.service.d/90-esp-remote-le.conf`
+`enable` adds `/etc/systemd/system/bluetooth.service.d/90-inpudeck-le.conf`
 and runs `daemon-reload` only if files changed. Repeating it is a no-op. It
 promotes our earlier temporary test override from `/run` without stopping a
 working connection. It does not modify `/etc/bluetooth/main.conf`.
@@ -103,7 +103,7 @@ has `--experimental` (as after our temporary test), it keeps working. Otherwise
 activate at the next reboot, or explicitly restart Bluetooth at a convenient time:
 
 ```bash
-sudo python3 scripts/linux-le-setup.py enable --restart
+sudo python3 scripts/inpudeck-le-setup.py enable --restart
 ```
 
 A restart briefly disconnects **all** local Bluetooth devices. It is never
@@ -113,9 +113,14 @@ implicit in the default setup command. For a temporary test instead, use
 Install the on-demand command as your desktop user, **without sudo**:
 
 ```bash
-./scripts/linux-hid-connect.sh --install
-~/.local/bin/esp-remote-hid --help
+./scripts/inpudeck-hid.sh --install
+~/.local/bin/inpudeck-hid --help
 ```
+
+The installer also removes an earlier `esp-remote-hid` launcher, reconnect
+service, and helper copies when they carry the ESP Remote ownership marker.
+It refuses similarly named files without that marker instead of overwriting
+them.
 
 Repeat `--install` after updating the repository; it updates only these helper
 files. It does not start a service, trust a phone, modify audio routing, or edit
@@ -126,14 +131,14 @@ your shell profile. Use the full path if `~/.local/bin` is not on `PATH`.
 
 Keep an existing working bond. If this computer is not paired yet:
 
-1. In ESP Remote choose **Direct Bluetooth**, then **Allow new pairing**.
-2. On Linux run `bluetoothctl`, then `scan le` and find the phone/ESP Remote.
+1. In InpuDeck choose **Direct Bluetooth**, then **Allow new pairing**.
+2. On Linux run `bluetoothctl`, then `scan le` and find the phone/InpuDeck.
 3. Run `pair AA:BB:CC:DD:EE:FF`, then `trust AA:BB:CC:DD:EE:FF` and `scan off`.
-4. Leave ESP Remote open with this computer selected, and run:
+4. Leave InpuDeck open with this computer selected, and run:
 
 ```bash
-~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF
-~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --status
+~/.local/bin/inpudeck-hid --device AA:BB:CC:DD:EE:FF
+~/.local/bin/inpudeck-hid --device AA:BB:CC:DD:EE:FF --status
 ```
 
 The optional `--trust` flag sets trust explicitly. Otherwise connecting does not
@@ -150,7 +155,7 @@ These host checks still do not prove that input reaches the selected host. A USB
 bridge with the same name does not count. If metadata differs on another kernel,
 collect `--debug` output rather than assuming a name match proves readiness.
 
-Several saved computers may stay connected to the phone; ESP Remote routes input
+Several saved computers may stay connected to the phone; InpuDeck routes input
 to the selected computer. There is no need to delete the second computer's bond.
 The iOS host UUID shown by the app is **not** its Bluetooth MAC address.
 
@@ -163,14 +168,14 @@ only if this polling behavior is wanted:
 
 ```bash
 # Foreground watcher; Ctrl+C stops only this helper
-~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --watch
+~/.local/bin/inpudeck-hid --device AA:BB:CC:DD:EE:FF --watch
 
 # Optional per-user service, enabled at user login
-~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --install-service
-journalctl --user -u esp-remote-hid.service -f
+~/.local/bin/inpudeck-hid --device AA:BB:CC:DD:EE:FF --install-service
+journalctl --user -u inpudeck-hid.service -f
 
 # Remove only the service, retain the on-demand command
-~/.local/bin/esp-remote-hid --uninstall-service
+~/.local/bin/inpudeck-hid --uninstall-service
 ```
 
 The watcher polls every five seconds by default, requesting LE when HID is
@@ -195,9 +200,9 @@ Neither the default helper nor watcher invokes this recovery automatically.
 BlueZ may also expose a saved, per-device transport preference:
 
 ```bash
-~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --preferred-bearer le
+~/.local/bin/inpudeck-hid --device AA:BB:CC:DD:EE:FF --preferred-bearer le
 # Restore the original default when appropriate:
-~/.local/bin/esp-remote-hid --device AA:BB:CC:DD:EE:FF --preferred-bearer last-used
+~/.local/bin/inpudeck-hid --device AA:BB:CC:DD:EE:FF --preferred-bearer last-used
 ```
 
 This configuration command does not reconnect. It influences later ordinary
@@ -212,15 +217,20 @@ this adapter.
 ### Reversible GUI switch for receiving audio
 
 For a host that only occasionally needs to play a phone's Bluetooth audio,
-`scripts/linux-audio-receiver.py` provides a separate KDE menu switch:
+`scripts/inpudeck-audio-receiver.py` provides a separate KDE menu switch:
 
 ```bash
 # Run as the desktop user, without sudo. Installation alone changes no roles.
-python3 scripts/linux-audio-receiver.py install
-~/.local/bin/esp-remote-audio-receiver off
+python3 scripts/inpudeck-audio-receiver.py install
+~/.local/bin/inpudeck-audio-receiver off
 # Open the menu entry, or launch the dialog directly:
-~/.local/bin/esp-remote-audio-receiver gui
+~/.local/bin/inpudeck-audio-receiver gui
 ```
+
+Installation migrates a managed `90-esp-remote-audio-receiver.conf` fragment
+and removes the old managed launcher, desktop entry, and script copies. Files
+with local changes or without the old ownership marker are left untouched and
+reported as an error.
 
 Search the application menu for **Bluetooth Audio Reception**. To keep it beside
 the Bluetooth tray, right-click
@@ -240,7 +250,7 @@ output and headset microphone gateway roles enabled. On the tested Bazzite host:
 | Off | `a2dp_source hfp_ag` |
 
 Off writes one owned fragment,
-`~/.config/wireplumber/wireplumber.conf.d/90-esp-remote-audio-receiver.conf`, using
+`~/.config/wireplumber/wireplumber.conf.d/90-inpudeck-audio-receiver.conf`, using
 `override.bluez5.roles` so the array replaces the earlier setting. It persists
 across login/reboot. On removes only that fragment, restoring the underlying
 configuration. Both changes restart **WirePlumber only**, briefly interrupting
@@ -258,9 +268,9 @@ previous fragment and attempts to restart the previous audio configuration.
 Configuration validation failure alone does not restart audio.
 
 ```bash
-~/.local/bin/esp-remote-audio-receiver status
-~/.local/bin/esp-remote-audio-receiver on         # allow phone audio again
-~/.local/bin/esp-remote-audio-receiver uninstall # restore roles and remove files
+~/.local/bin/inpudeck-audio-receiver status
+~/.local/bin/inpudeck-audio-receiver on         # allow phone audio again
+~/.local/bin/inpudeck-audio-receiver uninstall # restore roles and remove files
 ```
 
 Remove a pinned panel button through Plasma's panel edit mode when uninstalling.
@@ -268,7 +278,7 @@ Existing per-device audio profile rules are not automatically changed by this
 installer: an old `device.profile = "off"` rule may need reviewing if reception
 is enabled but playback remains unavailable. On KeeFRogBz, the known obsolete
 `51-iphone-no-audio.conf` was backed up under
-`~/.local/state/esp-remote-control/diagnostics/2026-09-19/` and removed from active
+`~/.local/state/inpudeck/diagnostics/2026-09-19/` and removed from active
 configuration when installing the switch. That migration is separate from the
 portable helper and can be reversed by restoring the backup.
 
@@ -332,7 +342,7 @@ receiver switch restricts roles for the user session, not one phone's permission
   identity in `Address` while retaining an earlier address in its D-Bus object
   path. The helper enumerates objects instead of constructing a path from MAC.
 - `Public`/`Random` are address types and do not by themselves identify Classic
-  versus LE. Likewise, a name changing between “iPhone” and “ESP Remote” is not
+  versus LE. Likewise, a name changing between “iPhone” and “InpuDeck” is not
   proof of which transport is connected.
 - `Connected: yes` can describe Classic alone. `--debug` prints separate
   `LEConnected` and `BREDRConnected` states. `unknown` means the bearer property is
@@ -346,9 +356,9 @@ receiver switch restricts roles for the user session, not one phone's permission
 Start with read-only diagnostics:
 
 ```bash
-~/.local/bin/esp-remote-hid --debug
-~/.local/bin/esp-remote-hid --why
-python3 scripts/linux-le-setup.py status
+~/.local/bin/inpudeck-hid --debug
+~/.local/bin/inpudeck-hid --why
+python3 scripts/inpudeck-le-setup.py status
 journalctl -u bluetooth --since '5 minutes ago'
 ```
 
@@ -367,11 +377,11 @@ devices; share selected diagnostic excerpts when possible.
 
 ```bash
 # User files and optional service; does not remove the phone's pairing
-~/.local/bin/esp-remote-hid --uninstall
+~/.local/bin/inpudeck-hid --uninstall
 
 # Preview/remove only our BlueZ overrides
-python3 scripts/linux-le-setup.py disable --dry-run
-sudo python3 scripts/linux-le-setup.py disable
+python3 scripts/inpudeck-le-setup.py disable --dry-run
+sudo python3 scripts/inpudeck-le-setup.py disable
 ```
 
 Removing the drop-in applies at Bluetooth's next start/reboot. Add `--restart`
@@ -391,7 +401,7 @@ Run regression checks without Bluetooth hardware or root:
 
 ```bash
 python3 -B -m unittest discover -s Tests -p 'test_linux_*.py'
-bash -n scripts/linux-hid-connect.sh scripts/linux-le-api-test.sh
+bash -n scripts/inpudeck-hid.sh scripts/inpudeck-le-api-test.sh
 ```
 
 These cover transport selection, adapter/object identity, HID matching,

@@ -9,7 +9,7 @@ been established.
 
 | Component | Version |
 | --- | --- |
-| ESP Remote / iOS | 2.2.9 (53) / 26.7 |
+| ESP Remote Control / iOS | 2.2.9 (53) / 26.7 |
 | Host | KeeFRogBz, Bazzite 44 |
 | Kernel | 7.2.4-ogc3.1.fc44.x86_64 |
 | BlueZ | 5.87 |
@@ -92,7 +92,7 @@ userspace package suitable for `rpm-ostree install -yA` live application.
 Around 05:17, LE and the HID service reappeared, but UHID subsequently vanished
 and input reports produced `EINVAL`. At 05:20, overlapping tests included a
 scoped LE reset and a manual **Connect for KeeFRogBz in the Bluetooth device
-list**. The maintainer identified that manual action as restoring ESP Remote.
+list**. The maintainer identified that manual action as restoring InpuDeck.
 The helper did not issue another Connect, but that does **not** establish native
 autoconnection or prove the reset caused recovery. The manual action's exact
 transport sequence was not captured.
@@ -118,7 +118,7 @@ sole cause of every outage or proof that its patch alone fixes all behavior.
 ## Evidence and remaining checks
 
 Private captures and selected excerpts are stored locally under
-`~/.local/state/esp-remote-control/diagnostics/2026-09-19/reconnect-0509/`:
+`~/.local/state/inpudeck/diagnostics/2026-09-19/reconnect-0509/`:
 `findings.md`, `address-type-evidence.txt`, `kernel-address-fix.patch`,
 `hci_connect_le.disassembly.txt`, `gatt-notification-state.txt`, and
 `input-counts.json`. The raw HCI trace is not included in the repository.

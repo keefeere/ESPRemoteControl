@@ -3,9 +3,9 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/espremote-ios.XXXXXX")"
+build_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/inpudeck-ios.XXXXXX")"
 output_dir="$repo_root/dist"
-ipa_path="$output_dir/ESPRemoteControl-unsigned.ipa"
+ipa_path="$output_dir/InpuDeck-unsigned.ipa"
 
 cleanup() {
   rm -rf "$build_root"
@@ -13,8 +13,8 @@ cleanup() {
 trap cleanup EXIT
 
 xcodebuild \
-  -project "$repo_root/ESPRemoteControl.xcodeproj" \
-  -scheme ESPRemoteControl \
+  -project "$repo_root/InpuDeck.xcodeproj" \
+  -scheme InpuDeck \
   -configuration Release \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
@@ -25,7 +25,7 @@ xcodebuild \
   DEVELOPMENT_TEAM='' \
   clean build
 
-app_path="$build_root/DerivedData/Build/Products/Release-iphoneos/ESPRemoteControl.app"
+app_path="$build_root/DerivedData/Build/Products/Release-iphoneos/InpuDeck.app"
 if [[ ! -d "$app_path" ]]; then
   echo "Built app was not found at $app_path" >&2
   exit 1
@@ -33,7 +33,7 @@ fi
 
 # Fake-sign both executables before packaging. SideStore replaces these
 # signatures with the user development certificate during installation.
-share_extension_path="$app_path/PlugIns/ESPRemoteControlShare.appex"
+share_extension_path="$app_path/PlugIns/InpuDeckShare.appex"
 if [[ ! -d "$share_extension_path" ]]; then
   echo "Built Share Extension was not found at $share_extension_path" >&2
   exit 1
@@ -48,11 +48,11 @@ for bundle_path in "$app_path" "$share_extension_path"; do
   done
 done
 
-ldid -S "$share_extension_path/ESPRemoteControlShare"
-ldid -S "$app_path/ESPRemoteControl"
+ldid -S "$share_extension_path/InpuDeckShare"
+ldid -S "$app_path/InpuDeck"
 
 mkdir -p "$build_root/Payload" "$output_dir"
-ditto "$app_path" "$build_root/Payload/ESPRemoteControl.app"
+ditto "$app_path" "$build_root/Payload/InpuDeck.app"
 
 (
   cd "$build_root"

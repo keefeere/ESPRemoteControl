@@ -1,0 +1,550 @@
+/**
+ * Tools > USB Mode > USB-OTG (TinyUSB)
+ * Install library NimBLEDevice
+ */
+
+#include <Arduino.h>
+
+// ---- BLE (Peripheral) via NimBLE ----
+#include <NimBLEDevice.h>
+
+// ---- USB HID Keyboard, Mouse & Consumer Control (Arduino-ESP32 core) ----
+#include "USB.h"
+#include "USBHID.h"
+#include "USBHIDKeyboard.h"
+#include "USBHIDMouse.h"
+#include "USBHIDConsumerControl.h"
+
+// =====================
+// UUIDs (MUST MATCH iOS)
+// =====================
+static const char* kServiceUUID = "2D2A0001-8A5A-4E76-A2E3-1E57D9A1B001";
+static const char* kWriteCharUUID = "2D2A0002-8A5A-4E76-A2E3-1E57D9A1B001";
+
+// =====================
+// Protocol Commands
+// =====================
+
+// ---- v1 (legacy): 3 bytes per frame ----
+static const uint8_t CMD_KEY = 0x01;
+static const uint8_t CMD_MOUSE_MOVE = 0x02;
+static const uint8_t CMD_MOUSE_CLICK = 0x03;
+static const uint8_t CMD_MOUSE_SCROLL = 0x04;
+
+// ---- v2: [0xAA, 0x01] header + TLV frames ----
+// Frame format: [cmd][len][payload...]
+static const uint8_t V2_MAGIC = 0xAA;
+static const uint8_t V2_VERSION = 0x01;
+
+// Keyboard
+static const uint8_t V2_SET_MODIFIERS = 0x01;  // payload: [mask]
+static const uint8_t V2_KEY_DOWN = 0x02;       // payload: [keycode]
+static const uint8_t V2_KEY_UP = 0x03;         // payload: [keycode]
+static const uint8_t V2_KEY_TAP = 0x04;        // payload: [mask, keycode]
+
+// Mouse
+static const uint8_t V2_MOUSE_MOVE = 0x10;    // payload: [dx, dy]
+static const uint8_t V2_MOUSE_SCROLL = 0x11;  // payload: [dx, dy]
+static const uint8_t V2_MOUSE_CLICK = 0x12;   // payload: [button]
+static const uint8_t V2_MOUSE_DOWN = 0x13;    // payload: [button]
+static const uint8_t V2_MOUSE_UP = 0x14;      // payload: [button]
+
+// Consumer Control. Usage is little-endian uint16 from HID Usage Page 0x0C.
+static const uint8_t V2_CONSUMER_DOWN = 0x20; // payload: [usageLo, usageHi]
+static const uint8_t V2_CONSUMER_UP = 0x21;   // payload: []
+
+// USB-IF HUTRR110 System Microphone Mute (Generic Desktop usage 0xA9).
+static const uint8_t V2_SYSTEM_MICROPHONE_MUTE_DOWN = 0x22; // payload: []
+static const uint8_t V2_SYSTEM_MICROPHONE_MUTE_UP = 0x23;   // payload: []
+
+// =====================
+// USB HID instances
+// =====================
+USBHIDKeyboard Keyboard;
+USBHIDMouse Mouse;
+USBHIDConsumerControl ConsumerControl;
+USBHID HidProbe;
+
+static const uint8_t kSystemMicrophoneMuteDescriptor[] = {
+  0x05, 0x01,       // Usage Page (Generic Desktop)
+  0x09, 0x80,       // Usage (System Control)
+  0xA1, 0x01,       // Collection (Application)
+  0x85, HID_REPORT_ID_SYSTEM_CONTROL,
+  0x09, 0xA9,       // Usage (System Microphone Mute)
+  0x15, 0x00,       // Logical Minimum (0)
+  0x25, 0x01,       // Logical Maximum (1)
+  0x95, 0x01,       // Report Count (1)
+  0x75, 0x01,       // Report Size (1)
+  0x81, 0x06,       // Input (Data, Variable, Relative)
+  0x75, 0x07,       // Report Size (7)
+  0x81, 0x03,       // Input (Constant, Variable, Absolute)
+  0x05, 0x08,       // Usage Page (LEDs)
+  0x09, 0x57,       // Usage (System Microphone Mute)
+  0x75, 0x01,       // Report Size (1)
+  0x91, 0x06,       // Output (Data, Variable, Relative)
+  0x75, 0x07,       // Report Size (7)
+  0x91, 0x03,       // Output (Constant, Variable, Absolute)
+  0xC0              // End Collection
+};
+
+class USBHIDSystemMicrophoneMute : public USBHIDDevice {
+private:
+  USBHID hid;
+
+  bool send(uint8_t value) {
+    return hid.SendReport(HID_REPORT_ID_SYSTEM_CONTROL, &value, 1);
+  }
+
+public:
+  USBHIDSystemMicrophoneMute() : hid() {
+    static bool initialized = false;
+    if (!initialized) {
+      initialized = true;
+      USBHID::addDevice(this, sizeof(kSystemMicrophoneMuteDescriptor));
+    }
+  }
+
+  void begin() {
+    hid.begin();
+  }
+
+  size_t press() {
+    return send(1) ? 1 : 0;
+  }
+
+  size_t release() {
+    return send(0) ? 1 : 0;
+  }
+
+  uint16_t _onGetDescriptor(uint8_t* buffer) override {
+    memcpy(buffer, kSystemMicrophoneMuteDescriptor, sizeof(kSystemMicrophoneMuteDescriptor));
+    return sizeof(kSystemMicrophoneMuteDescriptor);
+  }
+
+  void _onOutput(uint8_t report_id, const uint8_t* buffer, uint16_t len) override {
+    if (report_id != HID_REPORT_ID_SYSTEM_CONTROL || len == 0) return;
+    Serial.printf("System microphone mute LED: %s\n", (buffer[0] & 0x01) ? "on" : "off");
+  }
+};
+
+USBHIDSystemMicrophoneMute SystemMicrophoneMute;
+
+// A warm reboot of some hosts leaves ESP32-S3 TinyUSB mounted but unable to
+// deliver HID reports in pre-OS screens. A hardware reset recovers it, so do
+// the same in software after a previously mounted USB host disappears or
+// stops completing HID IN transfers.
+static constexpr uint32_t kUsbRestartDelayMs = 250;
+static constexpr uint32_t kHidProbeIntervalMs = 500;
+static constexpr uint32_t kHidProbeTimeoutMs = 150;
+static constexpr uint32_t kHidProbeQuietPeriodMs = 250;
+static constexpr uint8_t kHidProbeFailureLimit = 2;
+static volatile bool gUsbWasMounted = false;
+static volatile bool gUsbMounted = false;
+static volatile bool gUsbSuspended = false;
+static volatile bool gUsbRestartRequested = false;
+static volatile uint32_t gUsbStoppedAtMs = 0;
+static volatile uint32_t gLastBleCommandAtMs = 0;
+static volatile uint8_t gHidProbeFailures = 0;
+
+static void requestUsbRecovery() {
+  if (gUsbRestartRequested) return;
+
+  gUsbStoppedAtMs = millis();
+  gUsbRestartRequested = true;
+}
+
+static void usbEventCallback(
+  void*,
+  esp_event_base_t eventBase,
+  int32_t eventId,
+  void*) {
+  if (eventBase != ARDUINO_USB_EVENTS) return;
+
+  switch (eventId) {
+    case ARDUINO_USB_STARTED_EVENT:
+      gUsbWasMounted = true;
+      gUsbMounted = true;
+      gUsbSuspended = false;
+      gHidProbeFailures = 0;
+      Serial.println("USB mounted.");
+      break;
+
+    case ARDUINO_USB_STOPPED_EVENT:
+      gUsbMounted = false;
+      gUsbSuspended = false;
+      Serial.println("USB unmounted.");
+      if (gUsbWasMounted) {
+        requestUsbRecovery();
+      }
+      break;
+
+    case ARDUINO_USB_SUSPEND_EVENT:
+      gUsbSuspended = true;
+      Serial.println("USB suspended.");
+      break;
+
+    case ARDUINO_USB_RESUME_EVENT:
+      gUsbSuspended = false;
+      gHidProbeFailures = 0;
+      Serial.println("USB resumed.");
+      break;
+
+    default:
+      break;
+  }
+}
+
+static uint8_t gModifiersMask = 0x00;
+static bool gKeysDown[256] = { false };
+
+static bool keyboardIsIdle() {
+  if (gModifiersMask != 0) return false;
+
+  for (bool keyDown : gKeysDown) {
+    if (keyDown) return false;
+  }
+  return true;
+}
+
+static bool sendHidProbe() {
+  hid_keyboard_report_t report = {};
+  return HidProbe.SendReport(
+    HID_REPORT_ID_KEYBOARD,
+    &report,
+    sizeof(report),
+    kHidProbeTimeoutMs);
+}
+
+static void setModifiers(uint8_t newMask) {
+  uint8_t diff = gModifiersMask ^ newMask;
+  if (!diff) return;
+
+  // Raw modifier codes: 0xE0..0xE7
+  if (diff & 0x01) {
+    if (newMask & 0x01) Keyboard.pressRaw(0xE0);
+    else Keyboard.releaseRaw(0xE0);
+  }  // LCtrl
+  if (diff & 0x02) {
+    if (newMask & 0x02) Keyboard.pressRaw(0xE1);
+    else Keyboard.releaseRaw(0xE1);
+  }  // LShift
+  if (diff & 0x04) {
+    if (newMask & 0x04) Keyboard.pressRaw(0xE2);
+    else Keyboard.releaseRaw(0xE2);
+  }  // LAlt
+  if (diff & 0x08) {
+    if (newMask & 0x08) Keyboard.pressRaw(0xE3);
+    else Keyboard.releaseRaw(0xE3);
+  }  // LGUI
+  if (diff & 0x10) {
+    if (newMask & 0x10) Keyboard.pressRaw(0xE4);
+    else Keyboard.releaseRaw(0xE4);
+  }  // RCtrl
+  if (diff & 0x20) {
+    if (newMask & 0x20) Keyboard.pressRaw(0xE5);
+    else Keyboard.releaseRaw(0xE5);
+  }  // RShift
+  if (diff & 0x40) {
+    if (newMask & 0x40) Keyboard.pressRaw(0xE6);
+    else Keyboard.releaseRaw(0xE6);
+  }  // RAlt
+  if (diff & 0x80) {
+    if (newMask & 0x80) Keyboard.pressRaw(0xE7);
+    else Keyboard.releaseRaw(0xE7);
+  }  // RGUI
+
+  gModifiersMask = newMask;
+}
+
+static void keyDown(uint8_t keycode) {
+  if (keycode == 0x00) return;
+  if (gKeysDown[keycode]) return;
+  Keyboard.pressRaw(keycode);
+  gKeysDown[keycode] = true;
+}
+
+static void keyUp(uint8_t keycode) {
+  if (keycode == 0x00) return;
+  if (!gKeysDown[keycode]) return;
+  Keyboard.releaseRaw(keycode);
+  gKeysDown[keycode] = false;
+}
+
+static void keyTap(uint8_t modifiersMask, uint8_t keycode) {
+  if (keycode == 0x00) return;
+
+  bool wasDown = gKeysDown[keycode];
+  uint8_t savedMods = gModifiersMask;
+
+  setModifiers(modifiersMask);
+
+  if (!wasDown) {
+    keyDown(keycode);
+    delay(5);
+    keyUp(keycode);
+    delay(1);
+  }
+
+  setModifiers(savedMods);
+}
+
+// v1 compatibility shim
+static void sendKeyPressAndRelease(uint8_t modifiers, uint8_t keycode) {
+  keyTap(modifiers, keycode);
+}
+
+static void sendMouseMove(int8_t dx, int8_t dy) {
+  Mouse.move(dx, dy);
+}
+
+static void sendMouseClick(uint8_t button) {
+  // button: 1=left, 2=right, 4=middle
+  Mouse.click(button);
+}
+
+static void sendMouseButtonDown(uint8_t button) {
+  Mouse.press(button);
+}
+
+static void sendMouseButtonUp(uint8_t button) {
+  Mouse.release(button);
+}
+
+static void sendMouseScroll(int8_t dx, int8_t dy) {
+  // Scroll: positive Y = scroll up, negative Y = scroll down
+  Mouse.move(0, 0, dy, dx);
+}
+
+static void sendConsumerDown(uint16_t usage) {
+  ConsumerControl.press(usage);
+}
+
+static void sendConsumerUp() {
+  ConsumerControl.release();
+}
+
+static void sendSystemMicrophoneMuteDown() {
+  SystemMicrophoneMute.press();
+}
+
+static void sendSystemMicrophoneMuteUp() {
+  SystemMicrophoneMute.release();
+}
+
+// =====================
+// BLE GATT server
+// =====================
+NimBLEServer* pServer = nullptr;
+NimBLECharacteristic* pWriteChar = nullptr;
+
+class WriteCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    gLastBleCommandAtMs = millis();
+
+    std::string v = pCharacteristic->getValue();
+    if (v.size() < 3) return;
+
+    // ---- v2: [0xAA, 0x01] + TLV frames ----
+    if ((uint8_t)v[0] == V2_MAGIC && (uint8_t)v[1] == V2_VERSION) {
+      size_t idx = 2;
+
+      while (idx + 1 < v.size()) {
+        uint8_t cmd = (uint8_t)v[idx + 0];
+        uint8_t len = (uint8_t)v[idx + 1];
+        idx += 2;
+
+        if (idx + len > v.size()) break;
+
+        const uint8_t* payload = (const uint8_t*)&v[idx];
+
+        switch (cmd) {
+          case V2_SET_MODIFIERS:
+            if (len == 1) setModifiers(payload[0]);
+            break;
+
+          case V2_KEY_DOWN:
+            if (len == 1) keyDown(payload[0]);
+            break;
+
+          case V2_KEY_UP:
+            if (len == 1) keyUp(payload[0]);
+            break;
+
+          case V2_KEY_TAP:
+            if (len == 2) keyTap(payload[0], payload[1]);
+            break;
+
+          case V2_MOUSE_MOVE:
+            if (len == 2) sendMouseMove((int8_t)payload[0], (int8_t)payload[1]);
+            break;
+
+          case V2_MOUSE_SCROLL:
+            if (len == 2) sendMouseScroll((int8_t)payload[0], (int8_t)payload[1]);
+            break;
+
+          case V2_MOUSE_CLICK:
+            if (len == 1) sendMouseClick(payload[0]);
+            break;
+
+          case V2_MOUSE_DOWN:
+            if (len == 1) sendMouseButtonDown(payload[0]);
+            break;
+
+          case V2_MOUSE_UP:
+            if (len == 1) sendMouseButtonUp(payload[0]);
+            break;
+
+          case V2_CONSUMER_DOWN:
+            if (len == 2) {
+              uint16_t usage = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+              sendConsumerDown(usage);
+            }
+            break;
+
+          case V2_CONSUMER_UP:
+            if (len == 0) sendConsumerUp();
+            break;
+
+          case V2_SYSTEM_MICROPHONE_MUTE_DOWN:
+            if (len == 0) sendSystemMicrophoneMuteDown();
+            break;
+
+          case V2_SYSTEM_MICROPHONE_MUTE_UP:
+            if (len == 0) sendSystemMicrophoneMuteUp();
+            break;
+
+          default:
+            break;
+        }
+
+        idx += len;
+      }
+
+      return;
+    }
+
+    // ---- v1: 3-byte frames (supports batching) ----
+    for (size_t i = 0; i + 2 < v.size(); i += 3) {
+      uint8_t type = (uint8_t)v[i + 0];
+      uint8_t byte1 = (uint8_t)v[i + 1];
+      uint8_t byte2 = (uint8_t)v[i + 2];
+
+      switch (type) {
+        case CMD_KEY:
+          sendKeyPressAndRelease(byte1, byte2);
+          break;
+
+        case CMD_MOUSE_MOVE:
+          sendMouseMove((int8_t)byte1, (int8_t)byte2);
+          break;
+
+        case CMD_MOUSE_CLICK:
+          sendMouseClick(byte1);
+          break;
+
+        case CMD_MOUSE_SCROLL:
+          sendMouseScroll((int8_t)byte1, (int8_t)byte2);
+          break;
+
+        default:
+          break;
+      }
+    }
+  }
+};
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    Serial.print("BLE connected: ");
+    Serial.println(connInfo.getAddress().toString().c_str());
+  }
+
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    Serial.print("BLE disconnected, reason=");
+    Serial.println(reason);
+
+    NimBLEDevice::startAdvertising();
+  }
+};
+
+static void setupBle() {
+  NimBLEDevice::init("InpuDeck Bridge");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
+
+  NimBLEService* svc = pServer->createService(kServiceUUID);
+
+  pWriteChar = svc->createCharacteristic(
+    kWriteCharUUID,
+    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  pWriteChar->setCallbacks(new WriteCallbacks());
+
+  svc->start();
+
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  adv->addServiceUUID(kServiceUUID);
+  adv->setName("InpuDeck Bridge");
+  adv->start();
+
+  Serial.println("BLE advertising started.");
+}
+
+static void setupUsbHid() {
+  USB.onEvent(usbEventCallback);
+  Keyboard.begin();
+  Mouse.begin();
+  ConsumerControl.begin();
+  SystemMicrophoneMute.begin();
+  HidProbe.begin();
+  USB.begin();
+
+  Serial.println("USB HID Keyboard, Mouse, Consumer Control & System Microphone Mute started.");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+
+  Serial.println("Starting InpuDeck ESP32-S3 BLE -> USB HID bridge...");
+
+  setupUsbHid();
+  setupBle();
+}
+
+void loop() {
+  static uint32_t lastHidProbeAtMs = 0;
+
+  if (!gUsbRestartRequested
+      && gUsbMounted
+      && !gUsbSuspended
+      && keyboardIsIdle()
+      && (uint32_t)(millis() - gLastBleCommandAtMs) >= kHidProbeQuietPeriodMs
+      && (uint32_t)(millis() - lastHidProbeAtMs) >= kHidProbeIntervalMs) {
+    lastHidProbeAtMs = millis();
+
+    if (sendHidProbe()) {
+      gHidProbeFailures = 0;
+    } else {
+      ++gHidProbeFailures;
+      Serial.printf(
+        "HID probe failed (%u/%u).\n",
+        (unsigned)gHidProbeFailures,
+        (unsigned)kHidProbeFailureLimit);
+
+      if (gHidProbeFailures >= kHidProbeFailureLimit) {
+        requestUsbRecovery();
+      }
+    }
+  }
+
+  if (gUsbRestartRequested
+      && (uint32_t)(millis() - gUsbStoppedAtMs) >= kUsbRestartDelayMs) {
+    Serial.println("Restarting ESP32-S3 to recover USB HID...");
+    delay(20);
+    ESP.restart();
+  }
+
+  delay(20);
+}

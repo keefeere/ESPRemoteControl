@@ -6,7 +6,7 @@ on:
     # The test app copies this production style; other app/Linux code is not
     # part of its build. Include the harness and workflow so test changes run.
     paths:
-      - "ESPRemoteControl/ShortAndLongPressButtonStyle.swift"
+      - "InpuDeck/ShortAndLongPressButtonStyle.swift"
       - "Tests/PressActions/**"
       - "scripts/test-press-actions.sh"
       - ".github/workflows/test-press-actions.yml"

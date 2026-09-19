@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/linux-hid-connect.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/inpudeck-hid.sh"
 
 
 @unittest.skipIf(os.geteuid() == 0, "user installer intentionally refuses root")
@@ -41,18 +41,18 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(len(files), 3)
         times = {path: path.stat().st_mtime_ns for path in files}
         self.run_helper("--install")
-        installed = self.prefix / "libexec/esp-remote-control/linux-hid-connect.sh"
+        installed = self.prefix / "libexec/inpudeck/inpudeck-hid.sh"
         self.run_helper("--install", script=installed)
         self.assertEqual(times, {path: path.stat().st_mtime_ns for path in files})
         self.assertFalse(self.config.exists())
         self.assertFalse(self.log.exists(), "on-demand install must not call systemctl")
-        launcher = self.prefix / "bin/esp-remote-hid"
+        launcher = self.prefix / "bin/inpudeck-hid"
         result = subprocess.run([str(launcher), "--help"], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_launcher_remembers_prefix_for_uninstall(self):
         self.run_helper("--install")
-        launcher = self.prefix / "bin/esp-remote-hid"
+        launcher = self.prefix / "bin/inpudeck-hid"
         result = subprocess.run([str(launcher), "--uninstall"], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(path.is_file() for path in self.prefix.rglob("*")))
@@ -60,7 +60,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse(self.log.exists())
 
     def test_unrelated_launcher_is_preserved(self):
-        launcher = self.prefix / "bin/esp-remote-hid"
+        launcher = self.prefix / "bin/inpudeck-hid"
         launcher.parent.mkdir(parents=True)
         launcher.write_text("personal command\n")
         self.run_helper("--install", ok=False)
@@ -68,12 +68,39 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(launcher.read_text(), "personal command\n")
 
     def test_unrelated_service_is_preserved(self):
-        unit = self.config / "systemd/user/esp-remote-hid.service"
+        unit = self.config / "systemd/user/inpudeck-hid.service"
         unit.parent.mkdir(parents=True)
         unit.write_text("# personal service\n")
         self.run_helper("--uninstall-service", ok=False)
         self.assertEqual(unit.read_text(), "# personal service\n")
         self.assertFalse(self.log.exists())
+
+    def test_install_removes_owned_esp_remote_install(self):
+        launcher = self.prefix / "bin/esp-remote-hid"
+        installed = self.prefix / "libexec/esp-remote-control/linux-hid-connect.sh"
+        backend = self.prefix / "libexec/esp-remote-control/linux-bluez-le.py"
+        unit = self.config / "systemd/user/esp-remote-hid.service"
+        for path in (launcher, installed, backend, unit):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text("#!/bin/sh\n# Managed by ESP Remote\n")
+        installed.write_text("legacy\n")
+        backend.write_text("legacy\n")
+        unit.write_text("# Managed by ESP Remote\n[Service]\n")
+
+        self.run_helper("--install")
+
+        self.assertFalse(launcher.exists())
+        self.assertFalse(unit.exists())
+        self.assertFalse(installed.exists())
+        self.assertTrue((self.prefix / "bin/inpudeck-hid").exists())
+        self.assertIn("disable --now esp-remote-hid.service", self.log.read_text())
+
+    def test_install_refuses_unowned_esp_remote_launcher(self):
+        launcher = self.prefix / "bin/esp-remote-hid"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("personal command\n")
+        self.run_helper("--install", ok=False)
+        self.assertEqual(launcher.read_text(), "personal command\n")
 
     def stub_paired_phone_without_cached_hid(self):
         self.env['ESP_TEST_LE_READY'] = str(self.root / 'le-ready')
@@ -106,9 +133,9 @@ esac
     def test_service_install_accepts_explicit_paired_peer_without_cached_hid(self):
         self.stub_paired_phone_without_cached_hid()
         self.run_helper('--device', '10:A2:D3:01:47:A1', '--install-service')
-        unit = self.config / 'systemd/user/esp-remote-hid.service'
+        unit = self.config / 'systemd/user/inpudeck-hid.service'
         self.assertIn('--device 10:A2:D3:01:47:A1 --watch', unit.read_text())
-        self.assertIn('enable --now esp-remote-hid.service', self.log.read_text())
+        self.assertIn('enable --now inpudeck-hid.service', self.log.read_text())
 
 
 if __name__ == "__main__":

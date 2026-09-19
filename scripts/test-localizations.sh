@@ -3,12 +3,12 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-main_english="$repo_root/ESPRemoteControl/en.lproj/Localizable.strings"
-share_english="$repo_root/ESPRemoteControlShare/en.lproj/Localizable.strings"
+main_english="$repo_root/InpuDeck/en.lproj/Localizable.strings"
+share_english="$repo_root/InpuDeckShare/en.lproj/Localizable.strings"
 
 for strings_file in \
-  "$repo_root"/ESPRemoteControl/{en,uk}.lproj/*.strings \
-  "$repo_root"/ESPRemoteControlShare/{en,uk}.lproj/*.strings; do
+  "$repo_root"/InpuDeck/{en,uk}.lproj/*.strings \
+  "$repo_root"/InpuDeckShare/{en,uk}.lproj/*.strings; do
   if command -v plutil >/dev/null; then
     plutil -lint "$strings_file" >/dev/null
   else
@@ -45,7 +45,7 @@ PERL
 
 # Existing UI is predominantly Ukrainian. Require every Ukrainian string
 # literal (apart from keyboard character tables) to have an English entry.
-perl -CSDA - "$main_english" "$repo_root"/ESPRemoteControl/*.swift "$repo_root"/Shared/*.swift <<'PERL'
+perl -CSDA - "$main_english" "$repo_root"/InpuDeck/*.swift "$repo_root"/Shared/*.swift <<'PERL'
 use strict;
 use warnings;
 use utf8;
@@ -76,7 +76,7 @@ die "Missing English localization keys:\n", join("\n", @missing), "\n" if @missi
 PERL
 
 # The Share Extension is a separate bundle and therefore has its own table.
-perl -CSDA - "$share_english" "$repo_root"/ESPRemoteControlShare/*.swift <<'PERL'
+perl -CSDA - "$share_english" "$repo_root"/InpuDeckShare/*.swift <<'PERL'
 use strict;
 use warnings;
 use utf8;

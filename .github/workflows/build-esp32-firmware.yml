@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "sketch_uid_keyboard_ble/**"
+      - "inpudeck_bridge/**"
       - ".github/workflows/build-esp32-firmware.yml"
   push:
     paths:
-      - "sketch_uid_keyboard_ble/**"
+      - "inpudeck_bridge/**"
       - ".github/workflows/build-esp32-firmware.yml"
 
 permissions:
@@ -44,21 +44,21 @@ jobs:
             --board-options USBMode=default,CDCOnBoot=cdc,PSRAM=enabled,FlashMode=qio \
             --export-binaries \
             --output-dir build/esp32-s3-zero \
-            sketch_uid_keyboard_ble
+            inpudeck_bridge
 
           merged_bin="$(find build/esp32-s3-zero -maxdepth 1 -name '*.merged.bin' -print -quit)"
           test -n "$merged_bin"
-          cp "$merged_bin" dist/ESPRemoteControl-ESP32-S3-Zero.bin
+          cp "$merged_bin" dist/InpuDeck-ESP32-S3-Zero.bin
           cd dist
-          sha256sum ESPRemoteControl-ESP32-S3-Zero.bin \
-            > ESPRemoteControl-ESP32-S3-Zero.bin.sha256
+          sha256sum InpuDeck-ESP32-S3-Zero.bin \
+            > InpuDeck-ESP32-S3-Zero.bin.sha256
 
       - name: Upload firmware
         uses: actions/upload-artifact@v7
         with:
-          name: ESPRemoteControl-ESP32-S3-Zero-firmware
+          name: InpuDeck-ESP32-S3-Zero-firmware
           path: |
-            dist/ESPRemoteControl-ESP32-S3-Zero.bin
-            dist/ESPRemoteControl-ESP32-S3-Zero.bin.sha256
+            dist/InpuDeck-ESP32-S3-Zero.bin
+            dist/InpuDeck-ESP32-S3-Zero.bin.sha256
           if-no-files-found: error
           retention-days: 30

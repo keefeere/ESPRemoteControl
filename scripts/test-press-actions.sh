@@ -2,13 +2,13 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-test_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/espremote-press-actions.XXXXXX")"
+test_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/inpudeck-press-actions.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT
 
 # Build the exact production button style in a small host app. The UI runner
 # exercises actual touches without Bluetooth permissions or a paired computer.
 cp "$repo_root/Tests/PressActions/"* "$test_root/"
-cp "$repo_root/ESPRemoteControl/ShortAndLongPressButtonStyle.swift" "$test_root/"
+cp "$repo_root/InpuDeck/ShortAndLongPressButtonStyle.swift" "$test_root/"
 xcodegen generate --spec "$test_root/project.yml"
 
 simulator_id="$(xcrun simctl list devices available -j | python3 -c '

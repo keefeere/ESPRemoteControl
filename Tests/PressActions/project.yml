@@ -1,6 +1,6 @@
 name: PressActionsTests
 options:
-  bundleIdPrefix: com.keefeere.ESPRemoteControl.tests
+  bundleIdPrefix: com.keefeere.InpuDeck.tests
   deploymentTarget:
     iOS: '17.0'
 settings:

@@ -2,7 +2,7 @@
 
 ## Current device-validated baseline — 2026-09-08
 
-**ESP Remote 2.1.14 (42)** is the maintainer-confirmed working baseline for
+**ESP Remote Control 2.1.14 (42)** is the maintainer-confirmed working baseline for
 reconnection and switching between the tested Linux and Mac computers.
 
 - Release: [ios-v2.1.14](https://github.com/keefeere/ESPRemoteControl/releases/tag/ios-v2.1.14).
@@ -186,8 +186,8 @@ checking our own report map and protocol behavior against the HID specifications
 - `BluetoothHostBrowser` adds outgoing BLE connections from the phone and system
   connection events. An outgoing link does not count as working HID until the
   host subscribes to both input reports; Mac behavior needs a real-device test.
-- `RemoteInputController` switches routes after release reports, keeps ESP as
-  the initial default, and remembers the user's choice.
+- `RemoteInputController` switches routes after release reports, uses direct
+  Bluetooth as the initial InpuDeck default, and remembers the user's choice.
 - The existing status strips expose mode selection and pairing in both input
   tabs. Shortcuts and the existing keyboard/trackpad use the selected route.
 - `Shared/HIDReports.swift` owns HID encoding, FIFO backpressure, and single-host
@@ -466,7 +466,7 @@ documented handling in [direct Bluetooth HID on Linux](linux-direct-hid.md):
 - `Connect()` connects every eligible profile of a bonded device, and the LE
   pairing authorises BR/EDR through cross-transport key derivation, so the
   iPhone's audio profiles become eligible. `ConnectProfile()` with the HID UUID
-  connects one profile instead. `scripts/linux-hid-connect.sh` wraps that call,
+  connects one profile instead. `scripts/inpudeck-hid.sh` wraps that call,
   falls back to `busctl`/`dbus-send` on BlueZ older than 5.65, waits for the
   kernel to attach a HID device rather than trusting the bare link, and can watch
   the profile and disconnect audio that something else connected.
@@ -479,7 +479,7 @@ Device acceptance checks for this update:
 - Confirm "Recovery 3/3" appears at most once per outage and that the ladder does
   not repeat after it. A repeating ladder means readiness is being reported and
   lost, not that the ladder is looping.
-- Connect with `scripts/linux-hid-connect.sh --trust` and verify that iPhone
+- Connect with `scripts/inpudeck-hid.sh --trust` and verify that iPhone
   audio stays on the phone, then compare with the desktop applet's Connect.
 - Reconnect on a host that keeps its GATT cache and confirm the journal shows
   either a report-map read followed by "second-stage refresh skipped", or one
@@ -570,7 +570,7 @@ answer: recovery can make the phone reachable, but it cannot make a host
 subscribe. The refusals interleaved through that journal are the Mac
 reconnecting on its own and being correctly refused while another host is
 selected. Re-attaching the profile from the Linux side, which
-`scripts/linux-hid-connect.sh` exists to do, is the path to test next.
+`scripts/inpudeck-hid.sh` exists to do, is the path to test next.
 
 ### The pairing window went to whichever host reconnected first
 
@@ -608,7 +608,7 @@ distinguishes them, since a rung that ran logs "Recovery n/3" before
 The pairing sheet suggested `bluetoothctl connect <MAC> 00001812-…`, leaving the
 address to be looked up. iOS exposes no Bluetooth address to applications, and
 the phone advertises with a rotating private address, so the app cannot fill it
-in. The hint now points at `scripts/linux-hid-connect.sh`, which resolves the
+in. The hint now points at `scripts/inpudeck-hid.sh`, which resolves the
 paired device itself, and names `bluetoothctl devices Paired` for doing it by
 hand.
 
@@ -768,7 +768,7 @@ distinction in the transport, not in anything a user can act on.
 The other strings got the same treatment — "Preparing Bluetooth" became
 "Preparing Bluetooth…", "Restoring HID" became "Restoring connection to <host>",
 and the pairing state now says where to look: "Ready to pair · find
-“ESP Remote” on the computer". Together with "Computer suspended input" above,
+“InpuDeck” on the computer". Together with "Computer suspended input" above,
 this was the third status in a row that reported a protocol fact as if it were
 the user's problem.
 
@@ -863,7 +863,7 @@ computer cannot recognise iOS's rotating advertising address and its pending
 request never matches; the bond is classic-only, with no LE long-term key; or
 the computer simply has no pending request, because BlueZ stops trying after an
 explicit disconnect and does not resume until the next `Connect()`.
-`scripts/linux-hid-connect.sh --why` checks all of these and prints the commands
+`scripts/inpudeck-hid.sh --why` checks all of these and prints the commands
 for the two it cannot determine from the host alone.
 
 ### Fixes found by auditing the whole transport
@@ -956,7 +956,7 @@ More importantly:
 ```
 
 The GAP Device Name characteristic returns the device name, overriding the
-advertised "ESP Remote", and GAP Appearance is 0x0040, Generic Phone. A real
+advertised "InpuDeck", and GAP Appearance is 0x0040, Generic Phone. A real
 mouse reports 0x03C2 and a keyboard 0x03C1. Neither value is settable from
 CoreBluetooth: the advertised local name is the only name this app controls,
 and Appearance is not exposed at all.
@@ -1077,7 +1077,7 @@ only to the selected subscriber, RemoteWake is declared, and advertising stays
 available for reconnect. Linux still owns the host half of that contract, and
 BlueZ does not keep retrying after every desktop-session or profile failure.
 
-`linux-hid-connect.sh --install` turns the existing HID-only connector into a
+`inpudeck-hid.sh --install` turns the existing HID-only connector into a
 durable per-user setup. It installs and enables a supervised `--watch` service,
 trusts the selected bonded phone for unattended reconnect, and installs a
 WirePlumber rule scoped to that phone's BlueZ card. This provides reconnect
@@ -1125,7 +1125,7 @@ Physical acceptance checks:
 1. Switch Linux → Mac → Linux several times. If a link fails, check for a named
    retry and then HID subscriptions; there should be no routine GATT rebuild.
 2. With Mac selected and HID ready, put it to sleep using Apple menu → Sleep,
-   initially with its lid open. Keep ESP Remote visible on the iPhone.
+   initially with its lid open. Keep InpuDeck visible on the iPhone.
 3. Press “Try to wake” once, wait several seconds, then export the
    journal. If it stays asleep, wake it manually and record that observation.
 4. Distinguish no HID session, a queued report blocked by iOS, and two locally

@@ -50,7 +50,7 @@ jobs:
           # from the tag. Letting those disagree offers users an update whose
           # version is not the one inside the build.
           project="$(sed -n 's/^[[:space:]]*MARKETING_VERSION = \(.*\);$/\1/p' \
-            ESPRemoteControl.xcodeproj/project.pbxproj | sort -u)"
+            InpuDeck.xcodeproj/project.pbxproj | sort -u)"
           if [ "$(printf '%s\n' "$project" | wc -l)" -ne 1 ]; then
             echo "::error::MARKETING_VERSION differs across build configurations: $project"
             exit 1
@@ -78,7 +78,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "ESP Remote Control ${TAG#ios-v}"
+          git tag -a "$TAG" -m "InpuDeck ${TAG#ios-v}"
           git push origin "$TAG"
           echo "created=true" >> "$GITHUB_OUTPUT"
 
