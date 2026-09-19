@@ -26,7 +26,7 @@ are Ukrainian. English is maintained as a complete translation.
   `InfoPlist.strings`, not in `Localizable.strings`.
 
 Keep format placeholders (`%@`, `%d`, and positional variants) identical in
-both languages. Run `./scripts/test-localizations.sh` before merging; the iOS
+both languages. Run `bash ./scripts/test-localizations.sh` before merging; the iOS
 build also verifies that both localization tables are present in the app and
 Share Extension bundles. Finally, run the app once in each app-specific language
 and exercise Bluetooth statuses, scanner errors, settings, accessibility labels,

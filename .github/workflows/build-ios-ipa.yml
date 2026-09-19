@@ -55,7 +55,7 @@ jobs:
         run: ./scripts/test-direct-hid.sh
 
       - name: Validate English and Ukrainian localizations
-        run: ./scripts/test-localizations.sh
+        run: bash ./scripts/test-localizations.sh
 
       - name: Install ldid
         run: brew install ldid
