@@ -1,33 +1,16 @@
 #!/usr/bin/env bash
-# Connect only the HID-over-GATT profile of a paired iPhone running ESP Remote
-# Control in direct Bluetooth mode.
-#
-# A desktop "Connect" button calls BlueZ's generic Connect(), which brings up
-# every eligible profile of a bonded device. Pairing the BLE keyboard creates a
-# bond with the whole phone, so that generic call also connects the iPhone's
-# audio profiles and moves phone audio to the computer. ConnectProfile() takes a
-# single service UUID instead, which is what this script uses.
-#
-# The iPhone cannot start this connection itself: it publishes the HID service
-# as a BLE peripheral, and a BlueZ desktop does not advertise over BLE, so it
-# never appears in the app's computer search. The computer always initiates.
+# Connect a bonded iPhone over LE only, then verify its kernel HID device.
+# BlueZ ConnectProfile(1812) selects BR/EDR; it cannot force a BLE HID link.
+# The companion uses org.bluez.Bearer.LE1.Connect without a Classic fallback.
 set -euo pipefail
 
 HID_UUID="00001812-0000-1000-8000-00805f9b34fb"
-# iPhone-side audio and phonebook services that a generic Connect() also brings
-# up. Only ever disconnected, never connected, by this script.
-AUDIO_UUIDS=(
+# Classic phone services distinguish an iPhone from other paired HID devices.
+PHONE_UUIDS=(
   "0000110a-0000-1000-8000-00805f9b34fb" # A2DP source
   "0000110c-0000-1000-8000-00805f9b34fb" # AVRCP target
   "0000110e-0000-1000-8000-00805f9b34fb" # AVRCP controller
-  "0000111f-0000-1000-8000-00805f9b34fb" # Hands-free audio gateway
-  "00001112-0000-1000-8000-00805f9b34fb" # Headset audio gateway
-)
-# A keyboard or a mouse offers HID and little else. A phone also carries these,
-# which is what separates the device running the app from the other HID devices
-# already paired with this computer.
-PHONE_UUIDS=(
-  "${AUDIO_UUIDS[@]}"
+  "0000111f-0000-1000-8000-00805f9b34fb" # Hands-free gateway
   "0000112f-0000-1000-8000-00805f9b34fb" # Phone Book Access server
   "00001132-0000-1000-8000-00805f9b34fb" # Message Access server
 )
@@ -42,47 +25,68 @@ trust=0
 status_only=0
 debug_only=0
 why_only=0
+install_files=0
 install_service=0
 uninstall_service=0
+uninstall_files=0
+prefix="$HOME/.local"
+user_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+reset_le=0
+reset_device=0
+preferred_bearer=""
+backend="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/linux-bluez-le.py"
 
 usage() {
   cat <<'USAGE'
 Usage: linux-hid-connect.sh [options]
 
   -d, --device <MAC>     Paired iPhone address (AA:BB:CC:DD:EE:FF).
+                         Works even if BlueZ has not cached its HID service.
   -n, --name <text>      Pick a paired device whose name contains <text>.
   -a, --adapter <hciN>   Bluetooth adapter to use (default: hci0).
   -w, --watch [seconds]  Keep the HID profile connected, polling every
                          <seconds> (default: 5). Runs until interrupted.
       --drop-audio       Disconnect iPhone audio profiles that something else
                          already connected. Recovery only; see the note below.
+      --reset-le         Explicitly disconnect only LE before connecting again.
+      --reset-device     Cancel this phone's pending requests and disconnect both
+                         transports before LE reconnect. Keeps the pairing.
+      --preferred-bearer <le|bredr|last-used|last-seen>
+                         Save this phone's transport preference in BlueZ.
+                         Configuration only; does not reconnect or block audio.
       --trust            Mark the device trusted so BlueZ accepts its
                          reconnects without a desktop prompt.
       --status           Print the current state and exit.
       --debug            Print paired devices, the target, and every HID
                          device the kernel exposes, then exit.
-      --why              Check everything on this computer that can stop it
+      --why              Check host settings that can stop it
                          from reconnecting to the phone by itself, then exit.
-                         Run with sudo to include the bonding keys.
-      --install          Install a user service that reconnects HID after
-                         login/wake and permanently hides this phone from
-                         WirePlumber audio routing. Implies --trust.
-      --uninstall        Remove that service and its WirePlumber rule.
+                         Run with sudo to check bond key presence (not values).
+      --install          Install/update esp-remote-hid in the user prefix.
+                         Copies files only; no service, trust or audio changes.
+      --prefix <path>    Installation prefix (default: ~/.local).
+      --install-service  Additionally enable an optional user reconnect service.
+      --uninstall-service Remove only the optional reconnect service.
+      --uninstall        Remove installed helper files and its optional service.
   -h, --help             Show this help.
+
+Requires python3-dbus and BlueZ exposing experimental Bearer.LE1.Connect.
+See docs/linux-direct-hid.md for setup. No fallback to Classic is performed.
 
 With no -d/-n, the paired device that offers HID and also looks like a phone
 is used; several candidates are listed instead of guessed.
 
 --drop-audio only disconnects audio profiles that already connected, and by
-then the phone has lost audio focus. Prefer preventing the capture: never use
-the desktop applet's Connect, and disable the device in your audio stack.
+then the phone may have lost audio focus. Start with the LE helper. Optional
+audio reception control is documented separately; installation does not add it.
 
 Examples:
   linux-hid-connect.sh --trust     # one-off HID-only connect
   linux-hid-connect.sh --watch     # keep the HID profile connected
   linux-hid-connect.sh --debug     # what is paired and what the kernel sees
   sudo linux-hid-connect.sh --why  # why this computer is not reconnecting
-  linux-hid-connect.sh --install   # persistent HID-only connection
+  linux-hid-connect.sh --install   # install on-demand command only
+  linux-hid-connect.sh --install-service --device AA:BB:CC:DD:EE:FF
 USAGE
 }
 
@@ -95,54 +99,16 @@ require() {
   command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"
 }
 
-# BlueZ 5.65 added the optional UUID argument to bluetoothctl's connect and
-# disconnect commands. Older builds silently ignore it and connect everything,
-# which is exactly the behaviour this script exists to avoid.
-uuid_capable=""
-bluetoothctl_takes_uuid() {
-  if [ -z "$uuid_capable" ]; then
-    local version major minor
-    version="$(bluetoothctl --version 2>/dev/null | tr -cd '0-9.\n' | head -n1)"
-    major="${version%%.*}"
-    minor="${version#*.}"
-    minor="${minor%%.*}"
-    uuid_capable="no"
-    if [ -n "$version" ] && [ "${major:-0}" -ge 5 ]; then
-      if [ "${major:-0}" -gt 5 ] || [ "${minor:-0}" -ge 65 ]; then uuid_capable="yes"; fi
-    fi
-  fi
-  [ "$uuid_capable" = "yes" ]
+bluez() {
+  python3 "$backend" --adapter "$adapter" "$@"
 }
 
-dbus_path() {
-  printf '/org/bluez/%s/dev_%s' "$adapter" "${1//:/_}"
-}
-
-# One remote service UUID, connected or disconnected on its own. bluetoothctl is
-# preferred because it ships with BlueZ itself; busctl and dbus-send cover older
-# builds whose bluetoothctl cannot address a single profile.
-profile_call() {
-  local action="$1" mac="$2" uuid="$3"
-  if bluetoothctl_takes_uuid; then
-    bluetoothctl "$action" "$mac" "$uuid" >/dev/null 2>&1
-  elif command -v busctl >/dev/null 2>&1; then
-    local method="ConnectProfile"
-    [ "$action" = "disconnect" ] && method="DisconnectProfile"
-    busctl call org.bluez "$(dbus_path "$mac")" org.bluez.Device1 \
-      "$method" s "$uuid" >/dev/null 2>&1
-  elif command -v dbus-send >/dev/null 2>&1; then
-    local method="ConnectProfile"
-    [ "$action" = "disconnect" ] && method="DisconnectProfile"
-    dbus-send --system --print-reply --dest=org.bluez \
-      "$(dbus_path "$mac")" "org.bluez.Device1.$method" \
-      "string:$uuid" >/dev/null 2>&1
-  else
-    die "no way to address a single profile: need bluetoothctl 5.65+, busctl, or dbus-send"
-  fi
+adapter_info() {
+  bluez adapter-info
 }
 
 device_info() {
-  bluetoothctl info "$1" 2>/dev/null || true
+  bluez info "$1"
 }
 
 device_name() {
@@ -166,35 +132,10 @@ is_linked() {
   device_info "$1" | grep -qi '^[[:space:]]*Connected:[[:space:]]*yes'
 }
 
-# A connected ACL link is not yet a keyboard. Once the HoG profile attaches, a
-# HID device appears carrying the peer address. Which key holds it varies with
-# the kernel and BlueZ version — usually HID_UNIQ, sometimes only inside
-# HID_PHYS or the device path — so match the address anywhere in the uevent
-# rather than on one exact key. An address string is specific enough that a
-# false positive is not a practical concern, and the local adapter has a
-# different one.
+# Require both the LE bearer and the target's Bluetooth HID device. A Classic
+# link or a same-name USB bridge must not produce a successful keyboard status.
 has_hid_device() {
-  local mac name uevent hid_name
-  mac="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-  name="$(device_name "$1")"
-  if [ ! -d /sys/bus/hid/devices ]; then
-    # Nothing to inspect on this kernel; the link state is the only signal.
-    is_linked "$1"
-    return
-  fi
-  for uevent in /sys/bus/hid/devices/*/uevent; do
-    [ -r "$uevent" ] || continue
-    grep -qi "$mac" "$uevent" && return 0
-    # iOS advertises with a rotating private address, so the address BlueZ
-    # stored at bonding and the one the kernel recorded for the HID device
-    # need not be the same string. The name does not rotate, and the app
-    # advertises a fixed one, so match on that too.
-    hid_name="$(sed -n 's/^HID_NAME=//p' "$uevent" | head -n1)"
-    [ -n "$hid_name" ] || continue
-    [ -n "$name" ] && [ "$hid_name" = "$name" ] && return 0
-    case "$hid_name" in *"ESP Remote"*) return 0 ;; esac
-  done
-  return 1
+  bluez hid-ready "$1"
 }
 
 # Everything needed to tell "the profile did not attach" apart from "the script
@@ -232,20 +173,12 @@ dump_debug() {
   fi
   printf '== bluetoothctl ==\n'
   printf '  version: %s\n' "$(bluetoothctl --version 2>/dev/null || echo unknown)"
-  printf '  single-profile connect: %s\n' "$(bluetoothctl_takes_uuid && echo bluetoothctl || echo dbus)"
+  printf '== LE API ==\n'
+  [ -z "$mac" ] || bluez check "$mac" || true
 }
 
 paired_devices() {
-  # "devices Paired" exists in current BlueZ; older builds print usage for it
-  # and expect "paired-devices" instead, so fall back on empty output rather
-  # than on the exit status, which those builds still report as success.
-  local found=""
-  found="$(bluetoothctl devices Paired 2>/dev/null | awk '$1 == "Device" { print $2 }')" || true
-  if [ -z "$found" ]; then
-    found="$(bluetoothctl paired-devices 2>/dev/null | awk '$1 == "Device" { print $2 }')" || true
-  fi
-  [ -n "$found" ] && printf '%s\n' "$found"
-  return 0
+  bluez paired
 }
 
 resolve_device() {
@@ -271,7 +204,7 @@ resolve_device() {
   fi
 
   if [ "${#candidates[@]}" -eq 0 ]; then
-    die "no paired device offers the HID service. Pair the iPhone first, with pairing open in the app."
+    die "no paired device has cached HID. For an already paired iPhone, open ESP Remote and pass --device <MAC>."
   fi
 
   # Naming a keyboard or a mouse as a candidate for the phone is worse than
@@ -284,7 +217,7 @@ resolve_device() {
     done
     printf '\nIf the iPhone was paired here before, its bond or its cached HID service is gone.\n' >&2
     printf 'Check with:  bluetoothctl devices Paired\n' >&2
-    printf 'Then pair again with pairing open in the app, or force this address with --device.\n' >&2
+    printf 'For an existing bond, open ESP Remote and specify its address with --device; do not remove the bond just because HID is absent from the cache.\n' >&2
     exit 1
   fi
 
@@ -301,10 +234,8 @@ resolve_device() {
   exit 1
 }
 
-# A BLE keyboard is ready the instant you switch it on because the device only
-# has to advertise while the computer keeps a connect request pending for it.
-# The phone's half is not something this script can see; this is everything on
-# *this* computer that can stop its half, in the order it tends to break.
+# These host-side checks identify common prerequisites. They cannot prove
+# successful radio connection, GATT subscriptions, or delivery of input.
 verdict() {
   case "$1" in
     ok) printf '  [ ok ] %s\n' "$2" ;;
@@ -319,7 +250,7 @@ info_says() {
 
 bond_dir() {
   local mac="$1" adapter_mac
-  adapter_mac="$(bluetoothctl show "$adapter" 2>/dev/null \
+  adapter_mac="$(adapter_info \
     | awk '/^Controller /{ print $2; exit }')"
   [ -n "$adapter_mac" ] || return 1
   printf '/var/lib/bluetooth/%s/%s' "$adapter_mac" "$mac"
@@ -331,7 +262,7 @@ why_not_reconnecting() {
 
   printf '== what can stop this computer from reconnecting on its own ==\n'
 
-  if bluetoothctl show "$adapter" 2>/dev/null | grep -qiE '^[[:space:]]*Powered:[[:space:]]*yes'; then
+  if adapter_info | grep -qiE '^[[:space:]]*Powered:[[:space:]]*yes'; then
     verdict ok "adapter $adapter is powered"
   else
     verdict bad "adapter $adapter is off — nothing scans, nothing reconnects"
@@ -349,18 +280,18 @@ why_not_reconnecting() {
     verdict ok "device is not blocked"
   fi
 
-  # Without Trusted, BlueZ asks a human before accepting an incoming link, and
-  # on a headless or locked session nobody answers, so the attempt dies.
+  # Trust can bypass service authorization prompts; it does not ensure LE HID
+  # discovery or reconnection, and is not a transport/audio restriction.
   if info_says Trusted "$info"; then
     verdict ok "device is trusted"
   else
-    verdict bad "device is NOT trusted — run: bluetoothctl trust $mac (or --trust)"
+    verdict unknown "device is not trusted; service authorization may require a prompt (use --trust if intended)"
   fi
 
   if has_hid_service "$mac"; then
-    verdict ok "device offers the HID service"
+    verdict ok "cached services include HID"
   else
-    verdict bad "device does not offer HID — the phone is not in direct mode, or the bond predates it"
+    verdict unknown "HID is absent from cached services; open ESP Remote and connect using --device to discover it again"
   fi
 
   # iOS advertises with a rotating resolvable private address. Without the
@@ -369,19 +300,19 @@ why_not_reconnecting() {
   # waits forever on a device that is right there advertising.
   if dir="$(bond_dir "$mac")" && [ -r "$dir/info" ]; then
     if grep -q '^\[IdentityResolvingKey\]' "$dir/info"; then
-      verdict ok "bond has the phone's identity key (its rotating address resolves)"
+      verdict ok "bond has the phone's identity key (address resolution still needs verification)"
     else
-      verdict bad "bond has NO IdentityResolvingKey — this computer cannot recognise the phone's rotating address; remove the device and pair again"
+      verdict unknown "bond has no saved IdentityResolvingKey; investigate LE bonding and address resolution before re-pairing"
     fi
     if grep -qE '^\[(LongTermKey|PeripheralLongTermKey|SlaveLongTermKey)\]' "$dir/info"; then
       verdict ok "bond has an LE long-term key"
     else
-      verdict bad "bond has no LE long-term key — this is a classic-only bond; remove the device and pair again"
+      verdict unknown "bond has no saved LE long-term key; inspect LE pairing and authentication before re-pairing"
     fi
   elif [ "$(id -u)" != 0 ]; then
     verdict unknown "bonding keys not readable — re-run with sudo to check the identity key"
   else
-    verdict bad "no bond record on disk for $mac — the pairing is gone"
+    verdict unknown "no readable bond record at the expected path for $mac; compare BlueZ's pairing state"
   fi
 
   if is_linked "$mac"; then
@@ -389,52 +320,42 @@ why_not_reconnecting() {
     if has_hid_device "$mac"; then
       verdict ok "the HID profile is attached (kernel has the input device)"
     else
-      verdict bad "link is up but HID is NOT attached — run this script with no options to attach it"
+      verdict bad "link is up but LE HID is not attached; open ESP Remote and retry with --device $mac"
     fi
   else
     verdict unknown "no link right now — that is normal while the phone is idle; it becomes a problem only if it stays this way with the app open"
   fi
 
+  printf '\n== explicit LE connection support ==\n'
+  bluez check "$mac" || true
+
   cat <<'NOTE'
 
-Two things this computer cannot tell you, and how to settle them:
-
-  * Whether the phone is advertising. Run, while the app is open and the phone
-    is NOT connected here:
-        bluetoothctl --timeout 12 scan le | grep -i 'ESP Remote'
-    Nothing found means the phone's half is broken (app closed, Bluetooth off,
-    out of range) and no amount of host-side fixing will help.
-
-  * Whether BlueZ still has a pending connect for it. BlueZ stops trying after
-    an explicit disconnect and does not resume until the next Connect() — so
-    `bluetoothctl disconnect`, the applet's Disconnect button, and this
-    script's own drop-and-retry all leave it idle by design. Re-arm it with:
-        bluetoothctl connect <MAC>        # or just run this script
-    A device that is Trusted and bonded is re-armed automatically at boot and
-    when the adapter is powered back on, but not after a manual disconnect.
-
-Everything else that stops it is physical: the phone is off, out of range, or
-its Bluetooth is disabled.
+Keep ESP Remote open on the selected host while testing. A name-filtered scan
+alone cannot prove the phone is absent: iOS may omit its name in background.
+An LE-only connection still needs a working controller, bond and GATT session.
+This helper never uses generic Connect or ConnectProfile to connect the phone.
+Use --reset-le only for a deliberate LE reset; --watch does not tear links down.
 NOTE
 }
 
 report() {
-  local mac="$1"
-  printf '%s (%s): link %s, keyboard %s\n' \
+  local mac="$1" info le_state classic_state resolved
+  info="$(device_info "$mac")"
+  le_state="$(printf '%s\n' "$info" | awk '/LEConnected:/ {print $2}')"
+  classic_state="$(printf '%s\n' "$info" | awk '/BREDRConnected:/ {print $2}')"
+  resolved="$(printf '%s\n' "$info" | awk '/ServicesResolved:/ {print $2}')"
+  printf '%s (%s): LE=%s, Classic=%s, services=%s, HID=%s\n' \
     "$(device_name "$mac")" "$mac" \
-    "$(is_linked "$mac" && echo up || echo down)" \
-    "$(has_hid_device "$mac" && echo up || echo down)"
+    "${le_state:-unknown}" "${classic_state:-unknown}" "${resolved:-unknown}" \
+    "$(has_hid_device "$mac" && echo attached || echo not-ready)"
 }
 
 drop_audio_profiles() {
-  local mac="$1" uuid
-  for uuid in "${AUDIO_UUIDS[@]}"; do
-    device_info "$mac" | grep -qi "$uuid" || continue
-    profile_call disconnect "$mac" "$uuid" || true
-  done
+  bluez drop-audio "$1"
 }
 
-# ConnectProfile returns before the HoG plugin has attached the input device.
+# An LE link can be established before HoG attaches the kernel input device.
 await_hid_device() {
   local mac="$1" waited=0
   while [ "$waited" -lt "${2:-10}" ]; do
@@ -452,80 +373,104 @@ connect_hid() {
     return 0
   fi
 
-  profile_call connect "$mac" "$HID_UUID" || true
-  if await_hid_device "$mac"; then
+  bluez connect "$mac" || return $?
+  if await_hid_device "$mac" 15; then
     if [ "$drop_audio" -eq 1 ]; then drop_audio_profiles "$mac"; fi
     return 0
   fi
+  printf 'LE request did not produce a kernel HID device; preserving the link (use --debug)\n' >&2
+  return 1
+}
 
-  # BlueZ answers ConnectProfile with "already connected" while holding a link
-  # whose HoG attachment is gone — the state left behind when the phone moves
-  # its HID session to another computer and back. Only dropping the whole link
-  # makes it redo pairing-free reconnection and reattach the profile.
-  printf 'HID did not attach; dropping the link and retrying\n' >&2
-  bluetoothctl disconnect "$mac" >/dev/null 2>&1 || true
-  sleep 2
-  profile_call connect "$mac" "$HID_UUID" || true
-  await_hid_device "$mac" 15
-  if [ "$drop_audio" -eq 1 ]; then drop_audio_profiles "$mac"; fi
-  has_hid_device "$mac"
+copy_if_changed() {
+  local source="$1" target="$2" mode="$3"
+  if [ -e "$target" ] && [ "$source" -ef "$target" ]; then return 0; fi
+  if [ -r "$target" ] && cmp -s -- "$source" "$target"; then return 0; fi
+  install -m "$mode" -- "$source" "$target"
+}
+
+check_user_install() {
+  [ "$(id -u)" -ne 0 ] || die "run helper installation as your desktop user, without sudo"
+  [[ "$prefix" = /* ]] || die "installation prefix must be an absolute path"
+  [[ "$prefix" != *$'\n'* ]] || die "installation prefix must not contain newlines"
+}
+
+install_user_files() {
+  check_user_install
+  require install
+  local libexec="$prefix/libexec/esp-remote-control"
+  local installed="$libexec/linux-hid-connect.sh"
+  local launcher="$prefix/bin/esp-remote-hid" text
+  if [ -L "$launcher" ] || { [ -e "$launcher" ] && ! grep -q '^# Managed by ESP Remote$' "$launcher"; }; then
+    die "refusing to replace an unrelated command: $launcher"
+  fi
+  mkdir -p "$libexec" "$prefix/bin"
+  [ ! -L "$installed" ] && [ ! -L "$libexec/linux-bluez-le.py" ] || die "installed helper files must not be symlinks"
+  copy_if_changed "${BASH_SOURCE[0]}" "$installed" 0755
+  copy_if_changed "$backend" "$libexec/linux-bluez-le.py" 0644
+  printf -v text '#!/usr/bin/env bash\n# Managed by ESP Remote\nexec %q --prefix %q "$@"\n' "$installed" "$prefix"
+  if [ ! -f "$launcher" ] || [ "$(cat "$launcher")" != "${text%$'\n'}" ]; then
+    printf '%s' "$text" >"$launcher"
+    chmod 0755 "$launcher"
+  fi
+  printf 'Installed on-demand command: %s (no service or audio settings changed)\n' "$launcher"
+}
+
+check_owned_service() {
+  local unit="$user_config/systemd/user/${1:-esp-remote-hid.service}"
+  if [ -L "$unit" ] || { [ -e "$unit" ] && ! grep -q '^# Managed by ESP Remote$' "$unit"; }; then
+    die "existing service has no ownership marker; inspect it first: $unit"
+  fi
 }
 
 install_user_service() {
-  local mac="$1"
-  local libexec="$HOME/.local/libexec/esp-remote-control"
-  local units="$HOME/.config/systemd/user"
-  local wireplumber="$HOME/.config/wireplumber/wireplumber.conf.d"
-  local installed="$libexec/linux-hid-connect.sh"
-  local card="bluez_card.${mac//:/_}"
-
-  require install
+  local mac="$1" units="$user_config/systemd/user" text changed=0 was_active=0
+  local service_name="esp-remote-hid.service" service_args="--watch" description="Reconnect ESP Remote over LE"
+  check_user_install
+  check_owned_service "$service_name"
+  # systemd expands these characters in ExecStart. Refuse unusual prefixes
+  # instead of saving a unit that calls a different command.
+  [[ "$prefix" != *['%$"\']* ]] || die "service prefix contains unsupported systemd characters"
+  install_user_files
   require systemctl
-  mkdir -p "$libexec" "$units" "$wireplumber"
-  install -m 0755 "${BASH_SOURCE[0]}" "$installed"
-  cat >"$units/esp-remote-hid.service" <<UNIT
-[Unit]
-Description=Keep ESP Remote connected as HID only
-After=bluetooth.target
-
-[Service]
-ExecStart="$installed" --device $mac --watch
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-UNIT
-  cat >"$wireplumber/51-esp-remote.conf" <<WIREPLUMBER
--- Keep the iPhone available to BlueZ HID while excluding it from audio.
-monitor.bluez.rules = [
-  {
-    matches = [ { device.name = "~$card" } ]
-    actions = { update-props = { device.disabled = true } }
-  }
-]
-WIREPLUMBER
-
-  bluetoothctl trust "$mac" >/dev/null 2>&1 \
-    || printf 'warning: could not mark %s trusted\n' "$mac" >&2
-  systemctl --user daemon-reload
-  systemctl --user enable --now esp-remote-hid.service
-  systemctl --user try-restart wireplumber.service >/dev/null 2>&1 || true
-  printf 'Installed persistent HID reconnect for %s. Audio routing is disabled for %s.\n' "$mac" "$card"
+  if systemctl --user is-active --quiet "$service_name"; then was_active=1; fi
+  mkdir -p "$units"
+  printf -v text '# Managed by ESP Remote\n[Unit]\nDescription=%s\n\n[Service]\nExecStart="%s/libexec/esp-remote-control/linux-hid-connect.sh" --adapter %s --device %s %s\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n' "$description" "$prefix" "$adapter" "$mac" "$service_args"
+  local unit="$units/$service_name"
+  if [ ! -f "$unit" ] || [ "$(cat "$unit")" != "${text%$'\n'}" ]; then
+    printf '%s' "$text" >"$unit"
+    changed=1
+    systemctl --user daemon-reload
+  fi
+  systemctl --user enable --now "$service_name"
+  if [ "$changed" -eq 1 ] && [ "$was_active" -eq 1 ]; then systemctl --user restart "$service_name"; fi
+  printf 'Optional %s enabled for %s. WirePlumber configuration was not changed.\n' "$service_name" "$mac"
 }
 
 uninstall_user_service_files() {
-  command -v systemctl >/dev/null 2>&1 && {
-    systemctl --user disable --now esp-remote-hid.service >/dev/null 2>&1 || true
-  }
-  rm -f "$HOME/.config/systemd/user/esp-remote-hid.service"
-  rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-esp-remote.conf"
-  rm -f "$HOME/.local/libexec/esp-remote-control/linux-hid-connect.sh"
-  command -v systemctl >/dev/null 2>&1 && {
-    systemctl --user daemon-reload >/dev/null 2>&1 || true
-    systemctl --user try-restart wireplumber.service >/dev/null 2>&1 || true
-  }
-  printf 'Removed the persistent ESP Remote HID service and audio-isolation rule.\n'
+  check_user_install
+  local service_name="${1:-esp-remote-hid.service}"
+  check_owned_service "$service_name"
+  local unit="$user_config/systemd/user/$service_name"
+  if [ -f "$unit" ]; then
+    systemctl --user disable --now "$service_name"
+    rm -- "$unit"
+    systemctl --user daemon-reload
+  fi
+  printf 'Optional %s removed (or already absent).\n' "$service_name"
+}
+
+uninstall_user_files() {
+  check_user_install
+  local launcher="$prefix/bin/esp-remote-hid"
+  if [ -L "$launcher" ] || { [ -e "$launcher" ] && ! grep -q '^# Managed by ESP Remote$' "$launcher"; }; then
+    die "refusing to remove an unrelated command: $launcher"
+  fi
+  check_owned_service
+  uninstall_user_service_files
+  rm -f -- "$launcher" "$prefix/libexec/esp-remote-control/linux-hid-connect.sh" \
+    "$prefix/libexec/esp-remote-control/linux-bluez-le.py"
+  printf 'Helper files removed. BlueZ API configuration and pairing are unchanged.\n'
 }
 
 while [ $# -gt 0 ]; do
@@ -539,24 +484,53 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --drop-audio) drop_audio=1; shift ;;
+    --reset-le) reset_le=1; shift ;;
+    --reset-device) reset_device=1; shift ;;
+    --preferred-bearer) preferred_bearer="${2:?--preferred-bearer requires a value}"; shift 2 ;;
     --trust) trust=1; shift ;;
     --status) status_only=1; shift ;;
     --debug) debug_only=1; shift ;;
     --why) why_only=1; shift ;;
-    --install) install_service=1; trust=1; shift ;;
-    --uninstall) uninstall_service=1; shift ;;
+    --install) install_files=1; shift ;;
+    --prefix) prefix="${2:?--prefix requires an absolute path}"; shift 2 ;;
+    --install-service) install_service=1; shift ;;
+    --uninstall-service) uninstall_service=1; shift ;;
+    --uninstall) uninstall_files=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
 
+[ "$reset_le" -eq 0 ] || [ "$reset_device" -eq 0 ] || die "choose --reset-le or --reset-device"
+if [ -n "$preferred_bearer" ]; then
+  case "$preferred_bearer" in le|bredr|last-used|last-seen) ;; *) die "invalid preferred bearer" ;; esac
+  [ "$reset_le" -eq 0 ] && [ "$reset_device" -eq 0 ] && [ "$watch" -eq 0 ] \
+    && [ "$install_files" -eq 0 ] && [ "$install_service" -eq 0 ] \
+    && [ "$uninstall_files" -eq 0 ] && [ "$uninstall_service" -eq 0 ] \
+    && [ "$status_only" -eq 0 ] && [ "$debug_only" -eq 0 ] && [ "$why_only" -eq 0 ] \
+    && [ "$drop_audio" -eq 0 ] && [ "$trust" -eq 0 ] \
+    || die "--preferred-bearer is a separate configuration command"
+fi
+
+if [ "$uninstall_files" -eq 1 ]; then
+  uninstall_user_files
+  exit 0
+fi
 if [ "$uninstall_service" -eq 1 ]; then
-  install_service=0
   uninstall_user_service_files
   exit 0
 fi
+if [ "$install_files" -eq 1 ] && [ "$install_service" -eq 0 ]; then
+  install_user_files
+  exit 0
+fi
 
-require bluetoothctl
+require python3
+[ -r "$backend" ] || die "missing companion: $backend"
+python3 -c 'import dbus' 2>/dev/null || die "python3-dbus is required"
+[[ "$adapter" =~ ^hci[0-9]+$ ]] || die "adapter must be hciN"
+[ "$interval" -gt 0 ] || die "watch interval must be positive"
+adapter_info >/dev/null || die "cannot read adapter $adapter"
 if [ -z "$device" ]; then
   # Debugging must still report what it can when the target is ambiguous.
   if [ "$debug_only" -eq 1 ] || [ "$why_only" -eq 1 ]; then
@@ -566,6 +540,11 @@ if [ -z "$device" ]; then
   fi
 fi
 device="$(printf '%s' "$device" | tr 'a-z' 'A-Z')"
+
+if [ -n "$preferred_bearer" ]; then
+  bluez preferred-bearer "$device" "$preferred_bearer"
+  exit $?
+fi
 
 if [ "$debug_only" -eq 1 ]; then
   [ -n "$device" ] && report "$device"
@@ -582,22 +561,29 @@ fi
 
 if [ "$install_service" -eq 1 ]; then
   [ -n "$device" ] || die "no paired iPhone found; pass --device <MAC>"
-  has_hid_service "$device" \
-    || die "$device is not paired or does not offer the HID service"
+  bluez check "$device" || exit $?
+  if [ "$trust" -eq 1 ]; then bluez trust "$device"; fi
   install_user_service "$device"
   exit 0
 fi
-
-has_hid_service "$device" \
-  || die "$device is not paired or does not offer the HID service"
 
 if [ "$status_only" -eq 1 ]; then
   report "$device"
   exit 0
 fi
 
+bluez check "$device" || exit $?
+
+if [ "$reset_device" -eq 1 ]; then
+  bluez disconnect-device "$device" || exit $?
+fi
+
+if [ "$reset_le" -eq 1 ]; then
+  bluez disconnect "$device" || exit $?
+fi
+
 if [ "$trust" -eq 1 ]; then
-  bluetoothctl trust "$device" >/dev/null 2>&1 \
+  bluez trust "$device" \
     || printf 'warning: could not mark %s trusted\n' "$device" >&2
 fi
 
@@ -617,7 +603,7 @@ while :; do
   if has_hid_device "$device"; then
     current="up"
   else
-    connect_hid "$device" >/dev/null 2>&1 || true
+    connect_hid "$device" || true
     if has_hid_device "$device"; then current="up"; else current="down"; fi
   fi
   if [ "$current" != "$previous" ]; then
