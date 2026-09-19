@@ -17,3 +17,9 @@ swiftc -swift-version 5 \
   "$repo_root/Tests/MouseButtonMaskTests.swift" \
   -o "$build_dir/mouse-button-mask-tests"
 "$build_dir/mouse-button-mask-tests"
+
+swiftc -swift-version 5 \
+  "$repo_root/Shared/HID.swift" \
+  "$repo_root/Tests/HIDMappingTests.swift" \
+  -o "$build_dir/hid-mapping-tests"
+"$build_dir/hid-mapping-tests"
