@@ -20,6 +20,10 @@ struct HIDMappingTests {
                   "Lowercase Russian alternate uses AltGr")
             check(HID.russianAlternateForUkrainianKey(ukrainianKey, uppercase: false) == lower,
                   "Ukrainian Alt shortcut resolves to lowercase Russian alternate")
+            check(HID.russianAlternateCharacterForUkrainianKey(
+                ukrainianKey,
+                uppercase: false
+            ) == russianCharacter, "Ukrainian Alt shortcut exposes its visible legend")
 
             let uppercaseCharacter = Character(String(russianCharacter).uppercased())
             let upper = HID.mapCharacterToHID(uppercaseCharacter, layout: .ukrainianEnhanced)

@@ -4,6 +4,7 @@ import UIKit
 struct PressableKeyButton: UIViewRepresentable {
     let title: String
     var secondaryTitle: String? = nil
+    var secondaryTitleScale: CGFloat = 0.72
     var isActive: Bool = false
     var isProminent: Bool = false
     var isCompact: Bool = false
@@ -23,6 +24,7 @@ struct PressableKeyButton: UIViewRepresentable {
 
         button.baseTitle = title
         button.secondaryTitle = secondaryTitle
+        button.secondaryTitleScale = secondaryTitleScale
         button.isActive = isActive
         button.isProminent = isProminent
         button.isCompact = isCompact
@@ -36,6 +38,7 @@ struct PressableKeyButton: UIViewRepresentable {
     func updateUIView(_ uiView: KeyUIButton, context: Context) {
         uiView.baseTitle = title
         uiView.secondaryTitle = secondaryTitle
+        uiView.secondaryTitleScale = secondaryTitleScale
         uiView.isActive = isActive
         uiView.isProminent = isProminent
         uiView.isCompact = isCompact
@@ -89,6 +92,13 @@ final class KeyUIButton: UIButton {
     var secondaryTitle: String? {
         didSet {
             if secondaryTitle != oldValue {
+                applyConfiguration()
+            }
+        }
+    }
+    var secondaryTitleScale: CGFloat = 0.72 {
+        didSet {
+            if secondaryTitleScale != oldValue {
                 applyConfiguration()
             }
         }
@@ -236,7 +246,7 @@ final class KeyUIButton: UIButton {
         )
         secondaryTitleLabel.text = secondaryTitle
         secondaryTitleLabel.font = UIFont.monospacedSystemFont(
-            ofSize: max(9, mainSize * 0.72),
+            ofSize: max(7, mainSize * min(max(secondaryTitleScale, 0.35), 1)),
             weight: .medium
         )
         secondaryTitleLabel.textColor = foreground.withAlphaComponent(0.62)

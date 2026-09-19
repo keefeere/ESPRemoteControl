@@ -204,15 +204,24 @@ enum HID {
         _ character: Character,
         uppercase: Bool
     ) -> HIDCommand? {
-        let alternate: Character? = switch Character(String(character).lowercased()) {
+        guard let alternate = russianAlternateCharacterForUkrainianKey(
+            character,
+            uppercase: uppercase
+        ) else { return nil }
+        return ukrainianEnhancedMap[alternate]
+    }
+
+    static func russianAlternateCharacterForUkrainianKey(
+        _ character: Character,
+        uppercase: Bool
+    ) -> Character? {
+        switch Character(String(character).lowercased()) {
         case "і": uppercase ? "Ы" : "ы"
         case "є": uppercase ? "Э" : "э"
         case "'", "’": uppercase ? "Ё" : "ё"
         case "ї": uppercase ? "Ъ" : "ъ"
         default: nil
         }
-        guard let alternate else { return nil }
-        return ukrainianEnhancedMap[alternate]
     }
 
     private static func makeEnglishUSMap() -> [Character: HIDCommand] {
