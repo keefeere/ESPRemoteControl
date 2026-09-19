@@ -11,7 +11,7 @@ enum CodeScannerMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .qr2D: "QR / 2D"
-        case .barcode: "Штрихкод"
+        case .barcode: localized("Штрихкод")
         }
     }
 
@@ -139,21 +139,21 @@ struct CodeScannerButton: View {
     }
 
     private var scannerModeDescription: String {
-        let modeText = scannerMode == .barcode
+        let modeText = localized(scannerMode == .barcode
             ? "Штрихкод: EAN/UPC, Code 39/93/128, Interleaved 2 of 5 та ITF-14."
-            : "QR / 2D: QR, Data Matrix, Aztec та PDF417."
+            : "QR / 2D: QR, Data Matrix, Aztec та PDF417.")
 
         if batchMode {
-            return modeText + " Batch mode не закриває камеру: кожен код одразу надсилається на комп’ютер, після нього — Enter. Повтор одного коду з того самого кадру приглушується."
+            return modeText + localized(" Batch mode не закриває камеру: кожен код одразу надсилається на комп’ютер, після нього — Enter. Повтор одного коду з того самого кадру приглушується.")
         }
 
         if autoSend {
             return modeText + (isReady
-                ? " Після сканування код одразу буде набраний на підключеному комп’ютері."
-                : " HID не готовий: результат залишиться у полі «Ввід».")
+                ? localized(" Після сканування код одразу буде набраний на підключеному комп’ютері.")
+                : localized(" HID не готовий: результат залишиться у полі «Ввід»."))
         }
 
-        return modeText + " Після сканування результат буде вставлено у поле «Ввід» без автоматичного надсилання."
+        return modeText + localized(" Після сканування результат буде вставлено у поле «Ввід» без автоматичного надсилання.")
     }
 
     private func openScanner() {
@@ -166,14 +166,14 @@ struct CodeScannerButton: View {
                     if granted {
                         showsScanner = true
                     } else {
-                        alertMessage = "Доступ до камери не надано. Його можна увімкнути в Settings → Privacy & Security → Camera."
+                        alertMessage = localized("Доступ до камери не надано. Його можна увімкнути в Settings → Privacy & Security → Camera.")
                     }
                 }
             }
         case .denied, .restricted:
-            alertMessage = "Доступ до камери вимкнений. Увімкни його в Settings → Privacy & Security → Camera."
+            alertMessage = localized("Доступ до камери вимкнений. Увімкни його в Settings → Privacy & Security → Camera.")
         @unknown default:
-            alertMessage = "Не вдалося визначити доступ до камери."
+            alertMessage = localized("Не вдалося визначити доступ до камери.")
         }
     }
 
@@ -182,14 +182,14 @@ struct CodeScannerButton: View {
 
         if batchMode {
             guard isReady else {
-                batchStatus = "HID не готовий · код збережено у полі «Ввід»"
+                batchStatus = localized("HID не готовий · код збережено у полі «Ввід»")
                 return
             }
 
             // TextTypingPlanner maps the trailing newline to HID Enter, so the
             // whole code + submit action stays in the same ordered key queue.
             onImmediateSend(value + "\n")
-            batchStatus = "Надіслано: \(value)"
+            batchStatus = localizedFormat("Надіслано: %@", value)
             return
         }
 
@@ -197,7 +197,7 @@ struct CodeScannerButton: View {
 
         guard autoSend else { return }
         guard isReady else {
-            alertMessage = "Код збережено у полі «Ввід», але HID зараз не готовий до надсилання."
+            alertMessage = localized("Код збережено у полі «Ввід», але HID зараз не готовий до надсилання.")
             return
         }
         onImmediateSend(value)
@@ -348,7 +348,7 @@ final class ScannerViewController: UIViewController {
 
     private func configureCaptureSession() {
         guard let camera = AVCaptureDevice.default(for: .video) else {
-            scannerDelegate?.scanner(self, didFail: "Камеру не знайдено")
+            scannerDelegate?.scanner(self, didFail: localized("Камеру не знайдено"))
             return
         }
 
@@ -358,18 +358,18 @@ final class ScannerViewController: UIViewController {
         do {
             let input = try AVCaptureDeviceInput(device: camera)
             guard session.canAddInput(input) else {
-                scannerDelegate?.scanner(self, didFail: "Не вдалося підключити камеру")
+                scannerDelegate?.scanner(self, didFail: localized("Не вдалося підключити камеру"))
                 return
             }
             session.addInput(input)
         } catch {
-            scannerDelegate?.scanner(self, didFail: "Не вдалося відкрити камеру: \(error.localizedDescription)")
+            scannerDelegate?.scanner(self, didFail: localizedFormat("Не вдалося відкрити камеру: %@", error.localizedDescription))
             return
         }
 
         let output = AVCaptureMetadataOutput()
         guard session.canAddOutput(output) else {
-            scannerDelegate?.scanner(self, didFail: "Сканер кодів недоступний")
+            scannerDelegate?.scanner(self, didFail: localized("Сканер кодів недоступний"))
             return
         }
         session.addOutput(output)
@@ -402,7 +402,7 @@ final class ScannerViewController: UIViewController {
 
         let wanted = mode.metadataTypes.filter { output.availableMetadataObjectTypes.contains($0) }
         guard !wanted.isEmpty else {
-            scannerDelegate?.scanner(self, didFail: "Режим «\(mode.title)» не підтримується цим пристроєм")
+            scannerDelegate?.scanner(self, didFail: localizedFormat("Режим «%@» не підтримується цим пристроєм", mode.title))
             return
         }
         output.metadataObjectTypes = wanted

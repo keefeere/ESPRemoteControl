@@ -139,7 +139,7 @@ private struct DirectBluetoothSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Label(developerMode ? transport.statusText : transport.statusText.replacingOccurrences(of: "HID готовий", with: "Підключено"), systemImage: transport.isReady ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
+                    Label(developerMode ? transport.statusText : transport.statusText.replacingOccurrences(of: localized("HID готовий"), with: localized("Підключено")), systemImage: transport.isReady ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
                         .foregroundStyle(transport.isReady ? .green : .primary)
                     if developerMode, let error = transport.lastError {
                         Text(error).font(.caption).foregroundStyle(.orange)
@@ -211,7 +211,7 @@ private struct DirectBluetoothSheet: View {
                         Text("Скрипт сам знаходить адресу iPhone. Вручну її покаже bluetoothctl devices Paired, далі bluetoothctl connect <адреса> 00001812-…. Підставити адресу сюди не можна: iOS не дає застосункам Bluetooth-адресу пристрою.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
-                    Button(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення") {
+                    Button(localized(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення")) {
                         transport.beginPairing()
                     }
                     .disabled(!transport.canPair)
@@ -226,7 +226,7 @@ private struct DirectBluetoothSheet: View {
                         Text("Натисни «Знайти комп’ютер» і вибери Mac зі списку. Для Linux починай сполучення з комп’ютера.")
                             .font(.subheadline)
                     }
-                    Button(browser.isScanning ? "Зупинити пошук" : "Знайти комп’ютер") {
+                    Button(localized(browser.isScanning ? "Зупинити пошук" : "Знайти комп’ютер")) {
                         if browser.isScanning { browser.stopScan() } else { browser.scan() }
                     }
                     .disabled(!transport.canPair)
@@ -327,8 +327,8 @@ private struct DirectBluetoothSheet: View {
     }
 
     private func hostStatus(_ id: UUID) -> String {
-        if transport.connectedHostID == id { return "Клавіатура й миша підключені" }
-        if transport.selectedHostID == id { return "Вибрано · очікуємо підключення" }
-        return "Натисни, щоб підключити"
+        if transport.connectedHostID == id { return localized("Клавіатура й миша підключені") }
+        if transport.selectedHostID == id { return localized("Вибрано · очікуємо підключення") }
+        return localized("Натисни, щоб підключити")
     }
 }

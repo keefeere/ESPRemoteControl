@@ -11,6 +11,7 @@ on:
       - "Tests/DirectHIDTests.swift"
       - "Tests/MouseButtonMaskTests.swift"
       - "scripts/test-direct-hid.sh"
+      - "scripts/test-localizations.sh"
       - "scripts/build-unsigned-ipa.sh"
       - "scripts/update-sidestore-source.py"
       - ".github/workflows/build-ios-ipa.yml"
@@ -28,6 +29,7 @@ on:
       - "Tests/DirectHIDTests.swift"
       - "Tests/MouseButtonMaskTests.swift"
       - "scripts/test-direct-hid.sh"
+      - "scripts/test-localizations.sh"
       - "scripts/build-unsigned-ipa.sh"
       - "scripts/update-sidestore-source.py"
       - ".github/workflows/build-ios-ipa.yml"
@@ -51,6 +53,9 @@ jobs:
 
       - name: Test HID reports and session routing
         run: ./scripts/test-direct-hid.sh
+
+      - name: Validate English and Ukrainian localizations
+        run: ./scripts/test-localizations.sh
 
       - name: Install ldid
         run: brew install ldid

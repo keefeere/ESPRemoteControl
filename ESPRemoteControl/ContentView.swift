@@ -193,7 +193,7 @@ struct ContentView: View {
                     onPrepare: { wantsFocus = false },
                     onImmediateSend: { value in
                         sendText(value)
-                        showSendStatus("Скановано й надіслано через \(ble.mode.title)")
+                        showSendStatus(localizedFormat("Скановано й надіслано через %@", ble.mode.title))
                     }
                 )
 
@@ -204,7 +204,7 @@ struct ContentView: View {
                         .frame(width: 30, height: 32)
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
-                    longPressLabel: "Пояснення кнопки",
+                    longPressLabel: localized("Пояснення кнопки"),
                     onLongPress: { showsLayoutHelp = true }
                 ))
                 .accessibilityLabel("Перемкнути розкладку на комп’ютері")
@@ -223,13 +223,13 @@ struct ContentView: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
-                    longPressLabel: "Пояснення кнопки",
+                    longPressLabel: localized("Пояснення кнопки"),
                     onLongPress: { showsPrivacyHelp = true }
                 ))
-                .accessibilityLabel(isSecureInput ? "Показати текст" : "Приховати текст")
-                .help(isSecureInput ? "Показати текст" : "Приховати текст")
+                .accessibilityLabel(localized(isSecureInput ? "Показати текст" : "Приховати текст"))
+                .help(localized(isSecureInput ? "Показати текст" : "Приховати текст"))
                 .popover(isPresented: $showsPrivacyHelp) {
-                    Text(isSecureInput ? "Показати введений текст" : "Приховати введений текст")
+                    Text(localized(isSecureInput ? "Показати введений текст" : "Приховати введений текст"))
                         .font(.callout)
                         .padding(12)
                         .presentationCompactAdaptation(.popover)
@@ -291,7 +291,7 @@ struct ContentView: View {
                         Label("Переданий текст готовий", systemImage: "square.and.arrow.down")
                             .font(.caption.weight(.semibold))
                         Spacer()
-                        Text(ble.isReady ? "Надсилання…" : "Очікується підключення")
+                        Text(localized(ble.isReady ? "Надсилання…" : "Очікується підключення"))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -401,7 +401,7 @@ struct ContentView: View {
     private var mouseButtons: some View {
         HStack(spacing: 12) {
             PressableKeyButton(
-                title: "Ліва кнопка",
+                title: localized("Ліва кнопка"),
                 minHeight: 48,
                 onPress: { ble.sendMouseButtonDown(button: 1) },
                 onRelease: { ble.sendMouseButtonUp(button: 1) }
@@ -409,7 +409,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity)
 
             PressableKeyButton(
-                title: "Права кнопка",
+                title: localized("Права кнопка"),
                 minHeight: 48,
                 onPress: { ble.sendMouseButtonDown(button: 2) },
                 onRelease: { ble.sendMouseButtonUp(button: 2) }
@@ -537,11 +537,10 @@ struct ContentView: View {
                     .labelsHidden()
             }
 
-            Text(
-                jigglerEnabled
-                    ? "Активний · пауза \(jigglerIntervalLabel(jigglerInterval)) с"
-                    : "Вимкнений · пауза \(jigglerIntervalLabel(jigglerInterval)) с"
-            )
+            Text(localizedFormat(
+                jigglerEnabled ? "Активний · пауза %@ с" : "Вимкнений · пауза %@ с",
+                jigglerIntervalLabel(jigglerInterval)
+            ))
             .font(.caption.weight(.semibold))
             .foregroundStyle(jigglerEnabled ? Color.accentColor : Color.secondary)
 
@@ -554,7 +553,7 @@ struct ContentView: View {
                 step: 1
             )
             .accessibilityLabel("Пауза Mouse Jiggler")
-            .accessibilityValue("\(jigglerIntervalLabel(jigglerInterval)) секунд")
+            .accessibilityValue(localizedFormat("%@ секунд", jigglerIntervalLabel(jigglerInterval)))
 
             HStack(spacing: 0) {
                 ForEach(Array(jigglerIntervals.enumerated()), id: \.offset) { index, interval in
@@ -830,7 +829,7 @@ struct ContentView: View {
 
     private func pasteClipboard() {
         guard let clipboardText = UIPasteboard.general.string, !clipboardText.isEmpty else {
-            inputWarning = "Буфер обміну порожній"
+            inputWarning = localized("Буфер обміну порожній")
             return
         }
         let oldText = inputText
@@ -869,13 +868,13 @@ struct ContentView: View {
         guard ble.isReady, let text = pendingShortcutText, !text.isEmpty else { return }
         pendingShortcutText = nil
         sendText(text)
-        showSendStatus("Надіслано через \(ble.mode.title)")
+        showSendStatus(localizedFormat("Надіслано через %@", ble.mode.title))
     }
 
     private func resendInputText() {
         guard ble.isReady, !inputText.isEmpty else { return }
         sendText(inputText)
-        showSendStatus("Надіслано через \(ble.mode.title)")
+        showSendStatus(localizedFormat("Надіслано через %@", ble.mode.title))
     }
 
     private func sendText(_ text: String) {
@@ -899,7 +898,7 @@ struct ContentView: View {
             inputWarning = nil
         } else {
             let sample = String(plan.unsupportedCharacters.prefix(6))
-            inputWarning = "Немає HID-клавіш для: \(sample)"
+            inputWarning = localizedFormat("Немає HID-клавіш для: %@", sample)
         }
     }
 

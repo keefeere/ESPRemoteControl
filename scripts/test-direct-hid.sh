@@ -5,6 +5,7 @@ build_dir="$(mktemp -d "${TMPDIR:-/tmp}/espremote-hid-tests.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 
 swiftc -swift-version 5 \
+  "$repo_root/Shared/Localization.swift" \
   "$repo_root/Shared/HIDReports.swift" \
   "$repo_root/Shared/HIDHostStore.swift" \
   "$repo_root/Tests/DirectHIDTests.swift" \
@@ -19,6 +20,7 @@ swiftc -swift-version 5 \
 "$build_dir/mouse-button-mask-tests"
 
 swiftc -swift-version 5 \
+  "$repo_root/Shared/Localization.swift" \
   "$repo_root/Shared/HID.swift" \
   "$repo_root/Tests/HIDMappingTests.swift" \
   -o "$build_dir/hid-mapping-tests"

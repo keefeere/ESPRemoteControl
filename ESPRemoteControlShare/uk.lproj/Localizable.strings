@@ -1,0 +1,2 @@
+/* Ukrainian is the source language. Missing explicit values intentionally fall back to source keys. */
+"Закрити" = "Закрити";

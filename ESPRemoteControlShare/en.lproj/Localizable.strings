@@ -1,0 +1,13 @@
+"Текст буде збережено для ESP Remote. Відкрий застосунок — він використає вибраний Bluetooth-вихід." = "The text will be saved for ESP Remote. Open the app and it will use the selected Bluetooth output.";
+"Текст для надсилання" = "Text to send";
+"Завантаження…" = "Loading…";
+"Зберегти для ESP Remote" = "Save for ESP Remote";
+"Закрити" = "Close";
+"Готово. За потреби відредагуйте текст перед передаванням." = "Ready. Edit the text before sending if needed.";
+"У спільному елементі немає тексту або URL." = "The shared item contains no text or URL.";
+"Введіть текст для передавання." = "Enter text to send.";
+"Скоротіть текст до 2000 символів." = "Shorten the text to 2,000 characters.";
+"Не вдалося зберегти текст" = "Could not save the text";
+"Текст збережено. Відкрий ESP Remote для надсилання." = "Text saved. Open ESP Remote to send it.";
+"Повторити" = "Retry";
+"%@. Текст не втрачено; можна повторити." = "%@. The text was not lost; you can retry.";

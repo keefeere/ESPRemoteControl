@@ -9,7 +9,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
     private let restoreIdentifier = "com.keefeere.ESPRemoteControl.central"
     private let lastPeripheralKey = "lastBridgePeripheralIdentifier"
 
-    @Published var statusText = "Bluetooth: ініціалізація…"
+    @Published var statusText = localized("Bluetooth: ініціалізація…")
     @Published var isReady = false
 
     private var central: CBCentralManager?
@@ -294,7 +294,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
            let remembered = central.retrievePeripherals(withIdentifiers: [identifier]).first {
             peripheral = remembered
             remembered.delegate = self
-            statusText = "Bluetooth: підключення до збереженого адаптера…"
+            statusText = localized("Bluetooth: підключення до збереженого адаптера…")
             central.connect(remembered, options: nil)
             return
         }
@@ -304,7 +304,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
 
     private func scanForBridge() {
         guard let central, central.state == .poweredOn else { return }
-        statusText = "Bluetooth: пошук ESP32…"
+        statusText = localized("Bluetooth: пошук ESP32…")
         isReady = false
         central.stopScan()
         central.scanForPeripherals(
@@ -318,7 +318,7 @@ final class BLEKeyboardBridge: NSObject, ObservableObject, InputTransport {
         reconnectWorkItem?.cancel()
         reconnectAttempt += 1
         let delay = min(pow(2, Double(reconnectAttempt - 1)), 8)
-        statusText = "Bluetooth: перепідключення через \(Int(delay)) с…"
+        statusText = localizedFormat("Bluetooth: перепідключення через %d с…", Int(delay))
 
         let work = DispatchWorkItem { [weak self] in
             self?.connectToRememberedBridgeOrScan()
@@ -344,22 +344,22 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
         case .poweredOn:
             connectToRememberedBridgeOrScan()
         case .poweredOff:
-            statusText = "Bluetooth вимкнено"
+            statusText = localized("Bluetooth вимкнено")
             resetConnectionState()
         case .unauthorized:
-            statusText = "Немає дозволу на Bluetooth"
+            statusText = localized("Немає дозволу на Bluetooth")
             resetConnectionState()
         case .unsupported:
-            statusText = "Bluetooth LE не підтримується"
+            statusText = localized("Bluetooth LE не підтримується")
             resetConnectionState()
         case .resetting:
-            statusText = "Bluetooth перезапускається…"
+            statusText = localized("Bluetooth перезапускається…")
             resetConnectionState()
         case .unknown:
-            statusText = "Bluetooth: невідомий стан"
+            statusText = localized("Bluetooth: невідомий стан")
             resetConnectionState()
         @unknown default:
-            statusText = "Bluetooth: невідомий стан"
+            statusText = localized("Bluetooth: невідомий стан")
             resetConnectionState()
         }
     }
@@ -370,7 +370,7 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
         }
         peripheral = restored
         restored.delegate = self
-        statusText = "Bluetooth: відновлення з’єднання…"
+        statusText = localized("Bluetooth: відновлення з’єднання…")
     }
 
     func centralManager(
@@ -382,7 +382,7 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
         guard isRunning else { return }
         self.peripheral = peripheral
         peripheral.delegate = self
-        statusText = "Bluetooth: підключення до ESP32…"
+        statusText = localized("Bluetooth: підключення до ESP32…")
         central.stopScan()
         central.connect(peripheral, options: nil)
     }
@@ -393,7 +393,7 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
         reconnectWorkItem = nil
         reconnectAttempt = 0
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: lastPeripheralKey)
-        statusText = "Bluetooth: перевірка сервісу…"
+        statusText = localized("Bluetooth: перевірка сервісу…")
         peripheral.delegate = self
         peripheral.discoverServices([serviceUUID])
     }
@@ -422,13 +422,13 @@ extension BLEKeyboardBridge: CBCentralManagerDelegate {
 extension BLEKeyboardBridge: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error {
-            statusText = "Помилка BLE-сервісу: \(error.localizedDescription)"
+            statusText = localizedFormat("Помилка BLE-сервісу: %@", error.localizedDescription)
             scheduleReconnect()
             return
         }
 
         guard let service = peripheral.services?.first(where: { $0.uuid == serviceUUID }) else {
-            statusText = "ESP32 не має потрібного BLE-сервісу"
+            statusText = localized("ESP32 не має потрібного BLE-сервісу")
             return
         }
         peripheral.discoverCharacteristics([writeCharUUID], for: service)
@@ -440,17 +440,17 @@ extension BLEKeyboardBridge: CBPeripheralDelegate {
         error: Error?
     ) {
         if let error {
-            statusText = "Помилка BLE-команди: \(error.localizedDescription)"
+            statusText = localizedFormat("Помилка BLE-команди: %@", error.localizedDescription)
             scheduleReconnect()
             return
         }
 
         guard let characteristic = service.characteristics?.first(where: { $0.uuid == writeCharUUID }) else {
-            statusText = "ESP32 не має каналу команд"
+            statusText = localized("ESP32 не має каналу команд")
             return
         }
         writeChar = characteristic
-        statusText = "ESP32 підключено"
+        statusText = localized("ESP32 підключено")
         isReady = true
     }
 

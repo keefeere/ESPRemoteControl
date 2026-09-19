@@ -1,0 +1,2 @@
+"NSBluetoothAlwaysUsageDescription" = "ESP Remote uses Bluetooth as a keyboard and mouse, directly or through an ESP32 adapter.";
+"NSCameraUsageDescription" = "Scan QR and 2D codes so their contents can be typed on the connected computer.";

@@ -39,6 +39,15 @@ if [[ ! -d "$share_extension_path" ]]; then
   exit 1
 fi
 
+for bundle_path in "$app_path" "$share_extension_path"; do
+  for language in en uk; do
+    if [[ ! -f "$bundle_path/$language.lproj/Localizable.strings" ]]; then
+      echo "Built bundle is missing $language.lproj/Localizable.strings: $bundle_path" >&2
+      exit 1
+    fi
+  done
+done
+
 ldid -S "$share_extension_path/ESPRemoteControlShare"
 ldid -S "$app_path/ESPRemoteControl"
 

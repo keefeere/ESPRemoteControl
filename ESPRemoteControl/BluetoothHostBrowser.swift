@@ -73,10 +73,10 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             CBCentralManagerScanOptionAllowDuplicatesKey: false
         ])
         isScanning = true
-        statusText = "Пошук пристроїв…"
+        statusText = localized("Пошук пристроїв…")
         let timer = DispatchWorkItem { [weak self] in
             self?.stopScan()
-            self?.statusText = "Пошук завершено"
+            self?.statusText = localized("Пошук завершено")
         }
         scanTimer = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timer)
@@ -101,7 +101,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
 
     func name(for id: UUID) -> String {
         let saved = knownHosts.first { $0.id == id }
-        return saved?.customName ?? resolvedName(for: id) ?? saved?.discoveredName ?? "Без назви"
+        return saved?.customName ?? resolvedName(for: id) ?? saved?.discoveredName ?? localized("Без назви")
     }
 
     func peerTag(_ id: UUID) -> String { "\(name(for: id)) [\(id.uuidString.prefix(8))]" }
@@ -153,7 +153,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     func connect(to id: UUID) {
         guard let manager, manager.state == .poweredOn,
               let peer = peers[id] ?? manager.retrievePeripherals(withIdentifiers: [id]).first else {
-            statusText = "Очікуємо пристрій. Підключи iPhone у його налаштуваннях Bluetooth або повтори пошук."
+            statusText = localized("Очікуємо пристрій. Підключи iPhone у його налаштуваннях Bluetooth або повтори пошук.")
             return
         }
         stopScan()
@@ -161,7 +161,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         maintained.insert(id)
         peers[id] = peer
         requestedHost = id
-        statusText = "З’єднання з \(name(for: id))…"
+        statusText = localizedFormat("З’єднання з %@…", name(for: id))
         cancelLinkRetry(id)
         onDiagnostic?("Outgoing BLE requested: \(peerTag(id)), state \(linkState(for: id))")
         if peer.state == .connected {
@@ -171,7 +171,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         let timer = DispatchWorkItem { [weak self, weak peer] in
             guard let self, self.requestedHost == id, let peer, peer.state != .connected else { return }
-            self.statusText = "Пристрій ще не відповів. Запит на з’єднання лишається активним."
+            self.statusText = localized("Пристрій ще не відповів. Запит на з’єднання лишається активним.")
             self.onDiagnostic?("Outgoing BLE still pending: \(self.peerTag(id)), state \(self.linkState(for: id))")
         }
         connectionTimer = timer
@@ -202,7 +202,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
     func isLinkHeld(_ id: UUID) -> Bool { maintained.contains(id) }
 
     func rememberReadyHost(_ id: UUID) {
-        if requestedHost == id { statusText = "Ввід підключено" }
+        if requestedHost == id { statusText = localized("Ввід підключено") }
     }
 
     private func addKnownHosts() {
@@ -223,7 +223,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         }
         let entry = BluetoothHostCandidate(
             id: peer.identifier,
-            name: resolvedName(for: peer.identifier) ?? previous?.name ?? "Пристрій без назви",
+            name: resolvedName(for: peer.identifier) ?? previous?.name ?? localized("Пристрій без назви"),
             signal: signal ?? previous?.signal,
             isConnectable: connectable
         )
@@ -237,7 +237,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         cancelLinkRetry(peer.identifier)
         if requestedHost == peer.identifier { connectionTimer?.cancel() }
         intentionallyCancelled.remove(peer.identifier)
-        statusText = "BLE-з’єднання є; очікуємо клавіатуру й мишу…"
+        statusText = localized("BLE-з’єднання є; очікуємо клавіатуру й мишу…")
         onLinkConnected?(peer.identifier)
     }
 
@@ -257,7 +257,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             if let disconnectedHost {
                 onPeerDisconnected?(disconnectedHost, .bluetoothUnavailable)
             }
-            statusText = central.state == .unauthorized ? "Немає дозволу на Bluetooth" : "Bluetooth недоступний"
+            statusText = localized(central.state == .unauthorized ? "Немає дозволу на Bluetooth" : "Bluetooth недоступний")
             onUnavailable?(statusText)
         }
     }
@@ -282,7 +282,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         if requestedHost == id {
             connectionTimer?.cancel()
             requestedHost = nil
-            statusText = error?.localizedDescription ?? "Не вдалося з’єднатися"
+            statusText = error?.localizedDescription ?? localized("Не вдалося з’єднатися")
         }
         onDiagnostic?("Outgoing BLE failed: \(peerTag(id)), \(errorDetails(error))")
         onPeerDisconnected?(peripheral.identifier, .connectionFailed)
@@ -295,7 +295,7 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
         if requestedHost == peripheral.identifier {
             connectionTimer?.cancel()
             requestedHost = nil
-            statusText = error?.localizedDescription ?? "З’єднання завершено"
+            statusText = error?.localizedDescription ?? localized("З’єднання завершено")
         }
         onDiagnostic?("Outgoing BLE disconnected: \(peerTag(peripheral.identifier)), \(errorDetails(error))")
         onPeerDisconnected?(peripheral.identifier, cause)

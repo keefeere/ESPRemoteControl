@@ -179,17 +179,17 @@ struct RemoteKeyboardView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(ShortAndLongPressButtonStyle(
-            longPressLabel: "Зафіксувати горизонтально",
+            longPressLabel: localized("Зафіксувати горизонтально"),
             onLongPress: { orientationLockRawValue = KeyboardOrientationLock.landscape.rawValue }
         ))
         .accessibilityLabel(
             orientationLock.isLocked
-                ? "Вимкнути фіксацію орієнтації"
-                : "Зафіксувати поточну орієнтацію"
+                ? localized("Вимкнути фіксацію орієнтації")
+                : localized("Зафіксувати поточну орієнтацію")
         )
         .accessibilityValue(
-            !orientationLock.isLocked ? "Вільна орієнтація"
-                : orientationLock.isPortrait ? "Вертикально" : "Горизонтально"
+            !orientationLock.isLocked ? localized("Вільна орієнтація")
+                : orientationLock.isPortrait ? localized("Вертикально") : localized("Горизонтально")
         )
         .accessibilityHint("Довге натискання вмикає горизонтальну орієнтацію")
     }
@@ -521,7 +521,7 @@ struct RemoteKeyboardView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(ShortAndLongPressButtonStyle(
-            longPressLabel: "Змінити лише екранну розкладку",
+            longPressLabel: localized("Змінити лише екранну розкладку"),
             onLongPress: { changeLayout(synchronizeHost: false) }
         ))
         .accessibilityLabel("Змінити мову")

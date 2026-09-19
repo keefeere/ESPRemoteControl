@@ -5,7 +5,7 @@ enum RemoteInputMode: String, CaseIterable, Identifiable {
     case esp
     case bluetooth
     var id: String { rawValue }
-    var title: String { self == .esp ? "ESP-адаптер" : "Прямий Bluetooth" }
+    var title: String { localized(self == .esp ? "ESP-адаптер" : "Прямий Bluetooth") }
 }
 
 /// Owns exactly one active input route. Switching waits for release reports
@@ -14,7 +14,7 @@ final class RemoteInputController: ObservableObject {
     @Published private(set) var mode: RemoteInputMode
     @Published private(set) var isReady = false
     @Published private(set) var isSwitching = false
-    @Published private(set) var statusText = "Підключення…"
+    @Published private(set) var statusText = localized("Підключення…")
     @Published private(set) var inputEpoch = 0
     let direct = DirectHIDTransport()
     private let esp = BLEKeyboardBridge()
@@ -55,7 +55,7 @@ final class RemoteInputController: ObservableObject {
         isSwitching = true
         isReady = false
         inputEpoch += 1
-        statusText = "Перемикання підключення…"
+        statusText = localized("Перемикання підключення…")
         active.stop { [weak self] in
             guard let self else { return }
             self.mode = next

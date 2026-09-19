@@ -25,7 +25,7 @@ final class ShareViewController: UIViewController {
         titleLabel.adjustsFontForContentSizeCategory = true
 
         let subtitleLabel = UILabel()
-        subtitleLabel.text = "Текст буде збережено для ESP Remote. Відкрий застосунок — він використає вибраний Bluetooth-вихід."
+        subtitleLabel.text = localized("Текст буде збережено для ESP Remote. Відкрий застосунок — він використає вибраний Bluetooth-вихід.")
         subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.numberOfLines = 0
@@ -36,22 +36,22 @@ final class ShareViewController: UIViewController {
         textView.layer.cornerCurve = .continuous
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 10, bottom: 12, right: 10)
         textView.delegate = self
-        textView.accessibilityLabel = "Текст для надсилання"
+        textView.accessibilityLabel = localized("Текст для надсилання")
 
-        statusLabel.text = "Завантаження…"
+        statusLabel.text = localized("Завантаження…")
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
         statusLabel.textColor = .secondaryLabel
         statusLabel.numberOfLines = 2
 
         var sendConfiguration = UIButton.Configuration.filled()
-        sendConfiguration.title = "Зберегти для ESP Remote"
+        sendConfiguration.title = localized("Зберегти для ESP Remote")
         sendConfiguration.image = UIImage(systemName: "paperplane.fill")
         sendConfiguration.imagePadding = 8
         sendButton.configuration = sendConfiguration
         sendButton.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
         sendButton.isEnabled = false
 
-        closeButton.setTitle("Закрити", for: .normal)
+        closeButton.setTitle(localized("Закрити"), for: .normal)
         closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
 
         let buttonRow = UIStackView(arrangedSubviews: [closeButton, sendButton])
@@ -162,8 +162,8 @@ final class ShareViewController: UIViewController {
         sendButton.isEnabled = hasText && !isSending
         if !isSending {
             statusLabel.text = hasText
-                ? "Готово. За потреби відредагуйте текст перед передаванням."
-                : "У спільному елементі немає тексту або URL."
+                ? localized("Готово. За потреби відредагуйте текст перед передаванням.")
+                : localized("У спільному елементі немає тексту або URL.")
         }
     }
 
@@ -171,12 +171,12 @@ final class ShareViewController: UIViewController {
         let text = textView.text ?? ""
         guard !text.isEmpty, text.count <= 2_000 else {
             statusLabel.text = text.isEmpty
-                ? "Введіть текст для передавання."
-                : "Скоротіть текст до 2000 символів."
+                ? localized("Введіть текст для передавання.")
+                : localized("Скоротіть текст до 2000 символів.")
             return
         }
         guard ShareTextInbox.enqueue(text) else {
-            finishWithError("Не вдалося зберегти текст")
+            finishWithError(localized("Не вдалося зберегти текст"))
             return
         }
 
@@ -184,7 +184,7 @@ final class ShareViewController: UIViewController {
         isSending = true
         sendButton.isEnabled = false
         closeButton.isEnabled = false
-        statusLabel.text = "Текст збережено. Відкрий ESP Remote для надсилання."
+        statusLabel.text = localized("Текст збережено. Відкрий ESP Remote для надсилання.")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.extensionContext?.completeRequest(returningItems: nil)
         }
@@ -195,9 +195,9 @@ final class ShareViewController: UIViewController {
         sendButton.isEnabled = true
         closeButton.isEnabled = true
         var configuration = sendButton.configuration
-        configuration?.title = "Повторити"
+        configuration?.title = localized("Повторити")
         sendButton.configuration = configuration
-        statusLabel.text = "\(message). Текст не втрачено; можна повторити."
+        statusLabel.text = localizedFormat("%@. Текст не втрачено; можна повторити.", message)
     }
 
     @objc private func closeTapped() {

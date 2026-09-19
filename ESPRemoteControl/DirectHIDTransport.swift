@@ -7,7 +7,7 @@ import UIKit
 /// their canonical 128-bit representation when publishing on iOS.
 final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPeripheralManagerDelegate {
     @Published private(set) var isReady = false
-    @Published private(set) var statusText = "Прямий Bluetooth вимкнено"
+    @Published private(set) var statusText = localized("Прямий Bluetooth вимкнено")
     @Published private(set) var canPair = false
     @Published private(set) var isPairing = false
     @Published private(set) var lastError: String?
@@ -163,7 +163,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         selectedHostID = preferred
         browser.setKnownHosts(hostStore.hosts)
         record("Starting HID; selected \(peerTag(preferred)); pairing \(isPairing)")
-        statusText = "Вмикаємо прямий Bluetooth…"
+        statusText = localized("Вмикаємо прямий Bluetooth…")
         browser.start()
     }
 
@@ -202,7 +202,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             self.connectedHostID = nil
             self.lastReadyHostID = nil
             self.isReady = false
-            self.statusText = "Прямий Bluetooth вимкнено"
+            self.statusText = localized("Прямий Bluetooth вимкнено")
             completion()
         }
     }
@@ -563,8 +563,8 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
 
     private func connectingStatus(for id: UUID) -> String {
         watchdog.isExhausted
-            ? "\(hostName(for: id)) не відповідає. Підключи iPhone на пристрої."
-            : "Під’єднуємось до \(hostName(for: id))…"
+            ? localizedFormat("%@ не відповідає. Підключи iPhone на пристрої.", hostName(for: id))
+            : localizedFormat("Під’єднуємось до %@…", hostName(for: id))
     }
 
     private func noteRejectedPeer(_ id: UUID, action: String, repeating: Bool) {
@@ -621,21 +621,21 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
                 }
                 browser.rememberReadyHost(id)
                 statusText = session.suspended
-                    ? "HID готовий · \(hostName(for: id)) · пристрій спить"
-                    : "HID готовий · \(hostName(for: id))"
+                    ? localizedFormat("HID готовий · %@ · пристрій спить", hostName(for: id))
+                    : localizedFormat("HID готовий · %@", hostName(for: id))
             }
         } else if let lastError {
             statusText = lastError
         } else if afterDrain != nil {
-            statusText = "Відпускання клавіш…"
+            statusText = localized("Відпускання клавіш…")
         } else if !servicesInstalled {
-            statusText = "Готуємо Bluetooth…"
+            statusText = localized("Готуємо Bluetooth…")
         } else if let id = session.host ?? browser.requestedHost ?? session.preferredHost {
             statusText = connectingStatus(for: id)
         } else if isPairing {
-            statusText = "Готові до сполучення · знайди «\(advertisedName)» на пристрої"
+            statusText = localizedFormat("Готові до сполучення · знайди «%@» на пристрої", advertisedName)
         } else {
-            statusText = "Вибери пристрій або відкрий сполучення"
+            statusText = localized("Вибери пристрій або відкрий сполучення")
         }
         if !ready { lastReadyHostID = nil }
         isReady = ready
@@ -791,7 +791,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     private func enqueue(_ reports: [HIDInputReport]) {
         guard isReady else { return }
         if !queue.append(reports) {
-            lastError = "Забагато тексту в черзі. Надішли меншими частинами."
+            lastError = localized("Забагато тексту в черзі. Надішли меншими частинами.")
             record("Input queue capacity exceeded; input released")
             releaseAllInput()
         }
@@ -816,7 +816,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     func sendKeyTaps(_ taps: [(modifiers: UInt8, keycode: UInt8)]) {
         guard isReady else { return }
         guard taps.count <= queue.capacity / 3 else {
-            lastError = "Текст завеликий. Надішли меншими частинами."
+            lastError = localized("Текст завеликий. Надішли меншими частинами.")
             return
         }
         enqueue(taps.flatMap { state.tap($0.keycode, modifiers: $0.modifiers) })
@@ -829,7 +829,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     ) -> Bool {
         guard isReady else { return false }
         guard taps.count <= queue.capacity / 3 else {
-            lastError = "Текст завеликий. Надішли меншими частинами."
+            lastError = localized("Текст завеликий. Надішли меншими частинами.")
             return false
         }
         afterInputQueueDrains = completion
@@ -917,7 +917,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
             if let id = session.host { session.disconnect(id) }
             host = nil
             clearInput()
-            lastError = peripheral.state == .unauthorized ? "Немає дозволу на Bluetooth" : "Bluetooth недоступний"
+            lastError = localized(peripheral.state == .unauthorized ? "Немає дозволу на Bluetooth" : "Bluetooth недоступний")
             refreshStatus()
         }
     }
@@ -925,7 +925,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         guard peripheral === manager, isRunning, service.uuid == addingService?.uuid else { return }
         if let error {
-            lastError = "Не вдалося створити HID: \(error.localizedDescription)"
+            lastError = localizedFormat("Не вдалося створити HID: %@", error.localizedDescription)
             record("Service \(service.uuid): \(error.localizedDescription)")
             cancelRecovery()
             addingService = nil
@@ -941,7 +941,7 @@ final class DirectHIDTransport: NSObject, ObservableObject, InputTransport, CBPe
         guard peripheral === manager, isRunning else { return }
         applyAdvertising(advertising.didStart(succeeded: error == nil))
         if let error = error as NSError? {
-            advertisingError = "Помилка видимості Bluetooth: \(error.localizedDescription)"
+            advertisingError = localizedFormat("Помилка видимості Bluetooth: %@", error.localizedDescription)
             if !session.isReady { lastError = advertisingError }
             record("Advertising failed: \(error.domain)/\(error.code): \(error.localizedDescription)")
             scheduleAdvertisingRetry()

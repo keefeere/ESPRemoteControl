@@ -21,7 +21,7 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .englishUS: "English (US)"
-        case .ukrainianEnhanced: "Українська"
+        case .ukrainianEnhanced: localized("Українська")
         }
     }
 

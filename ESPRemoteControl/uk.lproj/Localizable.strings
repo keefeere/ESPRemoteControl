@@ -1,0 +1,11 @@
+/* Ukrainian is the source language. Missing explicit values intentionally fall back to source keys. */
+"Українська" = "Українська";
+"Send to ESP Remote" = "Надіслати в ESP Remote";
+"Text" = "Текст";
+"Trackpad" = "Трекпад";
+"Numpad" = "Цифрова клавіатура";
+"Batch mode" = "Пакетний режим";
+"F-Keys" = "F-клавіші";
+"Numbers" = "Цифри";
+"Letters" = "Літери";
+"Space" = "Пробіл";

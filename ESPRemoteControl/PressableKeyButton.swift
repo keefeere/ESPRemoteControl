@@ -252,6 +252,6 @@ final class KeyUIButton: UIButton {
         secondaryTitleLabel.textColor = foreground.withAlphaComponent(0.62)
         secondaryTitleLabel.isHidden = false
         accessibilityLabel = baseTitle
-        accessibilityValue = "Друга розкладка: \(secondaryTitle)"
+        accessibilityValue = localizedFormat("Друга розкладка: %@", secondaryTitle)
     }
 }
