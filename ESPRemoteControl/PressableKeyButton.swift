@@ -130,6 +130,7 @@ final class KeyUIButton: UIButton {
     }
 
     private var heightConstraint: NSLayoutConstraint?
+    private let secondaryTitleLabel = UILabel()
 
     override var isHighlighted: Bool {
         didSet {
@@ -151,8 +152,20 @@ final class KeyUIButton: UIButton {
         titleLabel?.adjustsFontSizeToFitWidth = true
         titleLabel?.minimumScaleFactor = 0.65
         titleLabel?.lineBreakMode = .byClipping
-        titleLabel?.numberOfLines = 2
+        titleLabel?.numberOfLines = 1
         titleLabel?.textAlignment = .center
+
+        secondaryTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        secondaryTitleLabel.isUserInteractionEnabled = false
+        secondaryTitleLabel.textAlignment = .right
+        secondaryTitleLabel.adjustsFontSizeToFitWidth = true
+        secondaryTitleLabel.minimumScaleFactor = 0.75
+        addSubview(secondaryTitleLabel)
+        NSLayoutConstraint.activate([
+            secondaryTitleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            secondaryTitleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            secondaryTitleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 3)
+        ])
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
         clipsToBounds = true
@@ -202,44 +215,32 @@ final class KeyUIButton: UIButton {
     }
 
     private func updateTitle(foreground: UIColor) {
+        setAttributedTitle(nil, for: .normal)
+        setAttributedTitle(nil, for: .highlighted)
+        setTitle(baseTitle, for: .normal)
+        setTitleColor(foreground, for: .normal)
+        setTitleColor(foreground, for: .highlighted)
+
         guard let secondaryTitle, !secondaryTitle.isEmpty else {
-            setAttributedTitle(nil, for: .normal)
-            setAttributedTitle(nil, for: .highlighted)
-            setTitle(baseTitle, for: .normal)
-            setTitleColor(foreground, for: .normal)
-            setTitleColor(foreground, for: .highlighted)
+            secondaryTitleLabel.text = nil
+            secondaryTitleLabel.isHidden = true
             accessibilityLabel = baseTitle
             accessibilityValue = nil
             return
         }
 
-        setTitle(nil, for: .normal)
         let mainSize = fontSize ?? (isCompact ? 10 : 16)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        paragraph.minimumLineHeight = mainSize * 0.78
-        paragraph.maximumLineHeight = mainSize * 0.9
-        let text = NSMutableAttributedString(
-            string: "\(baseTitle)\n",
-            attributes: [
-                .font: UIFont.monospacedSystemFont(ofSize: mainSize, weight: .bold),
-                .foregroundColor: foreground,
-                .paragraphStyle: paragraph
-            ]
+        titleLabel?.font = UIFont.monospacedSystemFont(
+            ofSize: mainSize,
+            weight: .bold
         )
-        text.append(NSAttributedString(
-            string: secondaryTitle,
-            attributes: [
-                .font: UIFont.monospacedSystemFont(
-                    ofSize: max(7, mainSize * 0.58),
-                    weight: .medium
-                ),
-                .foregroundColor: foreground.withAlphaComponent(0.48),
-                .paragraphStyle: paragraph
-            ]
-        ))
-        setAttributedTitle(text, for: .normal)
-        setAttributedTitle(text, for: .highlighted)
+        secondaryTitleLabel.text = secondaryTitle
+        secondaryTitleLabel.font = UIFont.monospacedSystemFont(
+            ofSize: max(9, mainSize * 0.72),
+            weight: .medium
+        )
+        secondaryTitleLabel.textColor = foreground.withAlphaComponent(0.62)
+        secondaryTitleLabel.isHidden = false
         accessibilityLabel = baseTitle
         accessibilityValue = "Друга розкладка: \(secondaryTitle)"
     }
