@@ -3,6 +3,15 @@
 Turn your iPhone into an additional keyboard, trackpad, and control deck for
 multiple computers over direct Bluetooth or an optional ESP32-S3 USB bridge.
 
+<p align="center">
+  <img src="docs/images/input-portrait.png" width="42%" alt="InpuDeck text input and trackpad screen">
+  &nbsp;&nbsp;
+  <img src="docs/images/keyboard-portrait.png" width="42%" alt="InpuDeck full keyboard and trackpad in portrait orientation">
+</p>
+<p align="center">
+  <img src="docs/images/keyboard-landscape.png" width="88%" alt="InpuDeck full keyboard in landscape orientation">
+</p>
+
 ## Why This Exists
 
 Ever tried typing a password on a computer or Smart TV without a convenient
