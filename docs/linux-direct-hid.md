@@ -72,6 +72,7 @@ No UUID discovery filter is set: matching UUID filters can crash BlueZ 5.87
 | Transport preference | Preserved by installation | Optional per-phone `--preferred-bearer le`; restore the previous value with the same option |
 | LE discovery | Up to 12 seconds before each offline connection attempt | Temporary; stopped before connecting, no scan while LE is connected |
 | BlueZ 5.87 address-resolution workaround | Optional `bluetooth.service` startup hook for bonded dual-mode peers | Kernel flag only; remove the installed hook files and reload systemd |
+| GATT cache workaround | Optional host-wide `Cache=no` in BlueZ | `inpudeck-gatt-cache.py disable` restores the exact pre-change config; a Bluetooth restart applies either direction |
 | Kernel / drivers / privacy / discoverability | Not configured by the helper | Existing host policy continues to apply; BlueZ manages controller privacy during normal discovery/connection |
 
 The BlueZ experimental switch exposes userspace APIs for the whole daemon; it
@@ -233,6 +234,37 @@ optional user watcher remains responsible for requesting an LE connection.
 To remove the hook, delete the two installed files and run `systemctl
 daemon-reload`; no immediate Bluetooth restart is needed. A future BlueZ fix
 can replace this workaround. This does not explain delayed Windows reconnects.
+
+### BlueZ 5.87 GATT cache after an iPhone Bluetooth toggle
+
+On 2026-09-20, turning iPhone Bluetooth off and on left the selected Linux host
+with an LE link but no HID subscriptions. BlueZ logged `Invalid handle` and
+`Malformed ATT read response` in its HoG reader. The phone sent a Service
+Changed indication, but BlueZ subsequently crashed in `gatt_db_attribute_read`
+while exporting GATT objects. The address-resolution hook alone restored the
+LE link, **not** input. A single disconnect/reconnect of the phone also left
+HID unattached. This is a GATT/HoG recovery failure, separate from rotating
+LE addresses and from missing pairing keys.
+
+For this host, setting `[GATT] Cache=no` and restarting BlueZ restored input.
+After another iPhone Bluetooth off/on cycle, Linux created a fresh InpuDeck HID
+without manual Connect; physical InpuDeck input and MX Keys both worked.
+This is one observed cycle, not proof across reboots or every peripheral. BlueZ
+documents this setting as **host-wide** and recommends its default `always`
+for consistent reconnection and notification tracking. Expect rediscovery on
+other BLE devices too. The helper preserves the exact original `main.conf`,
+refuses to overwrite later local edits, and never changes bonds:
+
+```bash
+python3 scripts/inpudeck-gatt-cache.py status
+sudo python3 scripts/inpudeck-gatt-cache.py enable --restart
+# To restore the previous config later:
+sudo python3 scripts/inpudeck-gatt-cache.py disable --restart
+```
+
+Omit `--restart` to apply the file at the next Bluetooth start. A restart
+briefly disconnects all Bluetooth devices, including headphones. The address
+resolution hook remains separate; `Cache=no` does not replace it.
 
 ## Explicit recovery and transport preference
 
