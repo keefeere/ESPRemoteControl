@@ -1,5 +1,6 @@
 """Run the installer against an isolated prefix, with systemctl calls recorded."""
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
@@ -112,6 +113,7 @@ case "$4" in
   info) printf 'Device 10:A2:D3:01:47:A1\\n  Name: iPhone\\n  Paired: yes\\n  LEConnected: no\\n  BREDRConnected: no\\n  ServicesResolved: no\\n' ;;
   check) printf 'LE-only API available\\n' ;;
   hid-ready) test -e "$ESP_TEST_LE_READY" ;;
+  discover) printf 'Refreshed LE HID discovery\\n' ;;
   connect) touch "$ESP_TEST_LE_READY" ;;
   *) exit 2 ;;
 esac
@@ -129,6 +131,40 @@ esac
         result = self.run_helper('--device', '10:A2:D3:01:47:A1')
         self.assertIn('HID=attached', result.stdout)
         self.assertTrue((self.root / 'le-ready').exists())
+
+    def test_failed_discovery_does_not_start_a_blind_connection(self):
+        self.stub_paired_phone_without_cached_hid()
+        mock = self.root / 'bin/python3'
+        mock.write_text(mock.read_text().replace(
+            "discover) printf 'Refreshed LE HID discovery\\n' ;;", "discover) exit 2 ;;"))
+        result = self.run_helper('--device', '10:A2:D3:01:47:A1', ok=False)
+        self.assertIn('HID=not-ready', result.stdout)
+        self.assertFalse((self.root / 'le-ready').exists())
+
+    def test_watcher_keeps_polling_but_backs_off_radio_requests_after_failure(self):
+        self.stub_paired_phone_without_cached_hid()
+        radio_log = self.root / 'backend.log'
+        self.env['ESP_TEST_BACKEND_LOG'] = str(radio_log)
+        mock = self.root / 'bin/python3'
+        mock.write_text(mock.read_text().replace(
+            'case "$4" in', 'printf "%s\\n" "$4" >> "$ESP_TEST_BACKEND_LOG"\ncase "$4" in'
+        ).replace('connect) touch "$ESP_TEST_LE_READY" ;;', 'connect) exit 2 ;;'))
+        process = subprocess.Popen(
+            ['bash', str(SCRIPT), '--device', '10:A2:D3:01:47:A1', '--watch', '1'],
+            env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True)
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                process.communicate(timeout=2.2)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+            output, errors = process.communicate(timeout=5)
+        calls = radio_log.read_text().splitlines()
+        self.assertEqual(calls.count('connect'), 1, output + errors)
+        self.assertEqual(calls.count('discover'), 1, output + errors)
+        self.assertGreaterEqual(calls.count('hid-ready'), 3)
+        self.assertIn('Next reconnect attempt in 30s', output)
 
     def test_service_install_accepts_explicit_paired_peer_without_cached_hid(self):
         self.stub_paired_phone_without_cached_hid()

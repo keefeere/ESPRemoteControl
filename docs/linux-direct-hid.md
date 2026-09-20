@@ -30,8 +30,9 @@ create a network server, or need to stay running for input to work.
 
 **Start with the on-demand helper.** BlueZ may reconnect by itself; that worked
 in an initial test, but a later logout/login failed. An always-running watcher
-is optional and has not been demonstrated to fix this failure: repeated requests
-cannot necessarily clear an already pending or stale ATT session.
+is optional. Repeating connection requests alone did not fix the recorded
+reboot failure. The helper now refreshes LE discovery before an offline
+connection attempt and backs off after failures; this is not a kernel fix.
 
 BlueZ's [HoG profile][BlueZ HoG] already requests native automatic connection.
 An extra watcher is not inherently required for a BLE keyboard. Profile discovery
@@ -46,6 +47,18 @@ selection remains conservative and requires cached HID. `--status` reports the
 missing attachment instead of refusing diagnostics. Success still requires both
 the LE connection and the matching kernel HID device.
 
+Before connecting a disconnected LE peer, the helper starts an LE-only
+discovery session for at most 12 seconds. This lets BlueZ observe the phone's
+advertisement and refresh its service/address state. It releases its discovery
+session before issuing `LE1.Connect`, and stops early if BlueZ connects the phone
+itself. A connected LE peer is not scanned or disconnected. Discovery can still
+receive other devices' advertisements, but connection selection remains restricted
+to the paired identity and adapter; the app's name is never a connection key.
+Only this client's discovery session/filter is released; another application's
+active discovery session remains its own responsibility.
+No UUID discovery filter is set: matching UUID filters can crash BlueZ 5.87
+([upstream issue #2282](https://github.com/bluez/bluez/issues/2282)).
+
 ## Minimum host changes
 
 | Component | Default setup | Scope / rollback |
@@ -57,7 +70,9 @@ the LE connection and the matching kernel HID device.
 | Audio receiver switch | Separate optional installation | User menu/panel launcher; persistent receiving-role override only while off; `on` or `uninstall` restores underlying roles |
 | Pairing / trust | Preserved | Pair or `--trust` only when explicitly requested |
 | Transport preference | Preserved by installation | Optional per-phone `--preferred-bearer le`; restore the previous value with the same option |
-| Kernel / drivers / privacy / discoverability | Not changed | Existing host settings continue to apply |
+| LE discovery | Up to 12 seconds before each offline connection attempt | Temporary; stopped before connecting, no scan while LE is connected |
+| BlueZ 5.87 address-resolution workaround | Optional `bluetooth.service` startup hook for bonded dual-mode peers | Kernel flag only; remove the installed hook files and reload systemd |
+| Kernel / drivers / privacy / discoverability | Not configured by the helper | Existing host policy continues to apply; BlueZ manages controller privacy during normal discovery/connection |
 
 The BlueZ experimental switch exposes userspace APIs for the whole daemon; it
 cannot be scoped to just this phone. The helper's connect/disconnect requests
@@ -161,10 +176,10 @@ The iOS host UUID shown by the app is **not** its Bluetooth MAC address.
 
 ## Optional background reconnect
 
-No watcher is needed for input once HID is attached. The existing optional
-watcher can issue LE requests while waiting for a phone, but it has not been
-shown to fix the recorded failures and cannot fix the kernel defect. Install it
-only if this polling behavior is wanted:
+No watcher is needed for input once HID is attached. The optional watcher
+checks readiness and can attempt discovery/LE connection while waiting for a
+phone. It cannot fix the kernel defect. Install it only if this background
+behavior is wanted:
 
 ```bash
 # Foreground watcher; Ctrl+C stops only this helper
@@ -178,11 +193,46 @@ journalctl --user -u inpudeck-hid.service -f
 ~/.local/bin/inpudeck-hid --uninstall-service
 ```
 
-The watcher polls every five seconds by default, requesting LE when HID is
-missing. It does not forcibly drop connections after a timeout. Errors remain
-visible in its log. Repeating service installation reuses the same unit;
+The watcher checks HID every five seconds by default. These checks read D-Bus
+and kernel state; they do not issue scan/connect requests while HID is ready.
+An unsuccessful attempt waits 30, 60, 120, 240, then at most 300 seconds before
+another attempt. Each offline attempt includes the bounded discovery above.
+HID checks continue during the pause, so a native reconnect resets the backoff.
+This trades longer recovery when a phone returns after a long absence for fewer
+radio requests. It does not forcibly drop connections after a timeout. Errors
+remain visible in its log. Repeating service installation reuses the same unit;
 unchanged configuration does not restart the watcher. The service runs as the
 user, not root; it is not a system-wide pre-login or pre-OS keyboard solution.
+
+### BlueZ 5.87 dual-mode address-resolution bug
+
+A bonded iPhone can advertise with a rotating LE private address while BlueZ
+remembers its public identity. BlueZ 5.87 may then discover the iPhone but hang
+on the later LE connection: it puts the public identity in the controller's
+accept list without enabling address resolution for that device. This is
+[BlueZ issue #2356](https://github.com/bluez/bluez/issues/2356). A matching
+local trace showed the iPhone advertisement resolving during discovery, but
+the subsequent filtered connection timed out. Setting the kernel device flag
+`0x04` once made the next LE/HID attempt connect in five seconds, and physical
+keyboard and mouse input worked. The flag is lost when bluetoothd restarts.
+
+For this BlueZ version, install the small startup hook from the repository:
+
+```bash
+sudo install -Dm755 scripts/inpudeck-le-address-resolution.py \
+  /usr/local/libexec/inpudeck-le-address-resolution.py
+sudo install -Dm644 scripts/91-inpudeck-address-resolution.conf \
+  /etc/systemd/system/bluetooth.service.d/91-inpudeck-address-resolution.conf
+sudo systemctl daemon-reload
+```
+
+It runs within the existing `bluetooth.service` after each daemon start. It
+only sets a management flag for bonds with both BR/EDR and LE keys plus an IRK;
+it does not scan, connect, alter keys, or restart Bluetooth. The existing
+optional user watcher remains responsible for requesting an LE connection.
+To remove the hook, delete the two installed files and run `systemctl
+daemon-reload`; no immediate Bluetooth restart is needed. A future BlueZ fix
+can replace this workaround. This does not explain delayed Windows reconnects.
 
 ## Explicit recovery and transport preference
 

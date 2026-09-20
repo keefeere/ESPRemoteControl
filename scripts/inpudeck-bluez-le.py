@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
 
 DEVICE = "org.bluez.Device1"
@@ -77,6 +78,47 @@ class BlueZ:
 
     def target(self, address):
         return find_device(self.objects, self.adapter_path, address)
+
+    def refresh(self):
+        self.objects = self.interface("/", "org.freedesktop.DBus.ObjectManager").GetManagedObjects(timeout=5)
+
+    def discover(self, address, seconds=12, sleep=time.sleep, clock=time.monotonic):
+        """Refresh the bonded peer's advertisement before requesting LE.
+
+        After reboot BlueZ can retain the bond but lose the app's HID UUID
+        and current private address. Repeating Connect alone did not recover
+        that state on the tested host. Discovery is bounded, LE-only, and
+        released before Connect; other clients retain their own sessions.
+        """
+        path, interfaces = self.target(address)
+        self.require_le(path, interfaces)
+        if interfaces.get(LE, {}).get("Connected"):
+            return
+        adapter = self.interface(self.adapter_path, ADAPTER)
+        # BlueZ 5.87 can crash on matching UUID discovery filters (#2282).
+        # Scan LE without a UUID/name filter; select only our bonded identity.
+        adapter.SetDiscoveryFilter(self.dbus.Dictionary({
+            "Transport": "le",
+            "DuplicateData": self.dbus.Boolean(False),
+        }, signature="sv"), timeout=5)
+        started = False
+        try:
+            print(f"Refreshing LE discovery for {address} (up to {seconds}s)", flush=True)
+            adapter.StartDiscovery(timeout=10)
+            started = True
+            deadline = clock() + seconds
+            while clock() < deadline:
+                sleep(min(1, max(0, deadline - clock())))
+                self.refresh()
+                _, interfaces = self.target(address)
+                if interfaces.get(LE, {}).get("Connected"):
+                    break
+        finally:
+            try:
+                if started:
+                    adapter.StopDiscovery(timeout=10)
+            finally:
+                adapter.SetDiscoveryFilter(self.dbus.Dictionary({}, signature="sv"), timeout=5)
 
     def require_le(self, path, interfaces):
         props = interfaces[DEVICE]
@@ -164,7 +206,7 @@ def print_info(path, interfaces):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adapter", default="hci0")
-    parser.add_argument("command", choices=("adapter-info", "paired", "info", "check", "connect", "disconnect", "disconnect-device", "preferred-bearer", "trust", "drop-audio", "hid-ready"))
+    parser.add_argument("command", choices=("adapter-info", "paired", "info", "check", "discover", "connect", "disconnect", "disconnect-device", "preferred-bearer", "trust", "drop-audio", "hid-ready"))
     parser.add_argument("address", nargs="?")
     parser.add_argument("bearer", nargs="?", choices=("le", "bredr", "last-used", "last-seen"))
     args = parser.parse_args()
@@ -200,6 +242,8 @@ def main():
             print(f"LE-only API available: {path}")
         elif args.command == "connect":
             bluez.connect(path, interfaces)
+        elif args.command == "discover":
+            bluez.discover(args.address)
         elif args.command == "preferred-bearer":
             bluez.set_preferred_bearer(path, interfaces, args.bearer)
         elif args.command == "disconnect-device":
