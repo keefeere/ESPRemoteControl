@@ -72,7 +72,7 @@ No UUID discovery filter is set: matching UUID filters can crash BlueZ 5.87
 | Transport preference | Preserved by installation | Optional per-phone `--preferred-bearer le`; restore the previous value with the same option |
 | LE discovery | Up to 12 seconds before each offline connection attempt | Temporary; stopped before connecting, no scan while LE is connected |
 | BlueZ 5.87 address-resolution workaround | Optional `bluetooth.service` startup hook for bonded dual-mode peers | Kernel flag only; remove the installed hook files and reload systemd |
-| GATT cache workaround | Optional host-wide `Cache=no` in BlueZ | `inpudeck-gatt-cache.py disable` restores the exact pre-change config; a Bluetooth restart applies either direction |
+| GATT cache experiment | Optional host-wide `Cache=no` in BlueZ; currently rolled back | `inpudeck-gatt-cache.py disable` restores the exact pre-change config; a Bluetooth restart applies either direction |
 | Kernel / drivers / privacy / discoverability | Not configured by the helper | Existing host policy continues to apply; BlueZ manages controller privacy during normal discovery/connection |
 
 The BlueZ experimental switch exposes userspace APIs for the whole daemon; it
@@ -246,13 +246,15 @@ LE link, **not** input. A single disconnect/reconnect of the phone also left
 HID unattached. This is a GATT/HoG recovery failure, separate from rotating
 LE addresses and from missing pairing keys.
 
-For this host, setting `[GATT] Cache=no` and restarting BlueZ restored input.
-After another iPhone Bluetooth off/on cycle, Linux created a fresh InpuDeck HID
-without manual Connect; physical InpuDeck input and MX Keys both worked.
-This is one observed cycle, not proof across reboots or every peripheral. BlueZ
-documents this setting as **host-wide** and recommends its default `always`
-for consistent reconnection and notification tracking. Expect rediscovery on
-other BLE devices too. The helper preserves the exact original `main.conf`,
+For this host, setting `[GATT] Cache=no` and restarting BlueZ restored input
+for one iPhone Bluetooth off/on cycle. On the next Linux reboot, InpuDeck
+reconnected but MX Keys and MX Master did not attach until after login. This
+does not prove `Cache=no` caused the MX delay, but the experiment was rolled
+back rather than adopted as a permanent host setting. The original
+`main.conf` is restored on disk; the running daemon will use that restored
+setting only after its next start. BlueZ documents this setting as **host-wide**
+and recommends its default `always` for consistent reconnection and
+notification tracking. The helper preserves the exact original `main.conf`,
 refuses to overwrite later local edits, and never changes bonds:
 
 ```bash
