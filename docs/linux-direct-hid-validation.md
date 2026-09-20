@@ -115,7 +115,76 @@ confirms temporary working input, not fixed future recovery. The kernel defect
 explains the captured malformed connection attempt; it is not established as the
 sole cause of every outage or proof that its patch alone fixes all behavior.
 
+## 2026-09-20: reboot recurrence on InpuDeck 3.0.1 (61)
+
+The renamed installed helpers matched the repository. The existing optional
+watcher targeted the bonded phone by address and repeatedly received `NoReply`
+and `InProgress`. The app registered HID and served all four reports to the Mac;
+the Linux host remained selected with no subscriptions. Name matching was not
+the failure. BlueZ retained the bond but its cached service list lacked HID.
+
+A controlled sequence paused the watcher, canceled the phone's pending request,
+performed 12 seconds of LE discovery, requested LE once, and restored the
+watcher. The HCI trace showed a connectable InpuDeck HID advertisement from a
+random private address. Linux first attempted the public identity with address
+resolution disabled. That request was canceled about 20 seconds later; the
+controller resolving/accept lists were populated, address resolution enabled,
+and the next connection succeeded. LE, GATT and UHID became ready and the
+maintainer confirmed both cursor and keyboard input. Classic remained down.
+
+This is distinct from the earlier RPA mislabeled as Public: here the failed
+command used the actual public identity while resolution was disabled. The
+trace establishes the sequence, not the responsible kernel/BlueZ function or
+which individual recovery action was sufficient.
+
+A subsequent controlled reboot reproduced the failure: the watcher started at
+login, the bond survived, HID was absent from the cache again, and repeating
+LE requests did not attach HID. The helper change adds bounded LE discovery
+before offline connection attempts and 30–300 second retry backoff, while
+preserving connected links.
+
+Testing the first candidate with a HID UUID discovery filter crashed
+`bluetoothd` 5.87 in `device_found_callback`; the system then restarted the
+daemon. This matches the known
+[UUID filter regression #2282](https://github.com/bluez/bluez/issues/2282).
+That candidate was not installed. The fresh trace also captured a private
+advertising address used as Public in a connection command, matching the
+previously recorded kernel address-type defect.
+
+A subsequent 12-second LE discovery without UUID filters, followed by a wait
+for native connection, restored LE/GATT/UHID. No phone disconnect or explicit
+Connect was issued in that second experiment. Because it followed the daemon
+crash/restart, it does not isolate discovery as the only necessary action.
+The maintainer reported the connection working.
+
+The final helper omits UUID/name discovery filters. All 62 offline helper tests
+passed, covering bounded discovery, cleanup, preservation of existing links,
+and retry suppression. The installed helper files were updated and the existing
+watcher restarted; the phone remained connected over LE without Classic audio.
+No kernel or BlueZ package update was performed.
+
+The next reboot succeeded before login. The kernel created the iPhone keyboard
+and mouse at 01:05:00; the user helper did not start until 01:09:11, when it
+immediately reported HID up without issuing discovery or Connect. The maintainer
+confirmed connection before login and normal operation afterward. Thus this boot
+demonstrates native reconnection independently of the user helper; it does not
+prove that the new discovery path caused recovery or fixes every future boot.
+Final status was LE connected, Classic disconnected, services resolved and HID
+attached. Repeated lifecycle testing and the kernel/BlueZ fixes remain relevant.
+
+Private captures are under `~/.local/state/inpudeck/diagnostics/2026-09-20/`
+in `reconnect-001604/` and `reboot-0043/`. They are not committed.
+
 ## Evidence and remaining checks
+
+On the next Linux reboot at 18:01, the bonded iPhone, MX Keys, and MX Master
+all attached over LE without a manual Connect. The InpuDeck user watcher started
+at 18:01:36 and immediately reported HID up, so it did not create this initial
+connection. The new `bluetooth.service` address-resolution hook ran at 18:01:07
+and reported `flags changed: 0`: BlueZ had already supplied the flag on this
+particular boot. The user confirmed working input. This is a successful reboot
+sample, not proof that the earlier intermittent failure cannot recur. A return
+to Windows and another Linux boot are still needed for full dual-boot acceptance.
 
 Private captures and selected excerpts are stored locally under
 `~/.local/state/inpudeck/diagnostics/2026-09-19/reconnect-0509/`:

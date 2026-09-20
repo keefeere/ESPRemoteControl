@@ -46,6 +46,7 @@ Usage: inpudeck-hid.sh [options]
   -a, --adapter <hciN>   Bluetooth adapter to use (default: hci0).
   -w, --watch [seconds]  Keep the HID profile connected, polling every
                          <seconds> (default: 5). Runs until interrupted.
+                         Failed attempts back off from 30s to 5 minutes.
       --drop-audio       Disconnect iPhone audio profiles that something else
                          already connected. Recovery only; see the note below.
       --reset-le         Explicitly disconnect only LE before connecting again.
@@ -72,6 +73,8 @@ Usage: inpudeck-hid.sh [options]
 
 Requires python3-dbus and BlueZ exposing experimental Bearer.LE1.Connect.
 See docs/linux-direct-hid.md for setup. No fallback to Classic is performed.
+An offline target gets up to 12s of LE HID discovery before a connection attempt.
+Existing LE links are preserved; a ready HID link requires no discovery/connect.
 
 With no -d/-n, the paired device that offers HID and also looks like a phone
 is used; several candidates are listed instead of guessed.
@@ -373,6 +376,7 @@ connect_hid() {
     return 0
   fi
 
+  bluez discover "$mac" || return $?
   bluez connect "$mac" || return $?
   if await_hid_device "$mac" 15; then
     if [ "$drop_audio" -eq 1 ]; then drop_audio_profiles "$mac"; fi
@@ -631,14 +635,30 @@ if [ "$watch" -eq 0 ]; then
   die "the HID profile did not come up. Open InpuDeck on the iPhone with direct Bluetooth selected, then retry."
 fi
 
-printf 'watching %s every %ss; press Ctrl+C to stop\n' "$device" "$interval"
+printf 'watching %s every %ss; failed attempts back off 30–300s; press Ctrl+C to stop\n' "$device" "$interval"
 previous=""
+next_attempt=0
+retry_delay=30
 while :; do
   if has_hid_device "$device"; then
     current="up"
+    next_attempt=0
+    retry_delay=30
   else
-    connect_hid "$device" || true
-    if has_hid_device "$device"; then current="up"; else current="down"; fi
+    current="down"
+    if [ "$SECONDS" -ge "$next_attempt" ]; then
+      connect_hid "$device" || true
+      if has_hid_device "$device"; then
+        current="up"
+        next_attempt=0
+        retry_delay=30
+      else
+        next_attempt=$((SECONDS + retry_delay))
+        printf 'Next reconnect attempt in %ss; monitoring HID without radio requests\n' "$retry_delay"
+        retry_delay=$((retry_delay * 2))
+        if [ "$retry_delay" -gt 300 ]; then retry_delay=300; fi
+      fi
+    fi
   fi
   if [ "$current" != "$previous" ]; then
     printf '%s  keyboard %s\n' "$(date '+%H:%M:%S')" "$current"

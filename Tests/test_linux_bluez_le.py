@@ -27,6 +27,7 @@ class FakeBus:
     def __init__(self, enabled=True, connected=False, error=None):
         self.calls = []
         self.error = error
+        self.discovery_error = None
         self.xml = ('<node><interface name="org.bluez.Bearer.LE1">'
                     + ('<method name="Connect"/>' if enabled else '')
                     + '</interface></node>')
@@ -64,11 +65,24 @@ class FakeBus:
             def DisconnectProfile(self, uuid, **kwargs):
                 bus.calls.append((path, name, "DisconnectProfile", uuid))
 
+            def SetDiscoveryFilter(self, values, **kwargs):
+                bus.calls.append((path, name, "SetDiscoveryFilter", values))
+
+            def StartDiscovery(self, **kwargs):
+                bus.calls.append((path, name, "StartDiscovery"))
+                if bus.discovery_error:
+                    raise DBusError(bus.discovery_error)
+
+            def StopDiscovery(self, **kwargs):
+                bus.calls.append((path, name, "StopDiscovery"))
+
         return Proxy()
 
     def client(self):
         dbus = SimpleNamespace(SystemBus=lambda: self, Interface=self.interface,
-                               DBusException=DBusError)
+                               DBusException=DBusError, Boolean=bool,
+                               Dictionary=lambda value, **kw: dict(value),
+                               Array=lambda value, **kw: list(value))
         return le.BlueZ("hci0", dbus)
 
     def get_object(self, service, path):
@@ -77,6 +91,78 @@ class FakeBus:
 
 
 class TransportTests(unittest.TestCase):
+    def test_discovery_is_bounded_le_only_and_released_without_connecting(self):
+        bus = FakeBus()
+        bus.objects[PATH][le.DEVICE]["UUIDs"] = []
+        client = bus.client()
+        elapsed = [0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+            bus.objects[PATH][le.DEVICE]["UUIDs"] = [le.HID]
+        client.discover(MAC, seconds=12, sleep=sleep, clock=lambda: elapsed[0])
+        self.assertEqual(elapsed[0], 12)
+        self.assertEqual(bus.calls, [
+            (ADAPTER_PATH, le.ADAPTER, "SetDiscoveryFilter", {
+                "Transport": "le", "DuplicateData": False}),
+            (ADAPTER_PATH, le.ADAPTER, "StartDiscovery"),
+            (ADAPTER_PATH, le.ADAPTER, "StopDiscovery"),
+            (ADAPTER_PATH, le.ADAPTER, "SetDiscoveryFilter", {})])
+        self.assertIn(le.HID, client.target(MAC)[1][le.DEVICE]["UUIDs"])
+
+    def test_discovery_does_not_touch_an_existing_le_link(self):
+        bus = FakeBus(connected=True)
+        bus.client().discover(MAC)
+        self.assertEqual(bus.calls, [])
+
+    def test_failed_discovery_start_removes_filter_without_stopping_another_session(self):
+        bus = FakeBus()
+        bus.discovery_error = "org.bluez.Error.NotReady"
+        with self.assertRaises(DBusError):
+            bus.client().discover(MAC)
+        self.assertEqual([call[2] for call in bus.calls],
+                         ["SetDiscoveryFilter", "StartDiscovery", "SetDiscoveryFilter"])
+        self.assertEqual(bus.calls[-1][-1], {})
+
+    def test_unpaired_target_cannot_start_discovery(self):
+        bus = FakeBus()
+        bus.objects[PATH][le.DEVICE]["Paired"] = False
+        with self.assertRaisesRegex(RuntimeError, "paired"):
+            bus.client().discover(MAC)
+        self.assertEqual(bus.calls, [])
+
+    def test_native_reconnect_ends_discovery_early_without_resetting_link(self):
+        bus = FakeBus()
+        elapsed = [0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+            bus.objects[PATH][le.LE]["Connected"] = True
+        bus.client().discover(MAC, sleep=sleep, clock=lambda: elapsed[0])
+        self.assertEqual(elapsed[0], 1)
+        self.assertEqual([call[2] for call in bus.calls],
+                         ["SetDiscoveryFilter", "StartDiscovery", "StopDiscovery", "SetDiscoveryFilter"])
+
+    def test_discovery_cleans_up_when_target_disappears(self):
+        bus = FakeBus()
+        elapsed = [0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+            del bus.objects[PATH]
+        with self.assertRaisesRegex(RuntimeError, "found 0"):
+            bus.client().discover(MAC, sleep=sleep, clock=lambda: elapsed[0])
+        self.assertEqual(bus.calls[-2:], [
+            (ADAPTER_PATH, le.ADAPTER, "StopDiscovery"),
+            (ADAPTER_PATH, le.ADAPTER, "SetDiscoveryFilter", {})])
+
+    def test_discovery_cleanup_also_runs_on_interruption(self):
+        bus = FakeBus()
+        def interrupted(seconds):
+            raise KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            bus.client().discover(MAC, sleep=interrupted, clock=lambda: 0)
+        self.assertEqual(bus.calls[-2:], [
+            (ADAPTER_PATH, le.ADAPTER, "StopDiscovery"),
+            (ADAPTER_PATH, le.ADAPTER, "SetDiscoveryFilter", {})])
+
     def test_bond_identity_resolves_to_existing_rpa_path(self):
         bus = FakeBus()
         # Same phone paired on another adapter must not change the target.

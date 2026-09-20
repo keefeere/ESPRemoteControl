@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "scripts/linux-*"
+      - "scripts/inpudeck-*"
+      - "scripts/91-inpudeck-address-resolution.conf"
       - "Tests/test_linux_*.py"
       - ".github/workflows/test-linux-helpers.yml"
   push:
     paths:
-      - "scripts/linux-*"
+      - "scripts/inpudeck-*"
+      - "scripts/91-inpudeck-address-resolution.conf"
       - "Tests/test_linux_*.py"
       - ".github/workflows/test-linux-helpers.yml"
 
