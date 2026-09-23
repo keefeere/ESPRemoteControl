@@ -46,13 +46,14 @@ bridge presents itself as a physical USB keyboard and mouse.
 ## Direct Bluetooth
 
 Direct BLE HID is the default on a new installation. Keyboard and mouse
-input have worked on macOS and Linux, but reconnect remains unreliable across
-host/app lifecycle transitions. Bazzite testing of **2.2.9 (53)** confirmed input
-and repeated app background/foreground cycles, followed by failures after
-logout and reboot. A captured Linux LE connection failure matches an upstream
-kernel fix missing from the tested host; a helper alone cannot fix that defect.
-See the [Linux validation report](docs/linux-direct-hid-validation.md).
-Windows remains untested. The app remembers the selected mode and host.
+input and reconnect are stable in repeated physical testing on macOS and
+Windows. The Windows-side BlueVein integration preserves the existing bond so
+normal use and host switching do not require repeated pairing. Linux input also
+works, but its reconnect behavior depends more heavily on the BlueZ and kernel
+versions; the optional helper remains available for further Linux testing rather
+than being a release blocker. See the
+[Linux validation report](docs/linux-direct-hid-validation.md). The app remembers
+the selected mode and host.
 
 1. In the connection status strip, open **ESP** and choose **Direct Bluetooth**.
 2. Open the pairing button beside the status. To connect from the computer,
@@ -90,7 +91,9 @@ encoding, queue backpressure, host selection, and descriptor sizes. The IPA
 workflow runs these checks for pull requests and pushes to the v2 branch before
 building the app. Version 2.0.0 (16) passed these tests and the Xcode 26.6 iOS
 build on 2026-09-04 ([Actions run and IPA artifact](https://github.com/keefeere/ESPRemoteControl/actions/runs/33843087676)).
-Broader pairing and reconnect tests remain pending; see the macOS result above.
+Physical pairing, input, reconnect, and host-switching validation is complete on
+macOS and Windows. Linux helper and additional distro-specific lifecycle testing
+remain optional follow-up work.
 
 CI uses [path filters](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore)
 to avoid unrelated runs. **Test button presses** runs on PRs changing
@@ -333,16 +336,25 @@ This project solves a real problem with a unique hardware approach. Contribution
 
 ## Roadmap
 
-- **Direct BLE HID validation (current priority)** - macOS is stable and current Linux testing is successful; continue monitoring both while validating pairing, input, reconnect, and sleep/wake behavior on Windows. Retain ESP32 mode for USB HID and pre-OS input.
+- **Universal multi-connect** - Generalize saved hosts and quick switching beyond Direct BLE so one app can manage any mix of Bluetooth computers and multiple ESP32 bridges, including two or more bridges with distinct identities.
+- **Installer-configurable ESP32 identity** - Let the firmware read its bridge name from persistent configuration and let the installer provision that name while flashing, without requiring the user to edit or recompile the firmware. Prefer a dedicated NVS/configuration partition or an equivalent deterministic provisioning flow over patching an arbitrary compiled binary.
+- **ESP32-S3-Zero status LED** - Use the board LED to communicate useful bridge states such as booting, advertising, app connection, USB HID readiness, active input, and recoverable errors, with restrained patterns that do not become distracting.
+- **Global keep-awake option** - Add an app-wide setting that prevents display sleep while InpuDeck is active, independently of Mouse Jiggler. Preserve the existing foreground-only lifecycle and restore normal system sleep behavior when the app becomes inactive or the option is disabled.
+- **Landscape keyboard swipe pointer** - On the landscape keyboard, distinguish a key press or long press from a drag that crosses a movement threshold. A qualifying drag that begins on an ordinary key should cancel/defer that key action and transition into relative touchpad control; normal taps and long presses must retain their current behavior. Add left- and right-click touch zones beside the `input-keyboard-tools` slider.
+- **Air mouse** - Add an optional two-dimensional pointer mode driven by `CoreMotion` device motion (primarily gyroscope rotation rate, with sensor fusion rather than raw accelerometer-only input). Include activation/recentering, sensitivity, dead-zone, smoothing, acceleration, axis inversion, orientation handling, and convenient click controls, and keep behavior consistent across Direct BLE and ESP32 transports.
 - **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
 - **Adaptive layouts for iPhone Duo and iPad (wishlist)** - Once the iPhone Duo simulator is available, verify the app in full-screen and half-screen configurations. Also test representative iPad sizes and multitasking widths (Split View and Stage Manager), then consider layouts that make better use of the additional space.
 
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
-the CoreBluetooth approach, evidence, and remaining device checks, and
+the CoreBluetooth approach and implementation history, and
 [direct Bluetooth HID on Linux](docs/linux-direct-hid.md) for pairing, HID-only
 connection, and reconnect on a BlueZ desktop. Direct mode is the default for a
-new installation, but Windows and additional sleep/wake scenarios still need
-physical-device validation.
+new installation. macOS and Windows validation is complete; further Linux
+helper and distribution-specific testing is optional.
+
+### Completed in iOS 3
+
+- **Direct BLE HID on macOS and Windows** - Pairing, keyboard and mouse input, reconnect, and host switching are stable in repeated physical testing. Windows works without repeated pairing through the companion BlueVein improvements. Linux input is functional, with optional helper and distro-specific follow-up retained outside the release roadmap.
 
 ### Completed in iOS 2.2
 
