@@ -342,8 +342,11 @@ This project solves a real problem with a unique hardware approach. Contribution
 - **Global keep-awake option** - Add an app-wide setting that prevents display sleep while InpuDeck is active, independently of Mouse Jiggler. Preserve the existing foreground-only lifecycle and restore normal system sleep behavior when the app becomes inactive or the option is disabled.
 - **Landscape keyboard swipe pointer** - On the landscape keyboard, distinguish a key press or long press from a drag that crosses a movement threshold. A qualifying drag that begins on an ordinary key should cancel/defer that key action and transition into relative touchpad control; normal taps and long presses must retain their current behavior. Add left- and right-click touch zones beside the `input-keyboard-tools` slider.
 - **Air mouse** - Add an optional two-dimensional pointer mode driven by `CoreMotion` device motion (primarily gyroscope rotation rate, with sensor fusion rather than raw accelerometer-only input). Include activation/recentering, sensitivity, dead-zone, smoothing, acceleration, axis inversion, orientation handling, and convenient click controls, and keep behavior consistent across Direct BLE and ESP32 transports.
-- **LAN host mode (formerly v3, deferred)** - Revisit exact Unicode and bidirectional clipboard only if a concrete need remains after direct BLE HID validation.
 - **Adaptive layouts for iPhone Duo and iPad (wishlist)** - Once the iPhone Duo simulator is available, verify the app in full-screen and half-screen configurations. Also test representative iPad sizes and multitasking widths (Split View and Stage Manager), then consider layouts that make better use of the additional space.
+
+### Ideas / won't do
+
+- **LAN host mode (formerly proposed for v3)** - The current Direct BLE and ESP32 transports already meet the maintainer's needs, so a LAN transport, exact Unicode entry, and bidirectional clipboard are not planned. Reconsider only if future users demonstrate a concrete use case that the existing transports cannot reasonably cover.
 
 See [direct BLE HID research and implementation plan](docs/direct-ble-hid.md) for
 the CoreBluetooth approach and implementation history, and
@@ -354,6 +357,7 @@ helper and distribution-specific testing is optional.
 
 ### Completed in iOS 3
 
+- **InpuDeck identity** - Renamed the project and app from ESPRemoteControl to InpuDeck in 3.0.0, reflecting that direct Bluetooth HID is now a first-class transport and the ESP32 bridge is optional.
 - **Direct BLE HID on macOS and Windows** - Pairing, keyboard and mouse input, reconnect, and host switching are stable in repeated physical testing. Windows works without repeated pairing through the companion BlueVein improvements. Linux input is functional, with optional helper and distro-specific follow-up retained outside the release roadmap.
 
 ### Completed in iOS 2.2
