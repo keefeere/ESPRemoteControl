@@ -4,6 +4,8 @@
 "Налаштування" = "Settings";
 "Не вимикати екран" = "Keep screen awake";
 "Не дає iPhone автоматично гасити екран, поки InpuDeck відкритий. Звичайне блокування екрана відновлюється у background або після вимкнення цього режиму; тривала робота збільшує витрату батареї." = "Prevents your iPhone from turning off the display automatically while InpuDeck is open. Normal screen locking resumes in the background or when this option is off; extended use increases battery consumption.";
+"Режим експерта" = "Expert mode";
+"Режим експерта ховає необов’язкові пояснення, підписи action-кнопок і текст у зонах тачпада. Назви налаштувань, стани, помилки та підписи клавіш залишаються." = "Expert mode hides optional guidance, action-button labels, and text in trackpad areas. Setting names, status and error messages, and keyboard key legends remain visible.";
 "Mouse Jiggler активний" = "Mouse Jiggler is active";
 "Зрозуміло" = "Got it";
 "Поки Jiggler увімкнений, iPhone не гаситиме екран. Це збільшує витрату батареї; при згортанні застосунку Jiggler автоматично вимкнеться." = "While Jiggler is on, your iPhone will keep its screen awake. This uses more battery; Jiggler turns off automatically when the app goes to the background.";

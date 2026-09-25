@@ -33,6 +33,7 @@ struct RemoteKeyboardView: View {
     @AppStorage("showAlternateKeyLegends") private var showAlternateKeyLegends = true
     @AppStorage("hideAlternateKeyLegendsInPortrait") private var hideAlternateKeyLegendsInPortrait = false
     @AppStorage("alternateKeyLegendScalePercent") private var alternateKeyLegendScalePercent = 72.0
+    @AppStorage("expertMode") private var expertMode = false
 
     private var orientationLock: KeyboardOrientationLock {
         KeyboardOrientationLock(rawValue: orientationLockRawValue) ?? .unlocked
@@ -421,8 +422,10 @@ struct RemoteKeyboardView: View {
             VStack(spacing: 3) {
                 Image(systemName: "rectangle.and.hand.point.up.left")
                     .font(.title3)
-                Text("2 пальці — скрол/правий · pinch — zoom · 3 — середній")
-                    .font(.caption2)
+                if !expertMode {
+                    Text("2 пальці — скрол/правий · pinch — zoom · 3 — середній")
+                        .font(.caption2)
+                }
             }
             .foregroundStyle(.secondary)
             .allowsHitTesting(false)

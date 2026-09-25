@@ -15,6 +15,7 @@ struct ContentView: View {
     @AppStorage("scannerBatchMode") private var scannerBatchMode = false
     @AppStorage("developerMode") private var developerMode = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
+    @AppStorage("expertMode") private var expertMode = false
     @AppStorage("showAlternateKeyLegends") private var showAlternateKeyLegends = true
     @AppStorage("hideAlternateKeyLegendsInPortrait") private var hideAlternateKeyLegendsInPortrait = false
     @AppStorage("alternateKeyLegendScalePercent") private var alternateKeyLegendScalePercent = 72.0
@@ -38,7 +39,7 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             inputPage
-                .tabItem { Label("Ввід", systemImage: "keyboard") }
+                .tabItem { tabItemLabel("Ввід", systemImage: "keyboard", assetName: "InputTabIcon") }
                 .tag(0)
 
             RemoteKeyboardView(
@@ -47,11 +48,11 @@ struct ContentView: View {
                 onLayoutChange: selectLayout,
                 onShowSettings: showSettings
             )
-            .tabItem { Label("Клавіатура", systemImage: "keyboard.fill") }
+            .tabItem { tabItemLabel("Клавіатура", systemImage: "keyboard") }
             .tag(1)
 
             toolsPage
-                .tabItem { Label("Інструменти", systemImage: "switch.2") }
+                .tabItem { tabItemLabel("Інструменти", systemImage: "switch.2") }
                 .tag(2)
         }
         .simultaneousGesture(tabSwipeGesture)
@@ -214,12 +215,50 @@ struct ContentView: View {
         showsSettings = true
     }
 
+    @ViewBuilder
+    private func tabItemLabel(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        assetName: String? = nil
+    ) -> some View {
+        if expertMode {
+            if let assetName {
+                Image(assetName)
+                    .accessibilityLabel(title)
+            } else {
+                Image(systemName: systemImage)
+                    .accessibilityLabel(title)
+            }
+        } else if let assetName {
+            Label {
+                Text(title)
+            } icon: {
+                Image(assetName)
+            }
+        } else {
+            Label(title, systemImage: systemImage)
+        }
+    }
+
+    @ViewBuilder
+    private func actionLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
+        if expertMode {
+            Image(systemName: systemImage)
+                .frame(maxWidth: .infinity)
+        } else {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
     private var typingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                Text("Авто · \(selectedLayout.shortName)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                if !expertMode {
+                    Text("Авто · \(selectedLayout.shortName)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer(minLength: 8)
 
@@ -241,7 +280,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
                     longPressLabel: localized("Пояснення кнопки"),
-                    onLongPress: { showsLayoutHelp = true }
+                    onLongPress: { if !expertMode { showsLayoutHelp = true } }
                 ))
                 .accessibilityLabel("Перемкнути розкладку на комп’ютері")
                 .help("Надіслати скорочення зміни мови на комп’ютер")
@@ -260,7 +299,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
                     longPressLabel: localized("Пояснення кнопки"),
-                    onLongPress: { showsPrivacyHelp = true }
+                    onLongPress: { if !expertMode { showsPrivacyHelp = true } }
                 ))
                 .accessibilityLabel(localized(isSecureInput ? "Показати текст" : "Приховати текст"))
                 .help(localized(isSecureInput ? "Показати текст" : "Приховати текст"))
@@ -295,29 +334,29 @@ struct ContentView: View {
                 Button {
                     pasteClipboard()
                 } label: {
-                    Label("Вставити", systemImage: "doc.on.clipboard")
-                        .frame(maxWidth: .infinity)
+                    actionLabel("Вставити", systemImage: "doc.on.clipboard")
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Вставити")
 
                 Button {
                     wantsFocus = false
                     inputText = ""
                     inputWarning = nil
                 } label: {
-                    Label("Очистити", systemImage: "xmark")
-                        .frame(maxWidth: .infinity)
+                    actionLabel("Очистити", systemImage: "xmark")
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Очистити")
 
                 Button {
                     resendInputText()
                 } label: {
-                    Label("Надіслати", systemImage: "paperplane.fill")
-                        .frame(maxWidth: .infinity)
+                    actionLabel("Надіслати", systemImage: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(inputText.isEmpty || !ble.isReady)
+                .accessibilityLabel("Надіслати")
             }
             .font(.caption.weight(.semibold))
 
@@ -338,16 +377,22 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
 
                     HStack {
-                        Button("Надіслати") {
+                        Button {
                             sendPendingShortcutTextIfPossible()
+                        } label: {
+                            actionLabel("Надіслати", systemImage: "paperplane.fill")
                         }
                         .buttonStyle(.bordered)
                         .disabled(!ble.isReady)
+                        .accessibilityLabel("Надіслати")
 
-                        Button("Скасувати", role: .destructive) {
+                        Button(role: .destructive) {
                             self.pendingShortcutText = nil
+                        } label: {
+                            actionLabel("Скасувати", systemImage: "xmark")
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityLabel("Скасувати")
                     }
                 }
                 .padding(10)
@@ -374,7 +419,7 @@ struct ContentView: View {
                 Label(inputWarning, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            } else {
+            } else if !expertMode {
                 Text("Мова визначається автоматично. Для голосового введення натисніть мікрофон на системній клавіатурі iOS.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -387,13 +432,15 @@ struct ContentView: View {
 
     private var trackpadCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Trackpad", systemImage: "rectangle.and.hand.point.up.left")
-                    .font(.headline)
-                Spacer()
-                Text("1 — клік · 2 — правий · 3 — середній")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if !expertMode {
+                HStack {
+                    Label("Trackpad", systemImage: "rectangle.and.hand.point.up.left")
+                        .font(.headline)
+                    Spacer()
+                    Text("1 — клік · 2 — правий · 3 — середній")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             TrackpadView(
@@ -425,9 +472,11 @@ struct ContentView: View {
                     .strokeBorder(Color.primary.opacity(0.08))
             }
 
-            Text("Подвійний тап + утримання другого дотику — drag. Вертикальний рух уздовж правої грані — edge scroll.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if !expertMode {
+                Text("Подвійний тап + утримання другого дотику — drag. Вертикальний рух уздовж правої грані — edge scroll.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
@@ -437,20 +486,24 @@ struct ContentView: View {
     private var mouseButtons: some View {
         HStack(spacing: 12) {
             PressableKeyButton(
-                title: localized("Ліва кнопка"),
+                title: expertMode ? "" : localized("Ліва кнопка"),
+                systemImage: expertMode ? "arrow.left" : nil,
                 minHeight: 48,
                 onPress: { ble.sendMouseButtonDown(button: 1) },
                 onRelease: { ble.sendMouseButtonUp(button: 1) }
             )
             .frame(maxWidth: .infinity)
+            .accessibilityLabel("Ліва кнопка")
 
             PressableKeyButton(
-                title: localized("Права кнопка"),
+                title: expertMode ? "" : localized("Права кнопка"),
+                systemImage: expertMode ? "arrow.right" : nil,
                 minHeight: 48,
                 onPress: { ble.sendMouseButtonDown(button: 2) },
                 onRelease: { ble.sendMouseButtonUp(button: 2) }
             )
             .frame(maxWidth: .infinity)
+            .accessibilityLabel("Права кнопка")
         }
     }
 
@@ -471,9 +524,11 @@ struct ContentView: View {
                 consumerToolKey("Sleep", usage: HIDConsumerUsage.sleep)
             }
 
-            Text("Кнопки поводяться як клавіші апаратної клавіатури: натискання тримає HID usage, відпускання його відпускає. Power, Sleep і Win+L залежать від підтримки та політик ОС.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if !expertMode {
+                Text("Кнопки поводяться як клавіші апаратної клавіатури: натискання тримає HID usage, відпускання його відпускає. Power, Sleep і Win+L залежать від підтримки та політик ОС.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
@@ -514,9 +569,11 @@ struct ContentView: View {
                 consumerToolKey("Brightness −", usage: HIDConsumerUsage.brightnessDecrement)
             }
 
-            Text("Mute microphone використовує стандарт USB-IF HUTRR110 System Microphone Mute. Підтримка системного mute залежить від ОС.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if !expertMode {
+                Text("Mute microphone використовує стандарт USB-IF HUTRR110 System Microphone Mute. Підтримка системного mute залежить від ОС.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
@@ -548,9 +605,11 @@ struct ContentView: View {
                 keyboardToolKey("0", keycode: HID.keyKeypad0)
             }
 
-            Text("Це окремі Keyboard/Keypad HID usages, а не цифри верхнього ряду. Num Lock і поведінка десяткової клавіші залежать від ОС та активної розкладки клавіатури.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if !expertMode {
+                Text("Це окремі Keyboard/Keypad HID usages, а не цифри верхнього ряду. Num Lock і поведінка десяткової клавіші залежать від ОС та активної розкладки клавіатури.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
@@ -567,7 +626,7 @@ struct ContentView: View {
                     get: { jigglerEnabled },
                     set: { enabled in
                         jigglerEnabled = enabled
-                        if enabled { showsJigglerNotice = true }
+                        if enabled, !expertMode { showsJigglerNotice = true }
                     }
                 ))
                     .labelsHidden()
@@ -605,9 +664,11 @@ struct ContentView: View {
                 }
             }
 
-            Text("Рухається на 1 HID-крок і повертається назад, тому курсор практично не зміщується. Поки Jiggler активний, екран не гасне; при переході iOS у background він автоматично вимикається.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if !expertMode {
+                Text("Рухається на 1 HID-крок і повертається назад, тому курсор практично не зміщується. Поки Jiggler активний, екран не гасне; при переході iOS у background він автоматично вимикається.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
@@ -678,8 +739,12 @@ struct ContentView: View {
             Form {
                 Section {
                     Toggle("Не вимикати екран", isOn: $keepScreenAwake)
+                    Toggle("Режим експерта", isOn: $expertMode)
                 } footer: {
-                    Text("Не дає iPhone автоматично гасити екран, поки InpuDeck відкритий. Звичайне блокування екрана відновлюється у background або після вимкнення цього режиму; тривала робота збільшує витрату батареї.")
+                    if !expertMode {
+                        Text("Не дає iPhone автоматично гасити екран, поки InpuDeck відкритий. Звичайне блокування екрана відновлюється у background або після вимкнення цього режиму; тривала робота збільшує витрату батареї.")
+                        Text("Режим експерта ховає необов’язкові пояснення, підписи action-кнопок і текст у зонах тачпада. Назви налаштувань, стани, помилки та підписи клавіш залишаються.")
+                    }
                 }
 
                 Section("Перемикання розкладки на комп’ютері") {
@@ -688,9 +753,11 @@ struct ContentView: View {
                             Text(shortcut.displayName).tag(shortcut)
                         }
                     }
-                    Text("Коротке натискання EN/UA змінює розкладку телефона й надсилає цю комбінацію. Довге натискання змінює лише розкладку телефона.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("Коротке натискання EN/UA змінює розкладку телефона й надсилає цю комбінацію. Довге натискання змінює лише розкладку телефона.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Позначення клавіш") {
@@ -714,9 +781,11 @@ struct ContentView: View {
                     }
                     .disabled(!showAlternateKeyLegends)
 
-                    Text("Активна розкладка показується по центру. Друга — у нижньому правому куті; відсоток задає її розмір відносно основного символу.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("Активна розкладка показується по центру. Друга — у нижньому правому куті; відсоток задає її розмір відносно основного символу.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Тачпад") {
@@ -725,16 +794,20 @@ struct ContentView: View {
                             Text(shortcut.displayName).tag(shortcut.rawValue)
                         }
                     }
-                    Text("2 пальці скролять; pinch вмикається лише після помітної зміни відстані між пальцями. Подвійний тап + утримання другого дотику — drag; права грань — однопальцевий edge scroll; 2-finger tap — правий клік, 3-finger tap — середній.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("2 пальці скролять; pinch вмикається лише після помітної зміни відстані між пальцями. Подвійний тап + утримання другого дотику — drag; права грань — однопальцевий edge scroll; 2-finger tap — правий клік, 3-finger tap — середній.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Сканер") {
                     Toggle("Batch mode", isOn: $scannerBatchMode)
-                    Text("У Batch mode камера не закривається після коду: кожен код одразу надсилається через HID, після нього автоматично надсилається Enter. Режим QR / 2D або Штрихкод перемикається у самому сканері й запам’ятовується.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("У Batch mode камера не закривається після коду: кожен код одразу надсилається через HID, після нього автоматично надсилається Enter. Режим QR / 2D або Штрихкод перемикається у самому сканері й запам’ятовується.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Bluetooth") {
@@ -744,21 +817,27 @@ struct ContentView: View {
                 Section {
                     Toggle("Режим розробника", isOn: $developerMode)
                 } footer: {
-                    Text("Показує журнал підключення, ідентифікатори пристроїв і засоби діагностики Bluetooth.")
+                    if !expertMode {
+                        Text("Показує журнал підключення, ідентифікатори пристроїв і засоби діагностики Bluetooth.")
+                    }
                 }
 
                 Section("Shortcuts") {
-                    Text("Щоб надсилати з меню Share, у Shortcuts додай дію «Send to InpuDeck», підстав «Shortcut Input» у поле Text і в Details увімкни Show in Share Sheet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("Щоб надсилати з меню Share, у Shortcuts додай дію «Send to InpuDeck», підстав «Shortcut Input» у поле Text і в Details увімкни Show in Share Sheet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     ShortcutsLink()
                 }
 
                 Section("Версія") {
                     LabeledContent("InpuDeck", value: appVersion)
-                    Text("Іконка клавіатури: Tabler Icons, MIT License.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("Іконка клавіатури: Tabler Icons, MIT License.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Налаштування")

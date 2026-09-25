@@ -58,6 +58,7 @@ struct CodeScannerButton: View {
     @AppStorage("scannerAutoSend") private var autoSend = false
     @AppStorage("scannerBatchMode") private var batchMode = false
     @AppStorage("scannerMode") private var scannerModeRawValue = CodeScannerMode.qr2D.rawValue
+    @AppStorage("expertMode") private var expertMode = false
     @State private var showsScanner = false
     @State private var alertMessage: String?
     @State private var batchStatus: String?
@@ -116,9 +117,11 @@ struct CodeScannerButton: View {
                                 .foregroundStyle(isReady ? Color.accentColor : Color.orange)
                         }
 
-                        Text(scannerModeDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if !expertMode {
+                            Text(scannerModeDescription)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(14)
                     .background(.ultraThinMaterial)
