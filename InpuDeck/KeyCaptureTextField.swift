@@ -3,6 +3,7 @@ import UIKit
 
 final class BackspaceDetectingTextView: UITextView {
     var onDeleteBackwardWhenEmpty: (() -> Void)?
+    private var hidesPlaceholder = false
 
     private let placeholderLabel: UILabel = {
         let label = UILabel()
@@ -66,8 +67,13 @@ final class BackspaceDetectingTextView: UITextView {
     }
 
     func updatePlaceholder() {
-        placeholderLabel.isHidden = !text.isEmpty
+        placeholderLabel.isHidden = hidesPlaceholder || !text.isEmpty
         updateTextPresentation()
+    }
+
+    func setPlaceholderHidden(_ hidden: Bool) {
+        hidesPlaceholder = hidden
+        updatePlaceholder()
     }
 
     private func updateTextPresentation() {
@@ -85,6 +91,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
     @Binding var wantsFirstResponder: Bool
 
     var isSecure: Bool
+    var hidesPlaceholder = false
     var onBeginEditing: () -> Void
     var onTextChange: (String, String) -> Void
     var onBackspaceWhenEmpty: () -> Void
@@ -127,6 +134,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
             textView.updatePlaceholder()
         }
         textView.setSecureDisplay(isSecure)
+        textView.setPlaceholderHidden(hidesPlaceholder)
 
         if wantsFirstResponder, !textView.isFirstResponder {
             DispatchQueue.main.async {
