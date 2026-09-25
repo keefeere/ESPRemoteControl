@@ -14,6 +14,7 @@ struct ContentView: View {
     @AppStorage("jigglerIntervalIndex") private var jigglerIntervalIndex = 7
     @AppStorage("scannerBatchMode") private var scannerBatchMode = false
     @AppStorage("developerMode") private var developerMode = false
+    @AppStorage("keepScreenAwake") private var keepScreenAwake = false
     @AppStorage("showAlternateKeyLegends") private var showAlternateKeyLegends = true
     @AppStorage("hideAlternateKeyLegendsInPortrait") private var hideAlternateKeyLegendsInPortrait = false
     @AppStorage("alternateKeyLegendScalePercent") private var alternateKeyLegendScalePercent = 72.0
@@ -81,6 +82,9 @@ struct ContentView: View {
             updateIdleTimer()
         }
         .onChange(of: jigglerEnabled) { _, _ in
+            updateIdleTimer()
+        }
+        .onChange(of: keepScreenAwake) { _, _ in
             updateIdleTimer()
         }
         .onChange(of: shortcutInbox.pendingText) { _, _ in
@@ -672,6 +676,12 @@ struct ContentView: View {
     private var settingsView: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle("Не вимикати екран", isOn: $keepScreenAwake)
+                } footer: {
+                    Text("Не дає iPhone автоматично гасити екран, поки InpuDeck відкритий. Звичайне блокування екрана відновлюється у background або після вимкнення цього режиму; тривала робота збільшує витрату батареї.")
+                }
+
                 Section("Перемикання розкладки на комп’ютері") {
                     Picker("Комбінація", selection: shortcutBinding) {
                         ForEach(HostLayoutShortcut.allCases) { shortcut in
@@ -786,7 +796,7 @@ struct ContentView: View {
     }
 
     private func updateIdleTimer() {
-        UIApplication.shared.isIdleTimerDisabled = jigglerEnabled && scenePhase == .active
+        UIApplication.shared.isIdleTimerDisabled = (keepScreenAwake || jigglerEnabled) && scenePhase == .active
     }
 
     private var appVersion: String {
