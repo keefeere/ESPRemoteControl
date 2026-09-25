@@ -55,6 +55,7 @@ struct ContentView: View {
                 .tabItem { tabItemLabel("Інструменти", systemImage: "switch.2") }
                 .tag(2)
         }
+        .id(expertMode)
         .simultaneousGesture(tabSwipeGesture)
         .safeAreaInset(edge: .top, spacing: 0) {
             if selectedTab == 2 {
@@ -252,6 +253,8 @@ struct ContentView: View {
     private func actionLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
         if expertMode {
             Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 24, height: 22)
                 .frame(maxWidth: .infinity)
         } else {
             Label(title, systemImage: systemImage)
@@ -329,14 +332,16 @@ struct ContentView: View {
                     }
                 },
                 onTextChange: handleTextChange,
-                onReturn: handleReturnKey,
                 onBackspaceWhenEmpty: handleBackspaceWhenEmpty
             )
             .frame(maxWidth: .infinity)
-            .frame(height: 88)
-            .padding(.horizontal, 12)
-            .background(Color(.secondarySystemGroupedBackground))
+            .frame(height: 104)
+            .background(Color(.tertiarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08))
+            }
 
             HStack(spacing: 8) {
                 Button {
@@ -495,7 +500,6 @@ struct ContentView: View {
         HStack(spacing: 12) {
             PressableKeyButton(
                 title: expertMode ? "" : localized("Ліва кнопка"),
-                systemImage: expertMode ? "arrow.left" : nil,
                 minHeight: 48,
                 onPress: { ble.sendMouseButtonDown(button: 1) },
                 onRelease: { ble.sendMouseButtonUp(button: 1) }
@@ -505,7 +509,6 @@ struct ContentView: View {
 
             PressableKeyButton(
                 title: expertMode ? "" : localized("Права кнопка"),
-                systemImage: expertMode ? "arrow.right" : nil,
                 minHeight: 48,
                 onPress: { ble.sendMouseButtonDown(button: 2) },
                 onRelease: { ble.sendMouseButtonUp(button: 2) }
@@ -926,10 +929,6 @@ struct ContentView: View {
         guard step != 0 else { return }
         let command = selectedTrackpadZoomShortcut.command(for: step)
         ble.sendKeyTap(modifiers: command.modifiers, hidKeycode: command.keycode)
-    }
-
-    private func handleReturnKey() {
-        ble.sendKeyTap(modifiers: 0, hidKeycode: HID.keyEnter)
     }
 
     private func handleBackspaceWhenEmpty() {

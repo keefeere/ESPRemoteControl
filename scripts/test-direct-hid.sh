@@ -22,6 +22,7 @@ swiftc -swift-version 5 \
 swiftc -swift-version 5 \
   "$repo_root/Shared/Localization.swift" \
   "$repo_root/Shared/HID.swift" \
+  "$repo_root/Shared/TextTypingPlanner.swift" \
   "$repo_root/Tests/HIDMappingTests.swift" \
   -o "$build_dir/hid-mapping-tests"
 "$build_dir/hid-mapping-tests"

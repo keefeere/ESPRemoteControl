@@ -11,6 +11,8 @@ struct SavedHIDHost: Codable, Identifiable, Equatable {
         customName ?? discoveredName ?? localized("Комп’ютер без назви")
     }
 
+    var hasDisplayName: Bool { customName != nil || discoveredName != nil }
+
     var diagnosticName: String { "\(name) [\(id.uuidString.prefix(8))]" }
 }
 

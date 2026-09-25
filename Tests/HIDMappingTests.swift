@@ -39,6 +39,13 @@ struct HIDMappingTests {
 
         check(HID.russianAlternateForUkrainianKey("а", uppercase: false) == nil,
               "Ordinary Ukrainian keys keep normal Alt behavior")
+        let multiline = TextTypingPlanner.makePlan(
+            for: "a\nb",
+            startingLayout: .englishUS,
+            layoutShortcut: .controlSpace
+        )
+        check(multiline.taps.map { $0.keycode } == [HID.keyA, HID.keyEnter, HID.keyB],
+              "A composer newline is sent as an Enter key between surrounding text")
         print("PASS: Ukrainian AltGr Russian letter mappings")
     }
 }
