@@ -223,7 +223,7 @@ struct ContentView: View {
     ) -> some View {
         if expertMode {
             if let assetName {
-                Image(assetName)
+                tabAssetIcon(assetName)
                     .accessibilityLabel(title)
             } else {
                 Image(systemName: systemImage)
@@ -233,11 +233,19 @@ struct ContentView: View {
             Label {
                 Text(title)
             } icon: {
-                Image(assetName)
+                tabAssetIcon(assetName)
             }
         } else {
             Label(title, systemImage: systemImage)
         }
+    }
+
+    private func tabAssetIcon(_ name: String) -> some View {
+        Image(name)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 24, height: 21)
     }
 
     @ViewBuilder
