@@ -3,6 +3,7 @@ import UIKit
 
 struct PressableKeyButton: UIViewRepresentable {
     let title: String
+    var systemImage: String? = nil
     var secondaryTitle: String? = nil
     var secondaryTitleScale: CGFloat = 0.72
     var isActive: Bool = false
@@ -23,6 +24,7 @@ struct PressableKeyButton: UIViewRepresentable {
         button.addTarget(context.coordinator, action: #selector(Coordinator.touchUp), for: .touchDragExit)
 
         button.baseTitle = title
+        button.systemImage = systemImage
         button.secondaryTitle = secondaryTitle
         button.secondaryTitleScale = secondaryTitleScale
         button.isActive = isActive
@@ -37,6 +39,7 @@ struct PressableKeyButton: UIViewRepresentable {
 
     func updateUIView(_ uiView: KeyUIButton, context: Context) {
         uiView.baseTitle = title
+        uiView.systemImage = systemImage
         uiView.secondaryTitle = secondaryTitle
         uiView.secondaryTitleScale = secondaryTitleScale
         uiView.isActive = isActive
@@ -92,6 +95,13 @@ final class KeyUIButton: UIButton {
     var secondaryTitle: String? {
         didSet {
             if secondaryTitle != oldValue {
+                applyConfiguration()
+            }
+        }
+    }
+    var systemImage: String? {
+        didSet {
+            if systemImage != oldValue {
                 applyConfiguration()
             }
         }
@@ -228,6 +238,8 @@ final class KeyUIButton: UIButton {
         setAttributedTitle(nil, for: .normal)
         setAttributedTitle(nil, for: .highlighted)
         setTitle(baseTitle, for: .normal)
+        setImage(systemImage.flatMap { UIImage(systemName: $0) }, for: .normal)
+        tintColor = foreground
         setTitleColor(foreground, for: .normal)
         setTitleColor(foreground, for: .highlighted)
 

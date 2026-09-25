@@ -134,6 +134,7 @@ private struct DirectBluetoothSheet: View {
     @State private var hostToForget: SavedHIDHost?
     @State private var editedName = ""
     @AppStorage("developerMode") private var developerMode = false
+    @AppStorage("expertMode") private var expertMode = false
 
     var body: some View {
         NavigationStack {
@@ -194,22 +195,26 @@ private struct DirectBluetoothSheet: View {
                     } header: {
                         Text("Мої комп’ютери")
                     } footer: {
-                        Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯.")
-                        if developerMode {
-                            Text("UUID — ідентифікатор у цьому iPhone; справжню Bluetooth MAC-адресу iOS застосунку не надає.")
+                        if !expertMode {
+                            Text("Натисни на комп’ютер, щоб спрямувати ввід до нього. Якщо назва недоступна, задай її через меню ⋯.")
+                            if developerMode {
+                                Text("UUID — ідентифікатор у цьому iPhone; справжню Bluetooth MAC-адресу iOS застосунку не надає.")
+                            }
                         }
                     }
                 }
                 Section("Сполучення з комп’ютера") {
-                    Text("У налаштуваннях Bluetooth комп’ютера вибери «\(transport.advertisedName)» або ім’я цього iPhone. Підтвердь системний запит, якщо він з’явиться.")
-                        .font(.subheadline)
-                    if developerMode {
-                        Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу, запусти на комп’ютері:")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("./scripts/inpudeck-hid.sh")
-                            .font(.caption2.monospaced()).textSelection(.enabled)
-                        Text("Скрипт сам знаходить адресу iPhone. Вручну її покаже bluetoothctl devices Paired, далі bluetoothctl connect <адреса> 00001812-…. Підставити адресу сюди не можна: iOS не дає застосункам Bluetooth-адресу пристрою.")
-                            .font(.caption2).foregroundStyle(.secondary)
+                    if !expertMode {
+                        Text("У налаштуваннях Bluetooth комп’ютера вибери «\(transport.advertisedName)» або ім’я цього iPhone. Підтвердь системний запит, якщо він з’явиться.")
+                            .font(.subheadline)
+                        if developerMode {
+                            Text("Linux: звичайна команда «З’єднатися» вмикає всі профілі спареного iPhone, разом з аудіо. Щоб підключити лише клавіатуру й мишу, запусти на комп’ютері:")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text("./scripts/inpudeck-hid.sh")
+                                .font(.caption2.monospaced()).textSelection(.enabled)
+                            Text("Скрипт сам знаходить адресу iPhone. Вручну її покаже bluetoothctl devices Paired, далі bluetoothctl connect <адреса> 00001812-…. Підставити адресу сюди не можна: iOS не дає застосункам Bluetooth-адресу пристрою.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                     Button(localized(transport.isPairing ? "Сполучення відкрите · поновити" : "Дозволити нове сполучення")) {
                         transport.beginPairing()
@@ -217,14 +222,16 @@ private struct DirectBluetoothSheet: View {
                     .disabled(!transport.canPair)
                 }
                 Section("Сполучення з iPhone") {
-                    if developerMode {
-                        Text("Якщо Mac уже знає iPhone й не показує його як клавіатуру, відкрий Bluetooth на Mac, запусти пошук тут і вибери Mac. Комп’ютер має бути доступний через Bluetooth LE.")
-                            .font(.subheadline)
-                        Text("Linux тут зазвичай не з’являється: комп’ютер під BlueZ сам не рекламує себе через Bluetooth LE, тому знайти його з iPhone неможливо. З’єднання завжди починає комп’ютер, а iPhone лише лишається видимим.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("Натисни «Знайти комп’ютер» і вибери Mac зі списку. Для Linux починай сполучення з комп’ютера.")
-                            .font(.subheadline)
+                    if !expertMode {
+                        if developerMode {
+                            Text("Якщо Mac уже знає iPhone й не показує його як клавіатуру, відкрий Bluetooth на Mac, запусти пошук тут і вибери Mac. Комп’ютер має бути доступний через Bluetooth LE.")
+                                .font(.subheadline)
+                            Text("Linux тут зазвичай не з’являється: комп’ютер під BlueZ сам не рекламує себе через Bluetooth LE, тому знайти його з iPhone неможливо. З’єднання завжди починає комп’ютер, а iPhone лише лишається видимим.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Натисни «Знайти комп’ютер» і вибери Mac зі списку. Для Linux починай сполучення з комп’ютера.")
+                                .font(.subheadline)
+                        }
                     }
                     Button(localized(browser.isScanning ? "Зупинити пошук" : "Знайти комп’ютер")) {
                         if browser.isScanning { browser.stopScan() } else { browser.scan() }
@@ -272,8 +279,10 @@ private struct DirectBluetoothSheet: View {
                             transport.requestWakeProbe()
                         }
                         .disabled(!transport.canPair || transport.selectedHostID == nil)
-                        Text("Надсилає натискання й відпускання Shift вибраному комп’ютеру, якщо HID підключено. Перевір, чи він прокинувся; результат відправлення буде в журналі.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        if !expertMode {
+                            Text("Надсилає натискання й відпускання Shift вибраному комп’ютеру, якщо HID підключено. Перевір, чи він прокинувся; результат відправлення буде в журналі.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Section("Журнал підключення") {
                         Button("Записати поточний стан", systemImage: "list.bullet.clipboard") {
@@ -282,8 +291,10 @@ private struct DirectBluetoothSheet: View {
                         ShareLink(item: transport.diagnosticText) {
                             Label("Поділитися журналом", systemImage: "square.and.arrow.up")
                         }
-                        Text("Журнал містить назви й UUID комп’ютерів, стан BLE та HID, етапи підключення і спроби пробудження, без введеного тексту.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        if !expertMode {
+                            Text("Журнал містить назви й UUID комп’ютерів, стан BLE та HID, етапи підключення і спроби пробудження, без введеного тексту.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         ForEach(Array(transport.diagnostics.suffix(12).enumerated()), id: \.offset) { _, line in
                             Text(line).font(.caption2.monospaced()).textSelection(.enabled)
                         }
