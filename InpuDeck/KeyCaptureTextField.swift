@@ -30,6 +30,8 @@ final class BackspaceDetectingTextView: UITextView {
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
+        textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        self.textContainer.lineFragmentPadding = 0
         addSubview(secureLabel)
         addSubview(placeholderLabel)
         let horizontalInset = textContainerInset.left + self.textContainer.lineFragmentPadding
