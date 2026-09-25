@@ -124,14 +124,13 @@ struct ContentView: View {
             connectionHeader
 
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 12) {
                     typingCard
                     trackpadCard
                     mouseButtons
                 }
-                .padding(.horizontal)
-                .padding(.top, 14)
-                .padding(.bottom, 14)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(
@@ -263,7 +262,7 @@ struct ContentView: View {
     }
 
     private var typingCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 if !expertMode {
                     Text("Авто · \(selectedLayout.shortName)")
@@ -287,7 +286,7 @@ struct ContentView: View {
                     sendLayoutShortcut()
                 } label: {
                     Image(systemName: "globe")
-                        .frame(width: 30, height: 32)
+                        .frame(width: expertMode ? 26 : 30, height: expertMode ? 26 : 32)
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
                     longPressLabel: localized("Пояснення кнопки"),
@@ -306,7 +305,7 @@ struct ContentView: View {
                     isSecureInput.toggle()
                 } label: {
                     Image(systemName: isSecureInput ? "eye.slash" : "eye")
-                        .frame(width: 32, height: 32)
+                        .frame(width: expertMode ? 26 : 32, height: expertMode ? 26 : 32)
                 }
                 .buttonStyle(ShortAndLongPressButtonStyle(
                     longPressLabel: localized("Пояснення кнопки"),
@@ -326,6 +325,7 @@ struct ContentView: View {
                 text: $inputText,
                 wantsFirstResponder: $wantsFocus,
                 isSecure: isSecureInput,
+                hidesPlaceholder: expertMode,
                 onBeginEditing: {
                     if inputText.isEmpty, pendingShortcutText == nil {
                         isSecureInput = false
@@ -343,7 +343,7 @@ struct ContentView: View {
                     .strokeBorder(Color.primary.opacity(0.08))
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Button {
                     pasteClipboard()
                 } label: {
@@ -438,7 +438,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding(10)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
@@ -491,13 +491,13 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding(10)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var mouseButtons: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             PressableKeyButton(
                 title: expertMode ? "" : localized("Ліва кнопка"),
                 minHeight: 48,

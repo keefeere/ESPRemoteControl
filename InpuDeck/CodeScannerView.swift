@@ -74,7 +74,7 @@ struct CodeScannerButton: View {
             openScanner()
         } label: {
             Image(systemName: scannerMode == .barcode ? "barcode.viewfinder" : "qrcode.viewfinder")
-                .frame(width: 32, height: 32)
+                .frame(width: expertMode ? 26 : 32, height: expertMode ? 26 : 32)
         }
         .buttonStyle(.borderless)
         .accessibilityLabel("Відкрити сканер · \(scannerMode.title)")
