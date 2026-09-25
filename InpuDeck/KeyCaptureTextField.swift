@@ -87,7 +87,6 @@ struct KeyCaptureTextField: UIViewRepresentable {
     var isSecure: Bool
     var onBeginEditing: () -> Void
     var onTextChange: (String, String) -> Void
-    var onReturn: () -> Void
     var onBackspaceWhenEmpty: () -> Void
 
     func makeUIView(context: Context) -> BackspaceDetectingTextView {
@@ -105,7 +104,7 @@ struct KeyCaptureTextField: UIViewRepresentable {
         textView.smartInsertDeleteType = .no
         textView.textContentType = .none
         textView.autocapitalizationType = .sentences
-        textView.returnKeyType = .send
+        textView.returnKeyType = .default
         textView.accessibilityHint = localized("Для голосового введення скористайтеся мікрофоном на системній клавіатурі iOS")
         textView.isScrollEnabled = true
         textView.alwaysBounceVertical = false
@@ -171,16 +170,6 @@ struct KeyCaptureTextField: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.parent.wantsFirstResponder = false
             }
-        }
-
-        func textView(
-            _ textView: UITextView,
-            shouldChangeTextIn range: NSRange,
-            replacementText replacement: String
-        ) -> Bool {
-            guard replacement == "\n" else { return true }
-            parent.onReturn()
-            return false
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {

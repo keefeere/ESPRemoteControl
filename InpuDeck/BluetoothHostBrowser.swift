@@ -5,6 +5,7 @@ import Foundation
 struct BluetoothHostCandidate: Identifiable {
     let id: UUID
     var name: String
+    var hasDisplayName: Bool
     var signal: Int?
     var isConnectable: Bool
 }
@@ -221,9 +222,12 @@ final class BluetoothHostBrowser: NSObject, ObservableObject, CBCentralManagerDe
             discoveredNames[peer.identifier] = name
             onNameDiscovered?(peer.identifier, name)
         }
+        let resolvedDisplayName = resolvedName(for: peer.identifier)
+        let displayName = resolvedDisplayName ?? previous?.name
         let entry = BluetoothHostCandidate(
             id: peer.identifier,
-            name: resolvedName(for: peer.identifier) ?? previous?.name ?? localized("Пристрій без назви"),
+            name: displayName ?? localized("Пристрій без назви"),
+            hasDisplayName: resolvedDisplayName != nil || previous?.hasDisplayName == true,
             signal: signal ?? previous?.signal,
             isConnectable: connectable
         )

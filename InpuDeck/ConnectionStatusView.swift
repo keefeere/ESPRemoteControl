@@ -34,11 +34,11 @@ struct ConnectionStatusView: View {
             Circle().fill(input.isReady ? .green : .orange).frame(width: 7, height: 7)
             if input.mode == .bluetooth {
                 Menu {
-                    if direct.savedHosts.isEmpty {
+                    if visibleSavedHosts.isEmpty {
                         Text("Немає збережених комп’ютерів")
                     } else {
                         Section("Мої комп’ютери") {
-                            ForEach(direct.savedHosts) { host in
+                            ForEach(visibleSavedHosts) { host in
                                 Button { direct.connect(to: host.id) } label: {
                                     if direct.connectedHostID == host.id {
                                         Label(developerMode ? host.diagnosticName : host.name, systemImage: "checkmark")
@@ -120,9 +120,16 @@ struct ConnectionStatusView: View {
 
     private var displayStatus: String {
         if !developerMode, input.mode == .bluetooth, let id = direct.selectedHostID {
-            return direct.hostName(for: id)
+            if let host = direct.savedHosts.first(where: { $0.id == id }), host.hasDisplayName {
+                return host.name
+            }
+            return localized(input.isReady ? "Підключено" : "Очікується підключення")
         }
         return input.statusText
+    }
+
+    private var visibleSavedHosts: [SavedHIDHost] {
+        developerMode ? direct.savedHosts : direct.savedHosts.filter(\.hasDisplayName)
     }
 }
 
@@ -140,15 +147,15 @@ private struct DirectBluetoothSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Label(developerMode ? transport.statusText : transport.statusText.replacingOccurrences(of: localized("HID готовий"), with: localized("Підключено")), systemImage: transport.isReady ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
+                    Label(sheetStatusText, systemImage: transport.isReady ? "checkmark.circle.fill" : "antenna.radiowaves.left.and.right")
                         .foregroundStyle(transport.isReady ? .green : .primary)
                     if developerMode, let error = transport.lastError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
                 }
-                if !transport.savedHosts.isEmpty {
+                if !visibleSavedHosts.isEmpty {
                     Section {
-                        ForEach(transport.savedHosts) { host in
+                        ForEach(visibleSavedHosts) { host in
                             HStack(spacing: 12) {
                                 Button { transport.connect(to: host.id) } label: {
                                     HStack {
@@ -240,7 +247,7 @@ private struct DirectBluetoothSheet: View {
                     if developerMode, !browser.statusText.isEmpty {
                         Text(browser.statusText).font(.caption).foregroundStyle(.secondary)
                     }
-                    ForEach(browser.devices.filter { device in !transport.savedHosts.contains { $0.id == device.id } }) { device in
+                    ForEach(visibleBrowserDevices) { device in
                         Button {
                             transport.connect(to: device.id)
                         } label: {
@@ -341,5 +348,28 @@ private struct DirectBluetoothSheet: View {
         if transport.connectedHostID == id { return localized("Клавіатура й миша підключені") }
         if transport.selectedHostID == id { return localized("Вибрано · очікуємо підключення") }
         return localized("Натисни, щоб підключити")
+    }
+
+    private var visibleSavedHosts: [SavedHIDHost] {
+        developerMode ? transport.savedHosts : transport.savedHosts.filter(\.hasDisplayName)
+    }
+
+    private var sheetStatusText: String {
+        if developerMode { return transport.statusText }
+        if let id = transport.selectedHostID,
+           transport.savedHosts.first(where: { $0.id == id })?.hasDisplayName != true {
+            return localized(transport.isReady ? "Підключено" : "Очікується підключення")
+        }
+        return transport.statusText.replacingOccurrences(
+            of: localized("HID готовий"),
+            with: localized("Підключено")
+        )
+    }
+
+    private var visibleBrowserDevices: [BluetoothHostCandidate] {
+        browser.devices.filter { device in
+            !transport.savedHosts.contains { $0.id == device.id }
+                && (developerMode || device.hasDisplayName)
+        }
     }
 }
