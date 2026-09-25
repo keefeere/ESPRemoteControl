@@ -2,6 +2,8 @@
 "Клавіатура" = "Keyboard";
 "Інструменти" = "Tools";
 "Налаштування" = "Settings";
+"Не вимикати екран" = "Keep screen awake";
+"Не дає iPhone автоматично гасити екран, поки InpuDeck відкритий. Звичайне блокування екрана відновлюється у background або після вимкнення цього режиму; тривала робота збільшує витрату батареї." = "Prevents your iPhone from turning off the display automatically while InpuDeck is open. Normal screen locking resumes in the background or when this option is off; extended use increases battery consumption.";
 "Mouse Jiggler активний" = "Mouse Jiggler is active";
 "Зрозуміло" = "Got it";
 "Поки Jiggler увімкнений, iPhone не гаситиме екран. Це збільшує витрату батареї; при згортанні застосунку Jiggler автоматично вимкнеться." = "While Jiggler is on, your iPhone will keep its screen awake. This uses more battery; Jiggler turns off automatically when the app goes to the background.";
